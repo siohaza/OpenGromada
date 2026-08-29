@@ -1,0 +1,9 @@
+#define DECOMP_OUTOFLINE_RESOURCE_DTOR
+#define DECOMP_INLINE_STRING_DTOR
+#include "util/resource.h"
+
+// FUNCTION: ALIEN 0x40b0e0
+RESOURCE::~RESOURCE()
+{
+	Close();
+}

@@ -1,0 +1,10 @@
+address|name|size|type
+0x401000|__vec_ctor|42|function
+0x401030|__vec_dtor|49|function
+0x403610|nullsub_2|1|function
+0x432c00|nullsub_3|1|function
+0x4333c0|nullsub_4|1|function
+0x442610|Iostream_init|3|function
+0x455160|GetOpenFileNameA_thunk|6|function
+0x455166|GetSaveFileNameA_thunk|6|function
+0x45516c|Direct3DCreate8_thunk|6|function

@@ -1,0 +1,20 @@
+#define DECOMP_INLINE_STRING_COPY_LIFETIME
+#include "util/named_list_struct_string.h"
+
+// FUNCTION: ALIEN 0x424dd0
+NAMED_LIST_STRUCT_STRING& NAMED_LIST_STRUCT_STRING::operator=(const NAMED_LIST_STRUCT_STRING& p_other)
+{
+	m_name = p_other.m_name;
+	m_value = p_other.m_value;
+	return *this;
+}
+
+// FUNCTION: ALIEN 0x424e30
+NAMED_LIST_STRUCT_STRING::~NAMED_LIST_STRUCT_STRING()
+{
+}
+
+// FUNCTION: ALIEN 0x425250
+NAMED_LIST_STRUCT_STRING::NAMED_LIST_STRUCT_STRING()
+{
+}

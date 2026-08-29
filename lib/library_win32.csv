@@ -1,0 +1,3 @@
+address|name|size|type
+0x455160|_GetOpenFileNameA@4|6|library
+0x455166|_GetSaveFileNameA@4|6|library

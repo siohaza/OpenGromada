@@ -1,0 +1,8 @@
+Windows Registry Editor Version 5.00
+
+[HKEY_CURRENT_USER\Environment]
+"INCLUDE"="C:\\msvc6\\Include"
+"LIB"="C:\\msvc6\\Lib"
+"TMP"="Z:\\build"
+"TEMP"="Z:\\build"
+"PATH"="C:\\msvc6\\Bin;C:\\cmake\\bin;C:\\windows\\system32"

@@ -1,0 +1,9 @@
+address|symbol|name|size|type
+0x5da554|?$S25@?1??Action@RAIL@@UAEHHHHH@Z@4EA|?$S25@?1??Action@RAIL@@UAEHHHHH@Z@4EA|1|global
+0x4b2c54|?$S35@?1??DrawRain@GRAPH@@QAEXXZ@4EA|?$S35@?1??DrawRain@GRAPH@@QAEXXZ@4EA|1|global
+0x4b2850|?$S40@?1??DrawSnowflakes@GRAPH@@QAEXXZ@4EA|?$S40@?1??DrawSnowflakes@GRAPH@@QAEXXZ@4EA|1|global
+0x5da534|?$S32@?1??Tact@MOUSETIPS@@QAEXPAVINPUT_AS@@@Z@4EA|?$S32@?1??Tact@MOUSETIPS@@QAEXPAVINPUT_AS@@@Z@4EA|1|global
+0x4b2c90|?$S52@?1??ExecFunc@MAP@@QAEPAPAVVID@@H@Z@4EA|?$S52@?1??ExecFunc@MAP@@QAEPAPAVVID@@H@Z@4EA|1|global
+0x48d128|__iob|__iob|96|global
+0x4901c0|?$S19@?1???0TEXTURE@@QAE@HHHIPBXPAVSTREAM@@@Z@4EA|?$S19@?1???0TEXTURE@@QAE@HHHIPBXPAVSTREAM@@@Z@4EA|1|global
+0x5da608|__pgmptr|__pgmptr|4|global

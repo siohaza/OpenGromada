@@ -1,0 +1,20 @@
+reccmp-user.yml
+reccmp-build.yml
+
+# Build output
+/build/
+/build-cmake/
+/build-docker/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+!3rdparty/**/*.lib
+*.exe
+*.asm
+
+# reccmp reports
+report.html
+*.svg
+__pycache__/
