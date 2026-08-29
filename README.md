@@ -15,7 +15,7 @@ cmake -S . -B build -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build build
 ```
 
-The resulting executable is `build/AlienShooter.exe`.
+The resulting executable is `build/AlienShooter.exe`. For assets please use [GOG](https://www.gog.com/en/game/alien_shooter_expansions) or retail 1.2 version
 
 ## License
 [Sustainable Use License](LICENSE.md)
