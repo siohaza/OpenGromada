@@ -12,14 +12,17 @@ QSMODEL::QSMODEL()
 // FUNCTION: ALIEN 0x4256c0
 QSMODEL::~QSMODEL()
 {
-	if (m_cumFreq)
+	if (m_cumFreq) {
 		operator delete(m_cumFreq);
+	}
 	m_cumFreq = 0;
-	if (m_freq)
+	if (m_freq) {
 		operator delete(m_freq);
+	}
 	m_freq = 0;
-	if (m_lookup)
+	if (m_lookup) {
 		operator delete(m_lookup);
+	}
 	m_lookup = 0;
 }
 
@@ -41,10 +44,12 @@ int QSMODEL::GetSym(int p_lcount)
 	hi = *(tmp + 1) + 1;
 	while (lo + 1 < hi) {
 		int mid = (hi + lo) >> 1;
-		if (p_lcount < m_cumFreq[mid])
+		if (p_lcount < m_cumFreq[mid]) {
 			hi = mid;
-		else
+		}
+		else {
 			lo = mid;
+		}
 	}
 	return lo;
 }
@@ -52,8 +57,9 @@ int QSMODEL::GetSym(int p_lcount)
 // FUNCTION: ALIEN 0x4259f0
 void QSMODEL::Update(int p_sym)
 {
-	if (m_left <= 0)
+	if (m_left <= 0) {
 		dorescale();
+	}
 	--m_left;
 	m_freq[p_sym] += m_incr;
 }

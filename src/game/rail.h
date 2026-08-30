@@ -16,7 +16,7 @@ public:
 	R_DOT* m_dot1; // 0x78
 	R_DOT* m_dot2; // 0x7c
 
-	int Action(int p_time, int p_dir, int p_a, int p_b);
+	decomp_intptr Action(int p_action, decomp_intptr p_dir, decomp_intptr p_a, decomp_intptr p_b);
 	void UnBreak(R_DOT* p_dot);
 };
 

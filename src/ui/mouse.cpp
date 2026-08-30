@@ -1,16 +1,16 @@
-#define DECOMP_INLINE_STRING_CHARP_CTOR
-#define DECOMP_INLINE_STRING_DTOR
 
 #include "ui/mouse.h"
-#include "video/vid.h"
-#include "world/hash_map.h"
-#include "gfx/graph_core.h"
-#include "gfx/graph.h"
-
-#include <string.h>
 
 #include "game/map.h"
+#include "gfx/graph.h"
+#include "gfx/graph_core.h"
+#include "platform/cursor.h"
+#include "platform/render.h"
 #include "util/myerror.h"
+#include "video/vid.h"
+#include "world/hash_map.h"
+
+#include <string.h>
 
 // GLOBAL: ALIEN 0x4845b4
 static const char* g_cursorNames[36] = {
@@ -94,25 +94,30 @@ MOUSE::MOUSE(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p
 {
 	m_hardware = 0;
 	void** cursors = m_cursors;
-	for (int i = 0; i < 36; ++i)
+	for (int i = 0; i < 36; ++i) {
 		cursors[i] = 0;
+	}
 	m_unk0x70 = 1;
-	if (m_vid != EmptyVid)
+	if (m_vid != EmptyVid) {
 		Remove();
-	else if (m_child)
+	}
+	else if (m_child) {
 		m_child->Remove();
-	if (m_vid == EmptyVid)
+	}
+	if (m_vid == EmptyVid) {
 		++m_noRef;
+	}
 }
 
 // FUNCTION: ALIEN 0x446d20
-VID* MOUSE::Draw()
+void MOUSE::Draw()
 {
-	if (m_unk0x70)
-		return (VID*) this;
-	if (m_hardware)
-		return (VID*) m_vid->Draw(this);
-	return (VID*) this;
+	if (m_unk0x70) {
+		return;
+	}
+	if (m_hardware) {
+		m_vid->Draw(this);
+	}
 }
 
 // FUNCTION: ALIEN 0x446d40
@@ -120,17 +125,20 @@ void* MOUSE::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	MOUSE* result = this;
 	this->~MOUSE();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
 // FUNCTION: ALIEN 0x446d60
 MOUSE::~MOUSE()
 {
-	MYERROR::Log(::Error,
+	MYERROR::Log(
+		::Error,
 		// STRING: ALIEN 0x4847c0
-		"Mouse  release");
+		"Mouse  release"
+	);
 }
 
 // FUNCTION: ALIEN 0x446d90
@@ -138,30 +146,28 @@ void MOUSE::Enable()
 {
 	if (!m_hardware) {
 		m_hardware = 1;
-		SetCursor(0);
-		int result = m_unk0x70;
-		if (result) {
-			result = 0;
-			do {
-				char** name = (char**) &g_cursorNames[result];
-				void** cursor = &m_cursors[result];
+		Platform_SetCursor(0);
+		if (m_unk0x70) {
+			for (int i = 0; i < 36; ++i) {
+				const char* name = g_cursorNames[i];
+				SDL_Cursor** cursor = (SDL_Cursor**) &m_cursors[i];
 				if (*cursor) {
-					DestroyCursor((HCURSOR) *cursor);
+					Platform_FreeCursor(*cursor);
 					*cursor = 0;
 				}
-				if (*name && **name) {
+				if (name && *name) {
 					// STRING: ALIEN 0x4847d8
 					STRING file("cursores\\");
-					file += *name;
+					file += name;
 					// STRING: ALIEN 0x4847d0
 					file += ".ani";
-					*cursor = LoadCursorFromFileA(file.m_str);
+					*cursor = Platform_LoadCursor(file.m_str);
 				}
-				if (!*cursor)
-					*cursor = LoadCursorA(0, (const char*) 0x7f00);
-				++result;
-			} while (result < 36);
-			SetCursor((HCURSOR) m_cursors[m_ani]);
+				if (!*cursor) {
+					*cursor = Platform_DefaultCursor();
+				}
+			}
+			Platform_SetCursor((SDL_Cursor*) m_cursors[m_ani]);
 		}
 	}
 }
@@ -173,17 +179,13 @@ void MOUSE::Disable()
 		int hw = m_unk0x70;
 		m_hardware = 0;
 		if (hw) {
-			SetCursor(0);
-			void** p = m_cursors;
-			int n = 36;
-			do {
-				if (*p) {
-					DestroyCursor((HCURSOR) *p);
-					*p = 0;
+			Platform_SetCursor(0);
+			for (int i = 0; i < 36; ++i) {
+				if (m_cursors[i]) {
+					Platform_FreeCursor((SDL_Cursor*) m_cursors[i]);
+					m_cursors[i] = 0;
 				}
-				++p;
-				--n;
-			} while (n);
+			}
 		}
 	}
 }
@@ -206,8 +208,9 @@ void MOUSE::HardwareOff()
 	if (m_unk0x70) {
 		Disable();
 		VID* vid;
-		if (Map->m_noVid <= 1 || (vid = Map->m_vids[1]) == 0)
+		if (Map->m_noVid <= 1 || (vid = Map->m_vids[1]) == 0) {
 			vid = EmptyVid;
+		}
 		int ani = m_ani;
 		m_vid = vid;
 		SPRITE::ChangeAnimation(ani == 0);
@@ -221,42 +224,45 @@ void MOUSE::HardwareOff()
 void MOUSE::ChangeAnimation(int p_ani)
 {
 	if (m_unk0x70) {
-		if (m_ani != p_ani && m_hardware)
-			SetCursor((HCURSOR) m_cursors[p_ani]);
+		if (m_ani != p_ani && m_hardware && p_ani >= 0 && p_ani < 36) {
+			Platform_SetCursor((SDL_Cursor*) m_cursors[p_ani]);
+		}
 		if (p_ani < 17) {
 			SPRITE::ChangeAnimation(p_ani);
 			return;
 		}
 		m_ani = p_ani;
 	}
-	else
+	else {
 		SPRITE::ChangeAnimation(p_ani);
+	}
 }
 
 // FUNCTION: ALIEN 0x447030
-decomp_intptr MOUSE::Action(int p_action, int p_a, int p_b, int p_c)
+decomp_intptr MOUSE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	switch (p_action) {
 	case 0x3d:
 		ChangeAnimation(p_a);
 		return 0;
-	case 0x3f: {
-		RECT rect;
-		GetWindowRect((HWND) ((GRAPH_CORE*) Graph)->m_hwnd, &rect);
-		SetCursorPos(p_a + rect.left, p_b + rect.top);
+	case 0x3f:
+		Platform_WarpMouse((float) p_a, (float) p_b);
 		return 0;
-	}
 	case 0x3e: {
 		int nvid = p_a;
-		if (nvid < 0)
+		if (nvid < 0) {
 			return 0;
-		if (nvid >= Map->m_noVid)
+		}
+		if (nvid >= Map->m_noVid) {
 			return 0;
-		if (!Map->m_vids[nvid])
+		}
+		if (!Map->m_vids[nvid]) {
 			return 0;
+		}
 		VID* vid = m_vid;
-		if (vid && nvid == vid->m_idx)
+		if (vid && nvid == vid->m_idx) {
 			return 0;
+		}
 		Insert();
 		SPRITE::Action(0x3e, nvid, p_b, p_c);
 		MOUSE* child = this;

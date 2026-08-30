@@ -1,7 +1,5 @@
 #include "video/vid_software.h"
 
-#include <string.h>
-
 #include "compress/qs1_coder.h"
 #include "game/gametime.h"
 #include "game/map.h"
@@ -12,51 +10,248 @@
 #include "gfx/texture.h"
 #include "sprite/ex_sprite_data.h"
 #include "sprite/sprite.h"
+#include "ui/ui_scaling.h"
 #include "util/myerror.h"
+#include "util/packed.h"
 #include "util/resource.h"
+
+#include <cmath>
+#include <string.h>
 
 extern float FSin[256];
 
-inline COLOR::COLOR(const GAMMA& p_gamma, const COLOR& p_color)
-{
-	if (p_gamma.m_a || p_gamma.m_b) {
-		unsigned int c = p_color.m_value;
-		unsigned int gb = p_gamma.m_b;
-		int b = (gb & 0xff) + ((((~p_gamma.m_a) & 0xff) + 1) * (c & 0xff) >> 8);
-		int g = ((gb >> 8) & 0xff) + (((((~p_gamma.m_a) >> 8) & 0xff) + 1) * ((c >> 8) & 0xff) >> 8);
-		int r = ((gb >> 16) & 0xff) + (((((~p_gamma.m_a) >> 16) & 0xff) + 1) * ((c >> 16) & 0xff) >> 8);
-		COLOR t(r, g, b);
-		m_value = t.m_value;
-	}
-	else
-		m_value = p_color.m_value;
-}
-
-static inline GAMMA ScreenGamma(const GRAPH_CORE* p_graph)
+inline static GAMMA ScreenGamma(const GRAPH_CORE* p_graph)
 {
 	return GAMMA(GAMMA::RAW_COPY, p_graph->m_gammaSet.m_a, p_graph->m_gammaSet.m_b);
 }
 
-static __forceinline GAMMA* CombineDrawGamma(
-	GAMMA* p_result, const GAMMA& p_gamma, int p_screenB, int p_screenA)
+static __forceinline GAMMA* CombineDrawGamma(GAMMA* p_result, const GAMMA& p_gamma, int p_screenB, int p_screenA)
 {
 	return p_result->Add(p_gamma, GAMMA(GAMMA::RAW_COPY, p_screenA, p_screenB));
 }
 
-static inline int LockDrawGraph(GRAPH_CORE* p_graph)
+inline static int LockDrawGraph(GRAPH_CORE* p_graph)
 {
-	int result = p_graph->m_locked;
-	if (!result) {
-		int rect[2];
-		if (p_graph->m_backBuffer->LockRect((D3DLOCKED_RECT*) rect, 0, 0) < 0) {
-			if (::Error)
-				MYERROR::Error(::Error, "GRAPH", 0, "backBuffer", 0);
-		}
-		p_graph->m_locked = rect[1];
-		result = rect[0] / ((p_graph->m_flags & 2) ? 4 : 2);
-		p_graph->m_unk0x248 = result;
+	return p_graph->Lock();
+}
+
+enum SCALED_UI_PIXEL_MODE {
+	SCALED_UI_ALPHA_UNSIGNED_GE,
+	SCALED_UI_OPAQUE_SIGNED_GT,
+	SCALED_UI_OPAQUE_UNSIGNED_GE
+};
+
+static int ScaledUIBoundary(int p_source, float p_scale)
+{
+	double scaled = (double) p_source * (double) p_scale;
+	return scaled >= 0.0 ? (int) std::floor(scaled + 0.5) : (int) std::ceil(scaled - 0.5);
+}
+
+static void DrawScaledUIPixel(
+	const UI_SCALING::RASTER_TARGET32& p_target,
+	unsigned short* p_zbuffer,
+	int p_zpitch,
+	int p_x,
+	int p_y,
+	int p_width,
+	int p_height,
+	unsigned int p_color,
+	short p_z,
+	SCALED_UI_PIXEL_MODE p_mode
+)
+{
+	UI_SCALING::RECT_I block;
+	if (!p_zbuffer || !UI_SCALING::PixelBlockBounds(p_target, p_x, p_y, p_width, p_height, &block)) {
+		return;
 	}
-	return result;
+
+	for (int y = block.m_top; y < block.m_bottom; ++y) {
+		unsigned int* color = p_target.m_pixels + (size_t) y * p_target.m_pitch;
+		unsigned short* zUnsigned = p_zbuffer + (size_t) y * p_zpitch;
+		short* zSigned = (short*) zUnsigned;
+		for (int x = block.m_left; x < block.m_right; ++x) {
+			if (p_mode == SCALED_UI_ALPHA_UNSIGNED_GE) {
+				if ((unsigned short) p_z >= zUnsigned[x]) {
+					COLOR source((int) p_color);
+					((COLOR*) &color[x])->AlphaAdd(source, p_color >> 24);
+				}
+			}
+			else if (p_mode == SCALED_UI_OPAQUE_UNSIGNED_GE) {
+				if (UI_SCALING::OpaquePalettedDepthPass(p_z, zUnsigned[x], true)) {
+					zUnsigned[x] = (unsigned short) p_z;
+					color[x] = p_color;
+				}
+			}
+			else if (UI_SCALING::OpaquePalettedDepthPass(p_z, zUnsigned[x], false)) {
+				zSigned[x] = p_z;
+				color[x] = p_color;
+			}
+		}
+	}
+}
+
+static int DrawScaledUIFrame(
+	VID_SOFTWARE* p_vid,
+	GRAPH_CORE* p_graph,
+	unsigned char* p_rle,
+	int p_rows,
+	int p_x0,
+	int p_yTop,
+	int p_z,
+	float p_scale,
+	int p_horizontalGap,
+	unsigned short p_flags,
+	const int* p_palette
+)
+{
+	if (!p_graph->m_color || !p_graph->m_zbuffer || !p_palette || !(p_flags & 1)) {
+		return 0;
+	}
+
+	UI_SCALING::RECT_I clip =
+		{(int) p_graph->m_viewXMin, (int) p_graph->m_viewYMin, (int) p_graph->m_viewXMax, (int) p_graph->m_viewYMax};
+	UI_SCALING::RASTER_TARGET32 target = UI_SCALING::MakeRasterTarget32(
+		(unsigned int*) p_graph->m_color,
+		(int) p_graph->m_width,
+		(int) p_graph->m_height,
+		p_graph->m_pitch,
+		clip
+	);
+	unsigned short* zbuffer = (unsigned short*) p_graph->m_zbuffer;
+
+	bool alpha = (p_flags & 2) && (p_flags & 8);
+	bool withDepthDelta = !alpha && (p_flags & 8) && (p_flags & 4);
+	bool directRgb16 = !(p_flags & 8);
+	int sourceSplit = p_vid->m_unk0x2f6 / 2;
+	const int sourceTileWidth = 2;
+	int targetWidth = ScaledUIBoundary(p_vid->m_unk0x2f6, p_scale) + p_horizontalGap;
+	bool horizontallyUnclipped = p_x0 >= (int) p_graph->m_viewXMin && p_x0 + targetWidth <= (int) p_graph->m_viewXMax;
+	if (!withDepthDelta) {
+		p_z += 1024;
+		if (p_z > 0x7fff) {
+			p_z = 0x7fff;
+		}
+	}
+	bool sloped = !withDepthDelta && p_vid->m_unk0x24 > p_vid->m_footprintHeight;
+
+	for (int row = 0; row < p_rows; ++row) {
+		int rowZ = p_z + (sloped ? 8 * (p_rows - row) : 0);
+		int rowTop = p_yTop + ScaledUIBoundary(row, p_scale);
+		int rowBottom = p_yTop + ScaledUIBoundary(row + 1, p_scale);
+		int rowHeight = rowBottom - rowTop;
+		int x = 0;
+		bool haveBridgePixel[2] = {false, false};
+		unsigned int bridgeColor[2] = {0, 0};
+		short bridgeZ[2] = {0, 0};
+		SCALED_UI_PIXEL_MODE bridgeMode[2] = {SCALED_UI_OPAQUE_SIGNED_GT, SCALED_UI_OPAQUE_SIGNED_GT};
+		while (p_rle[0] || p_rle[1]) {
+			x += p_rle[0];
+			int count = p_rle[1];
+			p_rle += 2;
+			unsigned char* zdelta = 0;
+			unsigned char* indices = 0;
+			unsigned char* rgb16 = 0;
+			if (withDepthDelta) {
+				zdelta = p_rle;
+				indices = p_rle + 2 * count;
+				p_rle = indices + count;
+			}
+			else if (directRgb16) {
+				rgb16 = p_rle;
+				p_rle += 2 * count;
+			}
+			else {
+				indices = p_rle;
+				p_rle += count;
+			}
+
+			for (int i = 0; i < count; ++i) {
+				unsigned int color;
+				short pixelZ;
+				SCALED_UI_PIXEL_MODE mode;
+				if (withDepthDelta) {
+					color = (unsigned int) p_palette[indices[i]];
+					short delta;
+					memcpy(&delta, zdelta + 2 * i, sizeof(delta));
+					pixelZ = (short) (p_z + delta);
+					mode = SCALED_UI_OPAQUE_SIGNED_GT;
+				}
+				else if (directRgb16) {
+					unsigned short sourceColor;
+					memcpy(&sourceColor, rgb16 + 2 * i, sizeof(sourceColor));
+					color = ExpandRGB16(sourceColor);
+					pixelZ = (short) rowZ;
+					mode = SCALED_UI_OPAQUE_UNSIGNED_GE;
+				}
+				else {
+					color = (unsigned int) p_palette[indices[i]];
+					pixelZ = (short) rowZ;
+					mode = alpha ? SCALED_UI_ALPHA_UNSIGNED_GE
+								 : (horizontallyUnclipped ? SCALED_UI_OPAQUE_UNSIGNED_GE : SCALED_UI_OPAQUE_SIGNED_GT);
+				}
+				int sourceX = x + i;
+				if (row < 8 && sourceX >= sourceSplit && sourceX < sourceSplit + sourceTileWidth) {
+					int bridgePixel = sourceX - sourceSplit;
+					haveBridgePixel[bridgePixel] = true;
+					bridgeColor[bridgePixel] = color;
+					bridgeZ[bridgePixel] = pixelZ;
+					bridgeMode[bridgePixel] = mode;
+				}
+				bool insertedTilePixel =
+					p_horizontalGap > 0 && sourceX >= sourceSplit && sourceX < sourceSplit + sourceTileWidth;
+				if (!insertedTilePixel) {
+					int splitOffset = sourceX >= sourceSplit + sourceTileWidth ? p_horizontalGap : 0;
+					int pixelLeft = ScaledUIBoundary(sourceX, p_scale);
+					int pixelRight = ScaledUIBoundary(sourceX + 1, p_scale);
+					DrawScaledUIPixel(
+						target,
+						zbuffer,
+						p_graph->m_zpitch,
+						p_x0 + pixelLeft + splitOffset,
+						rowTop,
+						pixelRight - pixelLeft,
+						rowHeight,
+						color,
+						pixelZ,
+						mode
+					);
+				}
+			}
+			x += count;
+		}
+		p_rle += 2;
+		if (p_horizontalGap > 0 && haveBridgePixel[0] && haveBridgePixel[1]) {
+			int firstPixelWidth = ScaledUIBoundary(1, p_scale);
+			int tileWidth = ScaledUIBoundary(sourceTileWidth, p_scale);
+			int tiledExtent = p_horizontalGap + tileWidth;
+			for (int offset = 0; tileWidth > 0 && offset < tiledExtent;) {
+				int phase = offset % tileWidth;
+				int bridgePixel = phase < firstPixelWidth ? 0 : 1;
+				int phaseEnd = bridgePixel == 0 ? firstPixelWidth : tileWidth;
+				int blockWidth = phaseEnd - phase;
+				if (blockWidth <= 0) {
+					blockWidth = 1;
+				}
+				if (blockWidth > tiledExtent - offset) {
+					blockWidth = tiledExtent - offset;
+				}
+				DrawScaledUIPixel(
+					target,
+					zbuffer,
+					p_graph->m_zpitch,
+					p_x0 + ScaledUIBoundary(sourceSplit, p_scale) + offset,
+					rowTop,
+					blockWidth,
+					rowHeight,
+					bridgeColor[bridgePixel],
+					bridgeZ[bridgePixel],
+					bridgeMode[bridgePixel]
+				);
+				offset += blockWidth;
+			}
+		}
+	}
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x4126b0
@@ -68,9 +263,9 @@ int VID_SOFTWARE::PaletteSize()
 // FUNCTION: ALIEN 0x4126c0
 int VID_SOFTWARE::HaveShadow()
 {
-	int v1 = m_unk0x48c;
-	if (v1)
-		return *(short*) (*m_unk0x484 + v1);
+	if (m_unk0x48c && m_unk0x484) {
+		return PackedRead<short>((char*) m_unk0x48c + m_unk0x484[0]);
+	}
 	return 0;
 }
 
@@ -79,8 +274,9 @@ void* VID_SOFTWARE::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	VID_SOFTWARE* result = this;
 	this->~VID_SOFTWARE();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -102,11 +298,13 @@ VID_SOFTWARE::VID_SOFTWARE()
 VID_SOFTWARE::~VID_SOFTWARE()
 {
 	if (m_weaponPtr == this) {
-		if (m_unk0x48c)
-			operator delete((void*) m_unk0x48c);
+		if (m_unk0x48c) {
+			operator delete(m_unk0x48c);
+		}
 		m_unk0x48c = 0;
-		if (m_unk0x484)
-			operator delete(m_unk0x484);
+		if (m_unk0x484) {
+			operator delete((void*) m_unk0x484);
+		}
 		m_unk0x484 = 0;
 		VID::MemoryInUse -= m_unk0x488;
 		m_unk0x488 = 0;
@@ -126,7 +324,7 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 
 	COLOR palette[256];
 	if (m_pixelFlag16 & 8) {
-		if (!p_res->GoNext(0x204c4150 /* 'PAL ' */ )) {
+		if (!p_res->GoNext(0x204c4150 /* 'PAL ' */)) {
 			if (m_pixelFlag16 & 0x10) {
 				p_res->Read(palette, 1024);
 			}
@@ -143,33 +341,35 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			}
 			unsigned int* col = (unsigned int*) palette;
 			for (int c = 0; c < 256; ++c) {
-				palette[c].m_value = COLOR(*(GAMMA*) &m_colorSub, palette[c]).m_value;
+				palette[c].m_value = COLOR(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), palette[c]).m_value;
 			}
 		}
 		else {
-			Error(5,
-				"PAL ", 0);
+			Error(5, "PAL ", 0);
 		}
 	}
 
-	if (p_res->GoNext(0x41544144 /* 'DATA' */ ))
-		Error(5,
-			"DATA", 0);
-	m_unk0x488 = p_res->m_resSize;
-	if (m_pixelFlag16 & 8)
+	if (p_res->GoNext(0x41544144 /* 'DATA' */)) {
+		Error(5, "DATA", 0);
+	}
+	m_unk0x488 = p_res->m_resSize + (m_dotFrameCount > 0 ? m_dotFrameCount : 0);
+	if (m_pixelFlag16 & 8) {
 		m_unk0x488 += 2 * PaletteSize();
-	m_unk0x48c = (int) operator new(m_unk0x488);
+	}
+	m_unk0x48c = operator new(m_unk0x488);
 	if (!m_unk0x48c) {
-		Error(2,
-			"cadr", m_unk0x488);
+		Error(2, "cadr", m_unk0x488);
 		return;
 	}
 	int* frames = (int*) operator new(4 * m_dotFrameCount);
-	m_unk0x484 = (char**) frames;
+	m_unk0x484 = frames;
 	if (!frames) {
-		Error(2,
+		Error(
+			2,
 			// STRING: ALIEN 0x482bd8
-			"cadrShift", m_dotFrameCount);
+			"cadrShift",
+			m_dotFrameCount
+		);
 		return;
 	}
 
@@ -178,12 +378,17 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 
 		int w = 0;
 		for (int c = 0; c < 256; ++c) {
-			if (PaletteSize() == 1024)
-				*(unsigned int*) ((char*) m_unk0x48c + 4 * c) = palette[c].m_value;
-			else
-				*(unsigned short*) ((char*) m_unk0x48c + w) = (unsigned short) (((palette[c].m_value >> 3) & 0x1f)
-					| (RGB16_rMask & (palette[c].m_value >> (16 - RGB16_rShift)))
-					| (RGB16_gMask & (palette[c].m_value >> (8 - RGB16_gShift))));
+			if (PaletteSize() == 1024) {
+				PackedWrite<unsigned int>((char*) m_unk0x48c + 4 * c, palette[c].m_value);
+			}
+			else {
+				PackedWrite<unsigned short>(
+					(char*) m_unk0x48c + w,
+					(unsigned short) (((palette[c].m_value >> 3) & 0x1f) |
+									  (RGB16_rMask & (palette[c].m_value >> (16 - RGB16_rShift))) |
+									  (RGB16_gMask & (palette[c].m_value >> (8 - RGB16_gShift))))
+				);
+			}
 			w += 2;
 		}
 		offset = 2 * PaletteSize();
@@ -194,36 +399,44 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 	}
 
 	for (int frame = 0; frame < m_dotFrameCount; ++frame) {
+		// Paletted frames can have an odd encoded size. Keep each internal
+		// frame start aligned because its fixed header and shadow contour are
+		// arrays of 16-bit values; RLE payloads themselves remain byte streams.
+		offset = (offset + 1) & ~1;
 		int packedSize;
 		p_res->Read(&packedSize, 4);
 		int left = p_res->ReadPacked((char*) m_unk0x48c + offset, packedSize, coder);
-		if (left)
-			Error(5,
+		if (left) {
+			Error(
+				5,
 				// STRING: ALIEN 0x482bc0
-				"Can't decode software", packedSize - left);
+				"Can't decode software",
+				packedSize - left
+			);
+		}
 		if (packedSize != 2) {
 			short flag2 = m_pixelFlag16;
-			if (!(flag2 & 8)
-				&& ((TEXTURE*) ((GRAPH_CORE*) Graph)->m_texE10)->m_format == 24
-				&& !(flag2 & 2)) {
+			if (!(flag2 & 8) && ((TEXTURE*) ((GRAPH_CORE*) Graph)->m_texE10)->m_format == 24 && !(flag2 & 2)) {
 
-				short* fr = (short*) ((char*) m_unk0x48c + offset);
-				short* header = fr + 3 * fr[0] + 1;
-				int yTop = header[0];
-				int yEnd = yTop + header[1];
-				unsigned short* k = (unsigned short*) (header + 2);
+				unsigned char* frameData = (unsigned char*) m_unk0x48c + offset;
+				short contourCount = PackedRead<short>(frameData);
+				unsigned char* header = frameData + 6 * contourCount + 2;
+				int yTop = PackedRead<short>(header);
+				int yEnd = yTop + PackedRead<short>(header + 2);
+				unsigned char* k = header + 4;
 				while (yTop < yEnd) {
-					while (*k) {
-						unsigned char* run = (unsigned char*) k + 1;
-						int count = *run;
-						k = (unsigned short*) (run + 1);
+					while (PackedRleRun(k)) {
+						int count = k[1];
+						unsigned char* pixels = k + 2;
 						while (count > 0) {
-							unsigned short px = *k++;
+							unsigned short px = PackedRead<unsigned short>(pixels);
 							--count;
-							*(k - 1) = (unsigned short) ((px & 0x1f) | ((px >> 1) & 0x7fe0));
+							PackedWrite<unsigned short>(pixels, (unsigned short) ((px & 0x1f) | ((px >> 1) & 0x7fe0)));
+							pixels += 2;
 						}
+						k = pixels;
 					}
-					++k;
+					k += 2;
 					++yTop;
 				}
 			}
@@ -231,12 +444,13 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			offset += packedSize;
 		}
 		else {
-			frames[frame] = frames[*(short*) ((char*) m_unk0x48c + offset)];
+			frames[frame] = frames[PackedRead<short>((char*) m_unk0x48c + offset)];
 		}
-		p_res->GoNextSub(0x41544144 /* 'DATA' */ );
+		p_res->GoNextSub(0x41544144 /* 'DATA' */);
 	}
-	if (coder)
+	if (coder) {
 		delete coder;
+	}
 	VID::MemoryInUse += m_unk0x488;
 	SetLayer();
 
@@ -248,22 +462,24 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			m_dotFrameStarts = (int*) operator new(4 * m_dotFrameCount);
 			for (int fr = 0; fr < m_dotFrameCount; ++fr) {
 				short grid[65536];
-				int* fill = (int*) grid;
-				for (int c = 0; c < 0x8000; ++c)
-					fill[c] = 0x83008300;
+				for (short& cell : grid) {
+					cell = -32000;
+				}
 				m_dotFrameStarts[fr] = m_nLinkDots;
 				int off = frames[fr];
 				short flags = m_pixelFlag16;
-				short* header = (short*) ((char*) m_unk0x48c + off + 6 * *(short*) ((char*) m_unk0x48c + off) + 2);
+				unsigned char* frameData = (unsigned char*) m_unk0x48c + off;
+				short contourCount = PackedRead<short>(frameData);
+				unsigned char* header = frameData + 6 * contourCount + 2;
 				if (flags & 8) {
 					if ((flags & 1) && (flags & 4)) {
 
-						int y = header[0];
-						int yEnd = y + header[1];
-						unsigned char* rle = (unsigned char*) (header + 2);
+						int y = PackedRead<short>(header);
+						int yEnd = y + PackedRead<short>(header + 2);
+						unsigned char* rle = header + 4;
 						while (y < yEnd) {
 							int x = 0;
-							while (*(unsigned short*) rle) {
+							while (PackedRleRun(rle)) {
 								int xr = *rle + x;
 								int count = rle[1];
 								unsigned char* px = rle + 2;
@@ -271,12 +487,13 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 									unsigned char* zp = px;
 									int xc = xr;
 									for (int c = count; c; --c) {
-										int z = (*(unsigned short*) zp >> 3) - 128;
+										int z = (PackedRead<unsigned short>(zp) >> 3) - 128;
 										int zz = z + y;
 										if (zz >= 0 && zz < 2048 && xc >= 0 && xc < 0x800) {
 											int cell = xc / 8 + ((zz / 8) << 8);
-											if (z > grid[cell])
+											if (z > grid[cell]) {
 												grid[cell] = (short) z;
+											}
 										}
 										++xc;
 										zp += 2;
@@ -291,20 +508,21 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 					}
 					else if ((flags & 8) && (flags & 1)) {
 
-						int y = header[0];
-						int yEnd = y + header[1];
-						unsigned char* rle = (unsigned char*) (header + 2);
+						int y = PackedRead<short>(header);
+						int yEnd = y + PackedRead<short>(header + 2);
+						unsigned char* rle = header + 4;
 						for (; y < yEnd; ++y, rle += 2) {
 							int x = 0;
-							while (*(unsigned short*) rle) {
+							while (PackedRleRun(rle)) {
 								int xr = *rle + x;
 								int count = rle[1];
 								unsigned char* px = rle + 2;
 								if (count > 0) {
 									int xc = xr;
 									for (int c = count; c; --c) {
-										if (y >= 0 && y < 0x800 && xc >= 0 && xc < 0x800)
+										if (y >= 0 && y < 0x800 && xc >= 0 && xc < 0x800) {
 											grid[256 * (y / 8) + xc / 8] = 0;
+										}
 										++xc;
 									}
 								}
@@ -326,8 +544,7 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 								short z = *cell;
 								if (*cell != -32000) {
 									scratch[3 * m_nLinkDots] = colIdx * 8.0f - width / 2;
-									scratch[3 * m_nLinkDots + 1] =
-										row * 8.0f - m_messageLineHeight / 2;
+									scratch[3 * m_nLinkDots + 1] = row * 8.0f - m_messageLineHeight / 2;
 									scratch[3 * m_nLinkDots + 2] = z;
 									++m_nLinkDots;
 								}
@@ -346,10 +563,9 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			if (m_nLinkDots > 0) {
 				int idx = 0;
 				do {
-					int* d = (int*) m_dotCoords + idx;
-					d[0] = *(int*) &scratch[idx];
-					d[1] = *(int*) &scratch[idx + 1];
-					d[2] = *(int*) &scratch[idx + 2];
+					m_dotCoords[idx] = scratch[idx];
+					m_dotCoords[idx + 1] = scratch[idx + 1];
+					m_dotCoords[idx + 2] = scratch[idx + 2];
 					++n;
 					idx += 3;
 				} while (n < m_nLinkDots);
@@ -379,18 +595,21 @@ void VID_SOFTWARE::SetLayer()
 		m_layer = 7;
 		return;
 	}
-	if (!(flag & 0x28))
+	if (!(flag & 0x28)) {
 		m_layer = 6;
-	else
+	}
+	else {
 		m_layer = 5;
+	}
 }
 
 // FUNCTION: ALIEN 0x415f10
 void VID_SOFTWARE::SetGammaToPalette(unsigned char* p_palette, const GAMMA& p_gamma)
 {
 	unsigned int* palette = (unsigned int*) p_palette;
-	if (!palette || (!p_gamma.m_a && !p_gamma.m_b))
+	if (!palette || (!p_gamma.m_a && !p_gamma.m_b)) {
 		return;
+	}
 	for (int i = 0; i < 256; ++i) {
 		unsigned int color;
 		int b;
@@ -402,22 +621,26 @@ void VID_SOFTWARE::SetGammaToPalette(unsigned char* p_palette, const GAMMA& p_ga
 		else {
 			color = palette[i];
 			b = (((color & 0xff) * (((~p_gamma.m_a) & 0xff) + 1)) >> 8) + (p_gamma.m_b & 0xff);
-			g = ((((color >> 8) & 0xff) * ((((~p_gamma.m_a) >> 8) & 0xff) + 1)) >> 8)
-				+ ((p_gamma.m_b >> 8) & 0xff);
-			r = ((((color >> 16) & 0xff) * ((((~p_gamma.m_a) >> 16) & 0xff) + 1)) >> 8)
-				+ ((p_gamma.m_b >> 16) & 0xff);
-			if (r < 0)
+			g = ((((color >> 8) & 0xff) * ((((~p_gamma.m_a) >> 8) & 0xff) + 1)) >> 8) + ((p_gamma.m_b >> 8) & 0xff);
+			r = ((((color >> 16) & 0xff) * ((((~p_gamma.m_a) >> 16) & 0xff) + 1)) >> 8) + ((p_gamma.m_b >> 16) & 0xff);
+			if (r < 0) {
 				r = 0;
-			else if (r > 255)
+			}
+			else if (r > 255) {
 				r = 255;
-			if (g < 0)
+			}
+			if (g < 0) {
 				g = 0;
-			else if (g > 255)
+			}
+			else if (g > 255) {
 				g = 255;
-			if (b < 0)
+			}
+			if (b < 0) {
 				b = 0;
-			else if (b > 255)
+			}
+			else if (b > 255) {
 				b = 255;
+			}
 			color = 0xff000000 | (r << 16) | (g << 8) | b;
 		}
 		palette[i] = color;
@@ -439,8 +662,9 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 			}
 			else {
 				memcpy(pixels, pixels + palSize, palSize);
-				if ((int) m_sprClass != 8 && !(m_flag & 0x800))
+				if ((int) m_sprClass != 8 && !(m_flag & 0x800)) {
 					SetGammaToPalette((unsigned char*) m_unk0x48c, p_gamma);
+				}
 			}
 		}
 		else if (p_idx < 4) {
@@ -451,21 +675,24 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 				char* old = (char*) m_unk0x48c;
 				m_unk0x488 += 3 * palSize;
 				VID::MemoryInUse += 3 * palSize;
-				m_unk0x48c = (int) operator new(m_unk0x488);
-				if (!m_unk0x48c)
-					return Error(2,
+				m_unk0x48c = operator new(m_unk0x488);
+				if (!m_unk0x48c) {
+					return Error(
+						2,
 						// STRING: ALIEN 0x482c10
-						"SetGamma", m_unk0x488);
-				memcpy((char*) m_unk0x48c + 4 * palSize, old + palSize,
-					m_unk0x488 - 4 * palSize);
+						"SetGamma",
+						m_unk0x488
+					);
+				}
+				memcpy((char*) m_unk0x48c + 4 * palSize, old + palSize, m_unk0x488 - 4 * palSize);
 				memcpy((char*) m_unk0x48c, (char*) m_unk0x48c + 4 * palSize, palSize);
-				memcpy((char*) m_unk0x48c + palSize, (char*) m_unk0x48c + 4 * palSize,
-					palSize);
+				memcpy((char*) m_unk0x48c + palSize, (char*) m_unk0x48c + 4 * palSize, palSize);
 				memcpy((char*) m_unk0x48c + 2 * palSize, (char*) m_unk0x48c, 2 * palSize);
 				operator delete(old);
 				if (m_unk0x484) {
-					for (int i = 0; i < m_dotFrameCount; ++i)
-						((int*) m_unk0x484)[i] += 3 * palSize;
+					for (int i = 0; i < m_dotFrameCount; ++i) {
+						m_unk0x484[i] += 3 * palSize;
+					}
 				}
 				m_pixelFlag16 |= 0x400;
 				for (VID* mirror = m_weaponPtr; mirror != this; mirror = mirror->m_weaponPtr) {
@@ -474,42 +701,50 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 				}
 			}
 
-			memcpy((char*) m_unk0x48c + p_idx * palSize,
-				(char*) m_unk0x48c + 4 * palSize, palSize);
+			memcpy((char*) m_unk0x48c + p_idx * palSize, (char*) m_unk0x48c + 4 * palSize, palSize);
 			if ((int) m_sprClass == 8 || (m_flag & 0x800)) {
-				SetGammaToPalette((unsigned char*) ((char*) m_unk0x48c + p_idx * palSize),
-					p_gamma);
+				SetGammaToPalette((unsigned char*) ((char*) m_unk0x48c + p_idx * palSize), p_gamma);
 			}
 			else {
 				GAMMA combined;
 				combined.Add(p_gamma, ScreenGamma((GRAPH_CORE*) Graph));
-				SetGammaToPalette((unsigned char*) ((char*) m_unk0x48c + p_idx * palSize),
-					combined);
+				SetGammaToPalette((unsigned char*) ((char*) m_unk0x48c + p_idx * palSize), combined);
 			}
 		}
 		else {
-			Error(4,
+			Error(
+				4,
 				// STRING: ALIEN 0x482bec
-				"n_gamma in VID_SOFTWARE::SetGamma", p_idx);
+				"n_gamma in VID_SOFTWARE::SetGamma",
+				p_idx
+			);
 		}
 	}
-	if (0)
-		return 0;
+	return 0;
 }
 
-#pragma optimize("y", off)
 // STUB: ALIEN 0x416860
 int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 {
-	if (m_unk0x47c & 0x40)
+	if (m_unk0x47c & 0x40) {
 		return 0;
+	}
+	if (!m_unk0x48c || !m_unk0x484) {
+		return 0;
+	}
 
 	int width = m_unk0x2f6;
 	int height = m_messageLineHeight;
-	int x0 = (int) p_sprite->m_x - (int) Map->m_shiftX - width / 2;
-	int y0 = (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - height / 2;
-	if (x0 + width < viewXMin || x0 >= viewXMax || y0 + height < viewYMin || y0 >= viewYMax)
+	float uiScale = p_sprite->UIDrawScale();
+	int horizontalGap = p_sprite->UIHorizontalGap();
+	int naturalScaledWidth = ScaledUIBoundary(width, uiScale);
+	int scaledWidth = naturalScaledWidth + horizontalGap;
+	int scaledHeight = ScaledUIBoundary(height, uiScale);
+	int x0 = (int) p_sprite->m_x - (int) Map->m_shiftX - naturalScaledWidth / 2;
+	int y0 = (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - scaledHeight / 2;
+	if (x0 + scaledWidth < ViewXMin() || x0 >= ViewXMax() || y0 + scaledHeight < ViewYMin() || y0 >= ViewYMax()) {
 		return 0;
+	}
 
 	int z = (int) (p_sprite->m_z * 8.0f);
 	if ((m_flag & 0x8000) && z < 0x3fff) {
@@ -518,38 +753,41 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	else if (m_flag & 0x10000) {
 		int bob = (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
 		z += bob;
-		y0 -= bob / 8;
+		y0 -= ScaledUIBoundary(bob / 8, uiScale);
 	}
 
-	short* frame = (short*) ((char*) m_unk0x48c + ((int*) m_unk0x484)[p_sprite->m_noCadr]);
-	short* header = frame + 3 * frame[0] + 1;
-	int nRows = header[1];
-	unsigned char* rle = (unsigned char*) (header + 2);
-	int yTop = y0 + header[0];
-	int yEnd = yTop + nRows;
-	if (yTop >= viewYMax || yEnd < viewYMin)
+	unsigned char* frame = (unsigned char*) m_unk0x48c + m_unk0x484[p_sprite->m_noCadr];
+	short contourCount = PackedRead<short>(frame);
+	unsigned char* header = frame + 6 * contourCount + 2;
+	int nRows = PackedRead<short>(header + 2);
+	unsigned char* rle = header + 4;
+	int yTop = y0 + ScaledUIBoundary(PackedRead<short>(header), uiScale);
+	int yEnd = yTop + ScaledUIBoundary(nRows, uiScale);
+	if (yTop >= ViewYMax() || yEnd < ViewYMin()) {
 		return 0;
-	if (yEnd > viewYMax)
-		yEnd = viewYMax;
+	}
+	if (yEnd > ViewYMax()) {
+		yEnd = ViewYMax();
+	}
 
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	int pitch;
-	int zpitch = graph->m_unk0x250;
+	int zpitch = graph->m_zpitch;
 	char* surface;
 	char* zbase = (char*) graph->m_zbuffer;
 	LockDrawGraph(graph);
-	pitch = graph->m_unk0x248;
-	surface = (char*) graph->m_locked;
+	pitch = graph->m_pitch;
+	surface = (char*) graph->m_color;
 
-	unsigned char paletteBuf[1024];
+	alignas(int) unsigned char paletteBuf[1024];
+	int* palette;
 	EX_SPRITE_DATA* exData = p_sprite->m_exData;
 	if (!exData || (!exData->m_unk0x24 && !exData->m_unk0x28)) {
-		int armyOffset =
-			(m_fontFlag & 4) ? ((p_sprite->m_flag >> 11) & 3) * PaletteSize() : 0;
-		AsmDrawPalette = (int*) ((char*) m_unk0x48c + armyOffset);
+		int armyOffset = (m_fontFlag & 4) ? ((p_sprite->m_flag >> 11) & 3) * PaletteSize() : 0;
+		palette = (int*) ((char*) m_unk0x48c + armyOffset);
 	}
 	else {
-		AsmDrawPalette = (int*) paletteBuf;
+		palette = (int*) paletteBuf;
 		int gammaOffset = (m_fontFlag & 4) ? 4 * PaletteSize() : 0;
 		memcpy(paletteBuf, (char*) m_unk0x48c + gammaOffset, PaletteSize());
 		if (m_flag & 0x800) {
@@ -558,28 +796,35 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		else {
 			GAMMA combined;
 			CombineDrawGamma(
-				&combined, p_sprite->GetGamma(),
+				&combined,
+				p_sprite->GetGamma(),
 				((GRAPH_CORE*) Graph)->m_gammaSet.m_b,
-				((GRAPH_CORE*) Graph)->m_gammaSet.m_a);
+				((GRAPH_CORE*) Graph)->m_gammaSet.m_a
+			);
 			SetGammaToPalette(paletteBuf, combined);
 		}
 	}
 
 	unsigned short flag2 = m_pixelFlag16;
+	if (p_sprite->m_uiScale && (uiScale != 1.0f || horizontalGap > 0)) {
+		return DrawScaledUIFrame(this, graph, rle, nRows, x0, yTop, z, uiScale, horizontalGap, flag2, palette);
+	}
 	if ((flag2 & 2) && (flag2 & 1) && (flag2 & 8)) {
 
 		z += 1024;
-		if (z > 0x7fff)
+		if (z > 0x7fff) {
 			z = 0x7fff;
+		}
 		int rows = nRows;
-		if (yTop < viewYMin) {
-			for (int skip = viewYMin - yTop; skip > 0; --skip) {
-				while (*(unsigned short*) rle)
+		if (yTop < ViewYMin()) {
+			for (int skip = ViewYMin() - yTop; skip > 0; --skip) {
+				while (PackedRleRun(rle)) {
 					rle += rle[1] + 2;
+				}
 				rle += 2;
 				--rows;
 			}
-			yTop = viewYMin;
+			yTop = ViewYMin();
 		}
 		int zstep = 0;
 		if (m_unk0x24 > m_footprintHeight) {
@@ -587,11 +832,10 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 			zstep = -8;
 		}
 		for (int y = yTop; y < yEnd; ++y, z += zstep) {
-			AsmDrawData[0] = (short) z;
 			int* dst = (int*) (surface + 4 * y * pitch);
 			unsigned short* zrow = (unsigned short*) (zbase + 2 * y * zpitch);
 			int x = x0;
-			while (*(unsigned short*) rle) {
+			while (PackedRleRun(rle)) {
 				x += *rle++;
 				int count = *rle++;
 				unsigned char* src = rle;
@@ -599,59 +843,65 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 				int xEnd = x + count;
 				int xc = x;
 				x = xEnd;
-				if (xc < viewXMin) {
-					src += viewXMin - xc;
-					count -= viewXMin - xc;
-					xc = viewXMin;
+				if (xc < ViewXMin()) {
+					src += ViewXMin() - xc;
+					count -= ViewXMin() - xc;
+					xc = ViewXMin();
 				}
-				if (xEnd > viewXMax)
-					count = viewXMax - xc;
-				if (count > 0)
-					AsmDrawWithAlpha32(src, zrow + xc, (COLOR*) (dst + xc), count);
+				if (xEnd > ViewXMax()) {
+					count = ViewXMax() - xc;
+				}
+				if (count > 0) {
+					AsmDrawWithAlpha32(src, zrow + xc, (COLOR*) (dst + xc), count, (unsigned short) z, palette);
+				}
 			}
 			rle += 2;
 		}
 		return 0;
 	}
-	if (!(flag2 & 1))
+	if (!(flag2 & 1)) {
 		return 0;
+	}
 	if ((flag2 & 8) && (flag2 & 4)) {
 
-		if (yTop < viewYMin) {
-			for (int skip = viewYMin - yTop; skip > 0; --skip) {
-				while (*(unsigned short*) rle)
+		if (yTop < ViewYMin()) {
+			for (int skip = ViewYMin() - yTop; skip > 0; --skip) {
+				while (PackedRleRun(rle)) {
 					rle += 3 * rle[1] + 2;
+				}
 				rle += 2;
 			}
-			yTop = viewYMin;
+			yTop = ViewYMin();
 		}
 		for (int y = yTop; y < yEnd; ++y) {
 			int* dst = (int*) (surface + 4 * y * pitch);
 			short* zrow = (short*) (zbase + 2 * y * zpitch);
 			int x = x0;
-			while (*(unsigned short*) rle) {
+			while (PackedRleRun(rle)) {
 				x += rle[0];
 				int count = rle[1];
 				rle += 2;
-				short* zdelta = (short*) rle;
+				unsigned char* zdelta = rle;
 				unsigned char* src = rle + 2 * count;
 				rle = src + count;
 				int xEnd = x + count;
 				int xc = x;
+				int sourceOffset = 0;
 				x = xEnd;
-				if (xc < viewXMin) {
-					zdelta += viewXMin - xc;
-					src += viewXMin - xc;
-					count -= viewXMin - xc;
-					xc = viewXMin;
+				if (xc < ViewXMin()) {
+					sourceOffset = ViewXMin() - xc;
+					src += sourceOffset;
+					count -= sourceOffset;
+					xc = ViewXMin();
 				}
-				if (xEnd > viewXMax)
-					count = viewXMax - xc;
+				if (xEnd > ViewXMax()) {
+					count = ViewXMax() - xc;
+				}
 				for (int i = 0; i < count; ++i) {
-					short zv = (short) (zdelta[i] + z);
+					short zv = (short) (PackedRead<short>(zdelta + 2 * (sourceOffset + i)) + z);
 					if (zv > zrow[xc + i]) {
 						zrow[xc + i] = zv;
-						dst[xc + i] = AsmDrawPalette[src[i]];
+						dst[xc + i] = palette[src[i]];
 					}
 				}
 			}
@@ -662,17 +912,19 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	if (!(flag2 & 8)) {
 
 		z += 1024;
-		if (z > 0x7fff)
+		if (z > 0x7fff) {
 			z = 0x7fff;
+		}
 		int rows = nRows;
-		if (yTop < viewYMin) {
-			for (int skip = viewYMin - yTop; skip > 0; --skip) {
-				while (*(unsigned short*) rle)
+		if (yTop < ViewYMin()) {
+			for (int skip = ViewYMin() - yTop; skip > 0; --skip) {
+				while (PackedRleRun(rle)) {
 					rle += 2 * rle[1] + 2;
+				}
 				rle += 2;
 				--rows;
 			}
-			yTop = viewYMin;
+			yTop = ViewYMin();
 		}
 		int zstep = 0;
 		if (m_unk0x24 > m_footprintHeight) {
@@ -684,28 +936,29 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 
 			unsigned short* zrow = (unsigned short*) (zbase + 2 * y * zpitch);
 			int x = x0;
-			while (*(unsigned short*) rle) {
+			while (PackedRleRun(rle)) {
 				x += *rle++;
 				int count = *rle++;
-				unsigned short* src = (unsigned short*) rle;
+				unsigned char* src = rle;
 				rle += 2 * count;
 				int xEnd = x + count;
 				int xc = x;
+				int sourceOffset = 0;
 				x = xEnd;
-				if (xc < viewXMin) {
-					src += viewXMin - xc;
-					count -= viewXMin - xc;
-					xc = viewXMin;
+				if (xc < ViewXMin()) {
+					sourceOffset = ViewXMin() - xc;
+					count -= sourceOffset;
+					xc = ViewXMin();
 				}
-				if (xEnd > viewXMax)
-					count = viewXMax - xc;
+				if (xEnd > ViewXMax()) {
+					count = ViewXMax() - xc;
+				}
 				for (int i = 0; i < count; ++i) {
 					if (z >= zrow[xc + i]) {
 						zrow[xc + i] = (unsigned short) z;
-						unsigned int c = src[i];
-						dst[xc + i] = 0xff000000 | ((c & 0x1f) << 3)
-							| ((c << (8 - RGB16_gShift)) & 0xff00)
-							| ((c << (16 - RGB16_rShift)) & 0xff0000);
+						unsigned int c = PackedRead<unsigned short>(src + 2 * (sourceOffset + i));
+						dst[xc + i] = 0xff000000 | ((c & 0x1f) << 3) | ((c << (8 - RGB16_gShift)) & 0xff00) |
+									  ((c << (16 - RGB16_rShift)) & 0xff0000);
 					}
 				}
 			}
@@ -715,17 +968,19 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	}
 
 	z += 1024;
-	if (z > 0x7fff)
+	if (z > 0x7fff) {
 		z = 0x7fff;
+	}
 	int rows = nRows;
-	if (yTop < viewYMin) {
-		for (int skip = viewYMin - yTop; skip > 0; --skip) {
-			while (*(unsigned short*) rle)
+	if (yTop < ViewYMin()) {
+		for (int skip = ViewYMin() - yTop; skip > 0; --skip) {
+			while (PackedRleRun(rle)) {
 				rle += rle[1] + 2;
+			}
 			rle += 2;
 			--rows;
 		}
-		yTop = viewYMin;
+		yTop = ViewYMin();
 	}
 	int zstep = 0;
 	if (m_unk0x24 > m_footprintHeight) {
@@ -733,15 +988,14 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		zstep = -8;
 	}
 
-	int unclipped = x0 >= viewXMin && x0 + width <= viewXMax;
+	int unclipped = x0 >= ViewXMin() && x0 + width <= ViewXMax();
 	for (int y = yTop; y < yEnd; ++y, z += zstep) {
-		AsmDrawData[0] = (short) z;
 		int* dst = (int*) (surface + 4 * y * pitch);
 		short* zrow = (short*) (zbase + 2 * y * zpitch);
 		int x = x0;
 		if (unclipped) {
 			unsigned short* zurow = (unsigned short*) zrow;
-			while (*(unsigned short*) rle) {
+			while (PackedRleRun(rle)) {
 				x += *rle++;
 				int count = *rle++;
 				unsigned char* src = rle;
@@ -749,7 +1003,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 				for (int i = 0; i < count; ++i) {
 					if (z >= zurow[x + i]) {
 						zurow[x + i] = (unsigned short) z;
-						dst[x + i] = AsmDrawPalette[src[i]];
+						dst[x + i] = palette[src[i]];
 					}
 				}
 				x += count;
@@ -757,7 +1011,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 			rle += 2;
 			continue;
 		}
-		while (*(unsigned short*) rle) {
+		while (PackedRleRun(rle)) {
 			x += *rle++;
 			int count = *rle++;
 			unsigned char* src = rle;
@@ -765,21 +1019,22 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 			int xEnd = x + count;
 			int xc = x;
 			x = xEnd;
-			if (xc < viewXMin) {
-				src += viewXMin - xc;
-				count -= viewXMin - xc;
-				xc = viewXMin;
+			if (xc < ViewXMin()) {
+				src += ViewXMin() - xc;
+				count -= ViewXMin() - xc;
+				xc = ViewXMin();
 			}
-			if (xEnd > viewXMax)
-				count = viewXMax - xc;
-			if (count > 0)
-				AsmDraw32(src, zrow + xc, dst + xc, count);
+			if (xEnd > ViewXMax()) {
+				count = ViewXMax() - xc;
+			}
+			if (count > 0) {
+				AsmDraw32(src, zrow + xc, dst + xc, count, (short) z, palette);
+			}
 		}
 		rle += 2;
 	}
 	return 0;
 }
-#pragma optimize("", on)
 
 // FUNCTION: ALIEN 0x418640
 void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
@@ -795,60 +1050,73 @@ void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
 
 	float shadowH = p_sprite->m_z;
 	char* base = (char*) m_unk0x48c;
-	if (!base || !m_unk0x484)
+	if (!base || !m_unk0x484) {
 		return;
-	if (m_unk0x47c & 0x40)
+	}
+	if (m_unk0x47c & 0x40) {
 		return;
+	}
 
 	int height = m_messageLineHeight;
 	float baseX = p_sprite->m_x - Map->m_shiftX - m_unk0x2f6 / 2;
 	float groundY = p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - height / 2;
-	if ((int) baseX + m_unk0x2f6 + 200 < viewXMin || (int) baseX >= viewXMax)
+	if ((int) baseX + m_unk0x2f6 + 200 < ViewXMin() || (int) baseX >= ViewXMax()) {
 		return;
-	if ((int) groundY + height + 100 < viewYMin || (int) groundY >= viewYMax)
+	}
+	if ((int) groundY + height + 100 < ViewYMin() || (int) groundY >= ViewYMax()) {
 		return;
+	}
 
 	float lineY = groundY + shadowH;
-	if (m_flag & 0x10000)
+	if (m_flag & 0x10000) {
 		shadowH = FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 + shadowH;
+	}
 
-	short* pts = (short*) (base + ((int*) m_unk0x484)[p_sprite->m_noCadr]);
-	int count = *pts++;
-	if (!count)
+	unsigned char* pts = (unsigned char*) base + m_unk0x484[p_sprite->m_noCadr];
+	int count = PackedRead<short>(pts);
+	pts += 2;
+	if (!count) {
 		return;
+	}
 
 	SHADOWVERTEX verts[514];
 	int i;
 	for (i = 0; i < 2 * count; i += 2) {
-		verts[i].x = *pts++ + baseX;
-		float py = *pts++ + lineY;
-		float elev = *pts++ + shadowH;
+		verts[i].x = PackedRead<short>(pts) + baseX;
+		pts += 2;
+		float py = PackedRead<short>(pts) + lineY;
+		pts += 2;
+		float elev = PackedRead<short>(pts) + shadowH;
+		pts += 2;
 		verts[i].y = py - elev;
 		verts[i].z = elev * 0.00012207031f + 0.015625f;
 		verts[i].rhw = 1.0f;
 		verts[i].diffuse = 0xa4a4a4;
+		verts[i].specular = 0;
 		verts[i + 1].x = elev * 0.34999999f + verts[i].x;
 		verts[i + 1].y = py - elev * 0.69999999f;
 		verts[i + 1].z = 0.015625f;
 		verts[i + 1].rhw = 1.0f;
 		verts[i + 1].diffuse = 0xa4a4a4;
+		verts[i + 1].specular = 0;
 	}
 	verts[i] = verts[0];
 	verts[i + 1] = verts[1];
 
 	((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_SPECULARENABLE, 0);
-	((GRAPH_CORE*) Graph)->m_device->SetTexture(0, 0);
 	((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_CULLMODE, D3DCULL_CCW);
 	((GRAPH_CORE*) Graph)->SetAlphaBlend(1, 3);
 	int total = 2 * count + 2;
-	for (i = 0; i < total; ++i)
+	for (i = 0; i < total; ++i) {
 		verts[i].diffuse = 0xa4a4a4;
+	}
 	((GRAPH_CORE*) Graph)->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0xc4, verts, 0x18, total);
 
 	((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_CULLMODE, D3DCULL_CW);
 	((GRAPH_CORE*) Graph)->SetAlphaBlend(9, 2);
-	for (i = 0; i < total; ++i)
+	for (i = 0; i < total; ++i) {
 		verts[i].diffuse = 0x8f8f8f;
+	}
 	((GRAPH_CORE*) Graph)->DrawPrimitive(D3DPT_TRIANGLESTRIP, 0xc4, verts, 0x18, total);
 
 	((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_CULLMODE, D3DCULL_CCW);

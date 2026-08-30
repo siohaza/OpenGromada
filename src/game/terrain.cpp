@@ -16,13 +16,15 @@ TERRAIN::TERRAIN(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRIT
 }
 
 // STUB: ALIEN 0x44bdb0
-int TERRAIN::AskCell(float p_x, float p_y)
+SPRITE* TERRAIN::AskCell(float p_x, float p_y)
 {
-	if (p_x < 0.0f || p_x >= Map->m_w || p_y < 0.0f || p_y >= Map->m_h)
-		return (int) this;
-	if (Map->GetGroundZ_vid(m_vid, m_x, m_y) < (double) m_z)
+	if (p_x < 0.0f || p_x >= Map->m_w || p_y < 0.0f || p_y >= Map->m_h) {
+		return this;
+	}
+	if (Map->GetGroundZ_vid(m_vid, m_x, m_y) < (double) m_z) {
 		return CanPlace(p_x, p_y, Z());
-	return (int) this;
+	}
+	return this;
 }
 
 // FUNCTION: ALIEN 0x44be50
@@ -32,15 +34,16 @@ void TERRAIN::AddHpPerSecond(int p_hp)
 		int hp = m_unk0x54;
 		if (hp > 0) {
 			int v = p_hp + hp;
-			if (v > m_vid->m_maxHp[(m_flag >> 11) & 3])
+			if (v > m_vid->m_maxHp[(m_flag >> 11) & 3]) {
 				v = m_vid->m_maxHp[(m_flag >> 11) & 3];
+			}
 			ChangeHp(v);
 		}
 	}
 }
 
 // FUNCTION: ALIEN 0x44bea0
-decomp_intptr TERRAIN::Action(int p_action, int p_a, int p_b, int p_c)
+decomp_intptr TERRAIN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	switch (p_action) {
 	case 0xc8:
@@ -68,19 +71,20 @@ int TERRAIN::Repair(int p_full)
 		do {
 			if (vid->m_idx == 35) {
 				VID* v40 = (Map->m_noVid > 40 && Map->m_vids[40]) ? Map->m_vids[40] : EmptyVid;
-				army = 4 * ((m_flag >> 11) & 3) + 0x3a8;
-				rebuild = *(int*) ((char*) v40 + army);
+				army = (m_flag >> 11) & 3;
+				rebuild = v40->m_entitiesNumber[army];
 				VID* v35 = (Map->m_noVid > 35 && Map->m_vids[35]) ? Map->m_vids[35] : EmptyVid;
-				if (rebuild >= *(int*) ((char*) v35 + 4 * ((m_flag >> 11) & 3) + 0x3a8))
+				if (rebuild >= v35->m_entitiesNumber[army]) {
 					break;
+				}
 			}
 			CreateLink();
-			Map->CreateSprite(Map->Vid(590), (float) GetX(), (float) GetY(), (float) GetZ(),
-				ANGLE(0), this);
+			Map->CreateSprite(Map->Vid(590), (float) GetX(), (float) GetY(), (float) GetZ(), ANGLE(0), this);
 			return 1;
 		} while (0);
 	}
-	if (m_child && m_child->m_vid == linkVid)
+	if (m_child && m_child->m_vid == linkVid) {
 		m_child->Action(0x56, 0, 0, 0);
+	}
 	return 1;
 }

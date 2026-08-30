@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Alien Shooter
+Comment=Fight alien hordes in the classic top-down shooter
+Exec=AlienShooter
+Icon=com.sigmateam.alienshooter
+Terminal=false
+Categories=Game;ActionGame;

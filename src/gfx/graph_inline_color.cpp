@@ -1,14 +1,13 @@
-#include "gfx/graph.h"
-
-#include <windows.h>
-#include <math.h>
-#include <stdlib.h>
-#include "util/myerror.h"
-
 #include "game/gametime.h"
+#include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture.h"
+#include "platform/timing.h"
+#include "util/myerror.h"
 #include "video/vid.h"
+
+#include <math.h>
+#include <stdlib.h>
 
 // GLOBAL: ALIEN 0x4b2c68
 static int s_loadFrame;
@@ -20,22 +19,23 @@ static unsigned int s_loadTime;
 void GRAPH::DrawLoadBar(VID* p_vid)
 {
 	GRAPH_CORE* core = (GRAPH_CORE*) this;
-	RealCurrentTime = timeGetTime();
-	if (!p_vid)
+	RealCurrentTime = Platform_Ticks();
+	if (!p_vid) {
 		return;
-	if (RealCurrentTime - s_loadTime <= (unsigned int) p_vid->m_defaultAniPeriod)
+	}
+	if (RealCurrentTime - s_loadTime <= (unsigned int) p_vid->m_defaultAniPeriod) {
 		return;
+	}
 	core->PreTact();
 	core->ClearScreen(COLOR(0, 0, 0));
-	DrawVid(p_vid, s_loadFrame, core->m_width * 0.5f,
-		core->m_height * 0.5f + 1.0f, 1.0f);
+	DrawVid(p_vid, s_loadFrame, core->m_width * 0.5f, core->m_height * 0.5f + 1.0f, 1.0f);
 	DrawEffect(1);
-	core->PutsXY(200.0f, core->GetViewYMin() + 5.0f, m_fontName,
-		GRAPH_CORE::GREEN);
+	core->PutsXY(200.0f, core->GetViewYMin() + 5.0f, m_fontName, GRAPH_CORE::GREEN);
 	core->PostTact(1);
 	s_loadTime = RealCurrentTime;
-	if (++s_loadFrame >= p_vid->m_dotFrameCount)
+	if (++s_loadFrame >= p_vid->m_dotFrameCount) {
 		s_loadFrame = 0;
+	}
 }
 
 // FUNCTION: ALIEN 0x430f10
@@ -44,24 +44,18 @@ void GRAPH::DrawDebugText(const char* p_format, ...)
 	GRAPH_CORE* core = (GRAPH_CORE*) this;
 	m_fontName = p_format;
 	core->PreTact();
-	core->Bar(200.0f, core->GetViewYMin() + 5.0f, 800.0f,
-		core->GetViewYMin() + 30.0f, COLOR(0, 0, 0));
-	core->PutsXY(200.0f, core->GetViewYMin() + 5.0f, m_fontName,
-		GRAPH_CORE::GREEN);
+	core->Bar(200.0f, core->GetViewYMin() + 5.0f, 800.0f, core->GetViewYMin() + 30.0f, COLOR(0, 0, 0));
+	core->PutsXY(200.0f, core->GetViewYMin() + 5.0f, m_fontName, GRAPH_CORE::GREEN);
 	core->PostTact(1);
 }
 
-static inline COLOR ScreenPixel(GRAPH_CORE* p_core, float p_x, float p_y)
+inline static COLOR ScreenPixel(GRAPH_CORE* p_core, float p_x, float p_y)
 {
-	p_core->Lock();
-	return p_x < p_core->m_viewXMin || p_x >= p_core->m_viewXMax
-			|| p_y < p_core->m_viewYMin || p_y >= p_core->m_viewYMax
-		? COLOR((int) 0xff000000)
-		: p_core->m_flags & 2
-			? *(COLOR*) (p_core->m_locked
-				+ 4 * ((int) p_y * (int) p_core->m_unk0x248 + (int) p_x))
-			: COLOR((const unsigned short*) (p_core->m_locked
-				+ 2 * ((int) p_y * (int) p_core->m_unk0x248 + (int) p_x)));
+	if (!p_core->m_color || p_x < p_core->m_viewXMin || p_x >= p_core->m_viewXMax || p_y < p_core->m_viewYMin ||
+		p_y >= p_core->m_viewYMax) {
+		return COLOR((int) 0xff000000);
+	}
+	return COLOR((int) ((const unsigned int*) p_core->m_color)[(int) p_y * p_core->m_pitch + (int) p_x]);
 }
 
 // FUNCTION: ALIEN 0x430fc0
@@ -77,8 +71,7 @@ int GRAPH::ScreenShot(STRING* p_name, int p_x, int p_y, int p_w, int p_h)
 		}
 	}
 	picture.m_impl->SaveTGA(*p_name, 0, 0, -1, -1);
-	if (0)
-		return 0;
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x433da0
@@ -95,43 +88,70 @@ void GRAPH::Line(float p_x, float p_y, float p_x1, float p_y1, COLOR p_color)
 {
 	if ((float) fabs(p_x) > 10000.0f) {
 		p_x = 0.0;
-		if (::Error)
-			MYERROR::Error(::Error, "GRAPH", 4,
+		if (::Error) {
+			MYERROR::Error(
+				::Error,
+				"GRAPH",
+				4,
 				// STRING: ALIEN 0x483f94
-				"x in Line", 0);
+				"x in Line",
+				0
+			);
+		}
 	}
 	if ((float) fabs(p_x1) > 10000.0f) {
 		p_x1 = 0.0;
-		if (::Error)
-			MYERROR::Error(::Error, "GRAPH", 4,
+		if (::Error) {
+			MYERROR::Error(
+				::Error,
+				"GRAPH",
+				4,
 				// STRING: ALIEN 0x483f88
-				"x1 in Line", 0);
+				"x1 in Line",
+				0
+			);
+		}
 	}
 	if ((float) fabs(p_y) > 10000.0f) {
 		p_y = 0.0;
-		if (::Error)
-			MYERROR::Error(::Error, "GRAPH", 4,
+		if (::Error) {
+			MYERROR::Error(
+				::Error,
+				"GRAPH",
+				4,
 				// STRING: ALIEN 0x483f7c
-				"y in Line", 0);
+				"y in Line",
+				0
+			);
+		}
 	}
 	if ((float) fabs(p_y1) > 10000.0f) {
 		p_y1 = 0.0;
-		if (::Error)
-			MYERROR::Error(::Error, "GRAPH", 4,
+		if (::Error) {
+			MYERROR::Error(
+				::Error,
+				"GRAPH",
+				4,
 				// STRING: ALIEN 0x483f70
-				"y1 in Line", 0);
+				"y1 in Line",
+				0
+			);
+		}
 	}
 	int x = (int) p_x;
 	int y = (int) p_y;
 	int stepY = -1;
 	int steep = 0;
 	int stepX;
-	if (p_x1 > p_x)
+	if (p_x1 > p_x) {
 		stepX = 1;
-	else
+	}
+	else {
 		stepX = -1;
-	if (p_y1 > p_y)
+	}
+	if (p_y1 > p_y) {
 		stepY = 1;
+	}
 	unsigned int dx = abs((int) (p_x1 - p_x));
 	unsigned int dy = abs((int) (p_y1 - p_y));
 	if (dy > dx) {
@@ -149,10 +169,12 @@ void GRAPH::Line(float p_x, float p_y, float p_x1, float p_y1, COLOR p_color)
 	int d = 2 * dy - dx;
 	int incr = 2 * dy;
 	for (unsigned int count = 0; count < dx; ++count) {
-		if (steep)
+		if (steep) {
 			PutPixel((float) y, (float) x, p_color);
-		else
+		}
+		else {
 			PutPixel((float) x, (float) y, p_color);
+		}
 		while (d >= 0) {
 			y += stepY;
 			d -= 2 * dx;

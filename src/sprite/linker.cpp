@@ -25,8 +25,9 @@ void* LINKER::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	LINKER* result = this;
 	this->~LINKER();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -38,7 +39,8 @@ void LINKER::LinkRotate(ANGLE p_dir)
 	d = p_dir.m_dir - m_ddir.m_dir;
 	float yoff = ANGLE::SinTable2[d] * m_dx + ANGLE::CosTable2[d] * m_dy;
 	SPRITE* s = m_owner;
-	if (!s)
+	if (!s) {
 		s = m_parent;
+	}
 	ChangeCoor(s->X() + xoff, s->Y() + yoff, Z());
 }

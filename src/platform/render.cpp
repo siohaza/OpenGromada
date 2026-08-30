@@ -1,0 +1,443 @@
+#include "platform/render.h"
+
+#include <SDL3/SDL.h>
+#include <algorithm>
+#include <cmath>
+#include <stdint.h>
+#include <stdlib.h>
+#include <string>
+
+static SDL_Window* s_window;
+static SDL_Renderer* s_renderer;
+static SDL_Texture* s_texture;
+static unsigned int* s_pixels;
+static int s_width;
+static int s_height;
+static bool s_fitAutomaticWindow;
+
+static void SetPortableWindowIcon()
+{
+#if !defined(_WIN32) && !defined(__APPLE__)
+	const char* basePath = SDL_GetBasePath();
+	if (!s_window || !basePath) {
+		SDL_ClearError();
+		return;
+	}
+
+	std::string iconPath(basePath);
+	iconPath += "AlienShooter.png";
+	SDL_Surface* icon = SDL_LoadPNG(iconPath.c_str());
+	if (!icon) {
+		SDL_ClearError();
+		return;
+	}
+	if (!SDL_SetWindowIcon(s_window, icon)) {
+		SDL_ClearError();
+	}
+	SDL_DestroySurface(icon);
+#endif
+}
+
+static bool IsFullscreen()
+{
+	return s_window && (SDL_GetWindowFlags(s_window) & SDL_WINDOW_FULLSCREEN);
+}
+
+static SDL_DisplayID WindowDisplay()
+{
+	SDL_DisplayID display = s_window ? SDL_GetDisplayForWindow(s_window) : 0;
+	return display ? display : SDL_GetPrimaryDisplay();
+}
+
+static bool WindowUsableBounds(SDL_DisplayID p_display, SDL_Rect* p_bounds)
+{
+	return p_display && SDL_GetDisplayUsableBounds(p_display, p_bounds) && p_bounds->w > 0 && p_bounds->h > 0;
+}
+
+static bool IsDummyVideo()
+{
+	const char* driver = SDL_GetCurrentVideoDriver();
+	return driver && SDL_strcasecmp(driver, "dummy") == 0;
+}
+
+static void WindowBorders(int* p_top, int* p_left, int* p_bottom, int* p_right)
+{
+	*p_top = 0;
+	*p_left = 0;
+	*p_bottom = 0;
+	*p_right = 0;
+	if (s_window) {
+		SDL_GetWindowBordersSize(s_window, p_top, p_left, p_bottom, p_right);
+	}
+}
+
+static void FitWindowToUsableBounds(SDL_DisplayID p_display)
+{
+	if (!s_window || IsFullscreen() || IsDummyVideo()) {
+		return;
+	}
+
+	SDL_SyncWindow(s_window);
+	SDL_Rect usable;
+	if (!WindowUsableBounds(p_display ? p_display : WindowDisplay(), &usable)) {
+		return;
+	}
+
+	int top;
+	int left;
+	int bottom;
+	int right;
+	WindowBorders(&top, &left, &bottom, &right);
+	const int maxWidth = usable.w - left - right;
+	const int maxHeight = usable.h - top - bottom;
+	if (maxWidth <= 0 || maxHeight <= 0) {
+		return;
+	}
+
+	int width;
+	int height;
+	if (!SDL_GetWindowSize(s_window, &width, &height) || width <= 0 || height <= 0 ||
+		(width <= maxWidth && height <= maxHeight)) {
+		return;
+	}
+
+	const double scale = std::min((double) maxWidth / width, (double) maxHeight / height);
+	const int fittedWidth = std::max(1, (int) std::floor(width * scale));
+	const int fittedHeight = std::max(1, (int) std::floor(height * scale));
+	SDL_SetWindowSize(s_window, fittedWidth, fittedHeight);
+	SDL_SyncWindow(s_window);
+}
+
+struct DEBUG_TEXT {
+	float m_x;
+	float m_y;
+	unsigned int m_color;
+	int m_height;
+	char m_text[128];
+};
+
+enum {
+	DEBUG_TEXT_MAX = 64
+};
+static DEBUG_TEXT s_debugText[DEBUG_TEXT_MAX];
+static int s_debugTextCount;
+
+static SDL_Texture* CreateTexture(int p_width, int p_height)
+{
+	SDL_Texture* texture =
+		SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, p_width, p_height);
+	if (!texture) {
+		return 0;
+	}
+
+	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+	return texture;
+}
+
+static int ReplaceLogicalTargets(int p_width, int p_height)
+{
+	if (!s_renderer || p_width <= 0 || p_height <= 0 || (size_t) p_width > SIZE_MAX / (size_t) p_height ||
+		(size_t) p_width * (size_t) p_height > SIZE_MAX / sizeof(unsigned int)) {
+		return 1;
+	}
+	SDL_Texture* texture = CreateTexture(p_width, p_height);
+	if (!texture) {
+		return 1;
+	}
+
+	unsigned int* pixels = (unsigned int*) calloc((size_t) p_width * p_height, sizeof(unsigned int));
+	if (!pixels) {
+		SDL_DestroyTexture(texture);
+		return 1;
+	}
+	if (!SDL_SetRenderLogicalPresentation(s_renderer, p_width, p_height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+		free(pixels);
+		SDL_DestroyTexture(texture);
+		return 1;
+	}
+
+	if (s_texture) {
+		SDL_DestroyTexture(s_texture);
+	}
+	free(s_pixels);
+
+	s_texture = texture;
+	s_pixels = pixels;
+	s_width = p_width;
+	s_height = p_height;
+
+	return 0;
+}
+
+int Platform_RenderOpen(
+	const char* p_title,
+	int p_outputWidth,
+	int p_outputHeight,
+	int p_frameWidth,
+	int p_frameHeight,
+	int p_fullscreen,
+	int p_fitAutomaticWindow,
+	unsigned int p_display
+)
+{
+	if (s_window) {
+		return 0;
+	}
+	if (p_outputWidth <= 0 || p_outputHeight <= 0 || p_frameWidth <= 0 || p_frameHeight <= 0) {
+		return 1;
+	}
+
+	if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+		return 1;
+	}
+
+	SDL_WindowFlags flags = 0;
+	if (p_fullscreen) {
+		flags |= SDL_WINDOW_FULLSCREEN;
+	}
+
+	if (!SDL_CreateWindowAndRenderer(p_title, p_outputWidth, p_outputHeight, flags, &s_window, &s_renderer)) {
+		s_window = 0;
+		s_renderer = 0;
+		return 1;
+	}
+	SetPortableWindowIcon();
+
+	s_fitAutomaticWindow = p_fitAutomaticWindow != 0;
+	if (p_display) {
+		SDL_SetWindowPosition(
+			s_window,
+			SDL_WINDOWPOS_CENTERED_DISPLAY(p_display),
+			SDL_WINDOWPOS_CENTERED_DISPLAY(p_display)
+		);
+		SDL_SyncWindow(s_window);
+	}
+	if (s_fitAutomaticWindow) {
+		FitWindowToUsableBounds(p_display);
+	}
+
+	if (ReplaceLogicalTargets(p_frameWidth, p_frameHeight)) {
+		Platform_RenderClose();
+		return 1;
+	}
+
+	if (!SDL_StartTextInput(s_window)) {
+		Platform_RenderClose();
+		return 1;
+	}
+	return 0;
+}
+
+void Platform_RenderClose()
+{
+	if (s_window && SDL_TextInputActive(s_window)) {
+		SDL_StopTextInput(s_window);
+	}
+	if (s_texture) {
+		SDL_DestroyTexture(s_texture);
+		s_texture = 0;
+	}
+	free(s_pixels);
+	s_pixels = 0;
+	if (s_renderer) {
+		SDL_DestroyRenderer(s_renderer);
+		s_renderer = 0;
+	}
+	if (s_window) {
+		SDL_DestroyWindow(s_window);
+		s_window = 0;
+	}
+	s_width = 0;
+	s_height = 0;
+	s_fitAutomaticWindow = false;
+}
+
+unsigned int* Platform_RenderPixels()
+{
+	return s_pixels;
+}
+
+int Platform_RenderPitch()
+{
+	return s_width;
+}
+
+int Platform_RenderWidth()
+{
+	return s_width;
+}
+
+int Platform_RenderHeight()
+{
+	return s_height;
+}
+
+int Platform_RenderResizeLogical(int p_width, int p_height)
+{
+	if (!s_window || !s_renderer || !s_pixels) {
+		return 1;
+	}
+	if (p_width == s_width && p_height == s_height) {
+		return 0;
+	}
+	return ReplaceLogicalTargets(p_width, p_height);
+}
+
+void Platform_RenderPresent()
+{
+	if (!s_renderer || !s_texture) {
+		return;
+	}
+
+	SDL_UpdateTexture(s_texture, 0, s_pixels, s_width * (int) sizeof(unsigned int));
+
+	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
+	SDL_RenderClear(s_renderer);
+	SDL_RenderTexture(s_renderer, s_texture, 0, 0);
+
+	for (int i = 0; i < s_debugTextCount; ++i) {
+		const DEBUG_TEXT& t = s_debugText[i];
+		float scale = (float) t.m_height / (float) SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+		if (scale < 1.0f) {
+			scale = 1.0f;
+		}
+		SDL_SetRenderScale(s_renderer, scale, scale);
+		SDL_SetRenderDrawColor(
+			s_renderer,
+			(t.m_color >> 16) & 0xff,
+			(t.m_color >> 8) & 0xff,
+			t.m_color & 0xff,
+			(t.m_color >> 24) & 0xff
+		);
+		SDL_RenderDebugText(s_renderer, t.m_x / scale, t.m_y / scale, t.m_text);
+	}
+	SDL_SetRenderScale(s_renderer, 1.0f, 1.0f);
+	s_debugTextCount = 0;
+
+	SDL_RenderPresent(s_renderer);
+}
+
+int Platform_RenderHandleDeviceReset()
+{
+	if (!s_renderer || !s_pixels || s_width <= 0 || s_height <= 0) {
+		return 1;
+	}
+	SDL_Texture* texture = CreateTexture(s_width, s_height);
+	if (!texture) {
+		return 1;
+	}
+	if (!SDL_SetRenderLogicalPresentation(s_renderer, s_width, s_height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+		SDL_DestroyTexture(texture);
+		return 1;
+	}
+	if (s_texture) {
+		SDL_DestroyTexture(s_texture);
+	}
+	s_texture = texture;
+	return 0;
+}
+
+void Platform_RenderSetFullscreen(int p_fullscreen)
+{
+	if (s_window) {
+		SDL_SetWindowFullscreen(s_window, p_fullscreen != 0);
+	}
+}
+
+void Platform_RenderSetVSync(int p_vsync)
+{
+	if (s_renderer) {
+		SDL_SetRenderVSync(s_renderer, p_vsync ? 1 : SDL_RENDERER_VSYNC_DISABLED);
+	}
+}
+
+SDL_Window* Platform_RenderWindow()
+{
+	return s_window;
+}
+
+SDL_Renderer* Platform_RenderRenderer()
+{
+	return s_renderer;
+}
+
+void Platform_RenderRestoreWindowPosition(int p_x, int p_y)
+{
+	if (!s_window || IsFullscreen()) {
+		return;
+	}
+
+	const bool saved = !SDL_WINDOWPOS_ISUNDEFINED(p_x) && !SDL_WINDOWPOS_ISUNDEFINED(p_y) &&
+					   !SDL_WINDOWPOS_ISCENTERED(p_x) && !SDL_WINDOWPOS_ISCENTERED(p_y);
+	SDL_DisplayID display = 0;
+	if (saved) {
+		SDL_Point point = {p_x, p_y};
+		display = SDL_GetDisplayForPoint(&point);
+	}
+	if (!display) {
+		display = WindowDisplay();
+	}
+	if (s_fitAutomaticWindow) {
+		FitWindowToUsableBounds(display);
+	}
+
+	SDL_Rect usable;
+	if (!WindowUsableBounds(display, &usable)) {
+		SDL_SetWindowPosition(s_window, saved ? p_x : SDL_WINDOWPOS_CENTERED, saved ? p_y : SDL_WINDOWPOS_CENTERED);
+		return;
+	}
+
+	int width;
+	int height;
+	if (!SDL_GetWindowSize(s_window, &width, &height)) {
+		return;
+	}
+	int top;
+	int left;
+	int bottom;
+	int right;
+	WindowBorders(&top, &left, &bottom, &right);
+
+	const int minX = usable.x + left;
+	const int minY = usable.y + top;
+	const int maxX = usable.x + usable.w - right - width;
+	const int maxY = usable.y + usable.h - bottom - height;
+	const int centerX = minX + (std::max(minX, maxX) - minX) / 2;
+	const int centerY = minY + (std::max(minY, maxY) - minY) / 2;
+	const int x = saved ? std::clamp(p_x, minX, std::max(minX, maxX)) : centerX;
+	const int y = saved ? std::clamp(p_y, minY, std::max(minY, maxY)) : centerY;
+	SDL_SetWindowPosition(s_window, x, y);
+	SDL_SyncWindow(s_window);
+}
+
+void Platform_RenderWindowToFrame(float* p_x, float* p_y)
+{
+	if (!s_renderer) {
+		return;
+	}
+	SDL_RenderCoordinatesFromWindow(s_renderer, *p_x, *p_y, p_x, p_y);
+}
+
+void Platform_WarpMouse(float p_x, float p_y)
+{
+	if (!s_renderer || !s_window) {
+		return;
+	}
+	float wx = p_x;
+	float wy = p_y;
+	SDL_RenderCoordinatesToWindow(s_renderer, p_x, p_y, &wx, &wy);
+	SDL_WarpMouseInWindow(s_window, wx, wy);
+}
+
+void Platform_RenderDebugText(float p_x, float p_y, unsigned int p_argb, const char* p_text, int p_height)
+{
+	if (!p_text || s_debugTextCount >= DEBUG_TEXT_MAX) {
+		return;
+	}
+	DEBUG_TEXT& t = s_debugText[s_debugTextCount++];
+	t.m_x = p_x;
+	t.m_y = p_y;
+	t.m_color = (p_argb & 0xff000000u) ? p_argb : (p_argb | 0xff000000u);
+	t.m_height = p_height > 0 ? p_height : SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE;
+	SDL_strlcpy(t.m_text, p_text, sizeof(t.m_text));
+}

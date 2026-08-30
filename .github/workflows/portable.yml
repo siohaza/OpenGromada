@@ -1,0 +1,227 @@
+name: portable-release
+
+on:
+  push:
+    branches: [portable]
+    tags: ["*"]
+  pull_request:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux ${{ matrix.compiler }} ${{ matrix.arch }} Release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            runner: ubuntu-latest
+            compiler: GCC
+            cc: gcc
+            cxx: g++
+            package: true
+          - arch: x64
+            runner: ubuntu-latest
+            compiler: Clang
+            cc: clang
+            cxx: clang++
+            package: false
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            compiler: GCC
+            cc: gcc
+            cxx: g++
+            package: true
+    env:
+      CC: ${{ matrix.cc }}
+      CXX: ${{ matrix.cxx }}
+      ARCHIVE: AlienShooter-linux-${{ matrix.arch }}.tar.gz
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - uses: libsdl-org/setup-sdl@main
+        id: sdl
+        with:
+          version: 3-latest
+          pre-release: false
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
+          install-linux-dependencies: true
+          discriminator: linux-${{ matrix.arch }}-${{ matrix.compiler }}-release-static
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_BINDIR=.
+          -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Package
+        if: matrix.package
+        run: |
+          cmake --install build --prefix package/AlienShooter
+          cp README.md LICENSE.md package/AlienShooter/
+          tar -C package -czf "$ARCHIVE" AlienShooter
+      - name: Upload release package
+        if: matrix.package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-linux-${{ matrix.arch }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  macos:
+    name: macOS ${{ matrix.arch }} Release
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cmake_arch: x86_64
+            runner: macos-15-intel
+          - arch: arm64
+            cmake_arch: arm64
+            runner: macos-15
+    env:
+      ARCHIVE: AlienShooter-macos-${{ matrix.arch }}.zip
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - uses: libsdl-org/setup-sdl@main
+        id: sdl
+        with:
+          version: 3-latest
+          pre-release: false
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          discriminator: macos-${{ matrix.arch }}-release-static
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Package
+        run: |
+          cmake --install build --prefix package/AlienShooter
+          cp README.md LICENSE.md package/AlienShooter/
+          ditto -c -k --sequesterRsrc --keepParent package/AlienShooter "$ARCHIVE"
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-macos-${{ matrix.arch }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  windows:
+    name: Windows ${{ matrix.arch }} Release
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            msvc_arch: amd64_x86
+          - arch: x64
+            msvc_arch: amd64
+          - arch: arm64
+            msvc_arch: amd64_arm64
+    env:
+      ARCHIVE: AlienShooter-windows-${{ matrix.arch }}.zip
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.msvc_arch }}
+      - uses: libsdl-org/setup-sdl@main
+        id: sdl
+        with:
+          version: 3-latest
+          pre-release: false
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          discriminator: windows-${{ matrix.arch }}-release-static
+      - name: Configure
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_BINDIR=.
+          -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          "-DCMAKE_PREFIX_PATH=${{ steps.sdl.outputs.prefix }}"
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Package
+        shell: pwsh
+        run: |
+          cmake --install build --prefix package/AlienShooter
+          Copy-Item README.md, LICENSE.md package/AlienShooter/
+          Compress-Archive -Path package/AlienShooter -DestinationPath $env:ARCHIVE
+      - name: Upload release package
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-windows-${{ matrix.arch }}
+          path: ${{ env.ARCHIVE }}
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+          overwrite: true
+
+  publish:
+    name: Publish GitHub Release assets
+    if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG_NAME: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+      - name: Generate checksums
+        run: |
+          count="$(find release-assets -maxdepth 1 -type f -name 'AlienShooter-*' | wc -l)"
+          test "$count" -eq 7
+          cd release-assets
+          sha256sum AlienShooter-* > SHA256SUMS.txt
+      - name: Upload assets
+        run: |
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release upload "$TAG_NAME" release-assets/* --clobber
+          else
+            gh release create "$TAG_NAME" release-assets/* \
+              --verify-tag \
+              --generate-notes \
+              --title "Alien Shooter $TAG_NAME"
+          fi

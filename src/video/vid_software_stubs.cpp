@@ -1,6 +1,5 @@
-#include "video/vid_software.h"
-
 #include "util/stream.h"
+#include "video/vid_software.h"
 
 // FUNCTION: ALIEN 0x415280
 VID_SOFTWARE::VID_SOFTWARE(STREAM* p_stream) throw()
@@ -15,11 +14,11 @@ VID_SOFTWARE::VID_SOFTWARE(STREAM* p_stream) throw()
 	m_weaponPtr = o.m_weaponPtr;
 	o.m_weaponPtr = this;
 	m_layer = o.m_layer;
-	*(unsigned short*) &m_pixelFlag = *(unsigned short*) &o.m_pixelFlag;
-	*(unsigned short*) &m_unk0x2f2[2] = *(unsigned short*) &o.m_unk0x2f2[2];
-	*(unsigned short*) &m_unk0x2f2[0] = *(unsigned short*) &o.m_unk0x2f2[0];
-	*(unsigned short*) &m_unk0x2f2[4] = *(unsigned short*) &o.m_unk0x2f2[4];
-	*(unsigned short*) &m_unk0x2f2[6] = *(unsigned short*) &o.m_unk0x2f2[6];
+	m_pixelFlag16 = o.m_pixelFlag16;
+	m_defaultAniPeriod = o.m_defaultAniPeriod;
+	m_dotFrameCount = o.m_dotFrameCount;
+	m_unk0x2f6 = o.m_unk0x2f6;
+	m_messageLineHeight = o.m_messageLineHeight;
 	m_unk0x484 = o.m_unk0x484;
 	m_unk0x48c = o.m_unk0x48c;
 	m_unk0x488 = o.m_unk0x488;
@@ -32,9 +31,10 @@ VID_SOFTWARE::VID_SOFTWARE(STREAM* p_stream) throw()
 			dst = src;
 		}
 		if (o.m_unk0x470) {
-			m_unk0x470 = operator new(4 * *(short*) &m_unk0x2f2[2]);
-			for (int j = 0; j < *(short*) &m_unk0x2f2[2]; ++j)
+			m_unk0x470 = operator new(4 * m_dotFrameCount);
+			for (int j = 0; j < m_dotFrameCount; ++j) {
 				((int*) m_unk0x470)[j] = ((int*) o.m_unk0x470)[j];
+			}
 		}
 	}
 }

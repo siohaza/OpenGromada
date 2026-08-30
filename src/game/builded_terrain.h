@@ -10,9 +10,7 @@ class BUILDED_TERRAIN : public SPRITE {
 public:
 	BUILDED_TERRAIN(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent);
 
-	VID* Draw();
+	void Draw();
 };
-
-DECOMP_SIZE_ASSERT(BUILDED_TERRAIN, 0x70)
 
 #endif

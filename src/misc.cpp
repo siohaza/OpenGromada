@@ -1,5 +1,7 @@
 #include "misc.h"
 
+#include "util/game_random.h"
+
 #include <stdlib.h>
 
 // FUNCTION: ALIEN 0x406130
@@ -11,7 +13,8 @@ int Sqrt(int p_value)
 		if (p_value >= bit + result) {
 			p_value -= bit + result;
 			result = (result >> 1) | bit;
-		} else {
+		}
+		else {
 			result >>= 1;
 		}
 		bit >>= 2;
@@ -28,5 +31,5 @@ double sqr(double p_value)
 // FUNCTION: ALIEN 0x4455b0
 int Random(int p_max)
 {
-	return rand() % (p_max + 1);
+	return GameRand() % (p_max + 1);
 }

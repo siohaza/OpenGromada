@@ -1,5 +1,4 @@
 #include "game/map.h"
-
 #include "util/myerror.h"
 #include "video/vid.h"
 
@@ -17,8 +16,9 @@ SPRITE* MAP::LoadSprite(RESOURCE* p_resource, int p_version)
 	SPRITE* sprite = 0;
 
 	p_resource->Read(&pointerToken, 4);
-	if (pointerToken == -1)
+	if (pointerToken == -1) {
 		return (SPRITE*) -1;
+	}
 	p_resource->Read(&nvid, 4);
 	if (p_version > 9) {
 		p_resource->Read(&x, 4);
@@ -43,12 +43,12 @@ SPRITE* MAP::LoadSprite(RESOURCE* p_resource, int p_version)
 			sprite = CreateSprite(m_vids[nvid], x, y, z, angle, 0);
 		}
 		else if (::Error) {
-			MYERROR::Error(::Error, "MAP", 3,
-				"sprite, this vid not exist", nvid);
+			MYERROR::Error(::Error, "MAP", 3, "sprite, this vid not exist", nvid);
 		}
 	}
 	m_relation.Insert((void*) (decomp_intptr) pointerToken, sprite);
-	if (sprite)
+	if (sprite) {
 		sprite->ChangeArmy(army);
+	}
 	return sprite;
 }

@@ -1,36 +1,27 @@
-#define DECOMP_INLINE_MAP_NEXTSPRITE
-#define DECOMP_INLINE_MAP_NEXTSPRITE_CURSOR
-#define DECOMP_INLINE_MAP_FIRSTSPRITE
-#define DECOMP_INLINE_STRING_CHARP_CTOR
-#define DECOMP_INLINE_STRING_COPY_CTOR
-#define DECOMP_INLINE_STRING_DTOR
-#define DECOMP_INLINE_LIST_SPRITE_ITERATE
 
-#define DECOMP_GAMMA_DEFAULT_CTOR_ZERO
 #include "game/map_steam.h"
 
-#include "game/building.h"
-#include "game/depo.h"
 #include "audio/sound.h"
+#include "game/building.h"
 #include "game/const.h"
+#include "game/depo.h"
 #include "game/engine.h"
-#include "game/rail.h"
-#include "game/terrain.h"
-#include "sprite/balloon.h"
-#include "sprite/civ_robot.h"
-#include "sprite/creature.h"
-#include "game/region.h"
 #include "game/gametime.h"
+#include "game/rail.h"
+#include "game/region.h"
+#include "game/terrain.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
-#include "sprite/plane.h"
+#include "platform/timing.h"
+#include "sprite/balloon.h"
+#include "sprite/civ_robot.h"
+#include "sprite/creature.h"
+#include "sprite/plane_internal.h"
 #include "world/hash_map.h"
 
 // FUNCTION: ALIEN 0x405060
-MAP_STEAM::MAP_STEAM(HINSTANCE p_instance, HINSTANCE p_prevInstance, STRING& p_argv,
-	int p_showCmd, SETTINGS* p_settings)
-	: MAP(p_instance, p_prevInstance, p_argv, p_showCmd, p_settings)
+MAP_STEAM::MAP_STEAM(STRING& p_argv, SETTINGS* p_settings) : MAP(p_argv, p_settings)
 {
 	if (m_flag & 4) {
 		m_unk0x22c0_d &= 0xfffffff0;
@@ -52,15 +43,13 @@ void MAP_STEAM::DeletePointerToSprite(SPRITE* p_sprite)
 	MAP::DeletePointerToSprite(p_sprite);
 }
 
-// GLOBAL: ALIEN 0x4905f4
-static unsigned int s_bannerTime;
-
 // STUB: ALIEN 0x405190
 int MAP_STEAM::Tact()
 {
-	if (StartTact())
+	if (StartTact()) {
 		return 1;
-	if (Const->m_mapName) {
+	}
+	if (Const->m_debugMode) {
 
 		switch (m_input.m_key) {
 		case '~':
@@ -86,20 +75,20 @@ int MAP_STEAM::Tact()
 			m_unk0x22c0_d ^= (m_unk0x22c0_d ^ ~m_unk0x22c0_d) & 8;
 			break;
 		}
-		if ((!(m_flag & 8) && !(m_unk0x22c0_d & 2)) || (((GRAPH_CORE*) Graph)->m_flags & 1)
-			|| ((m_unk0x22c0_d & 1) && m_input.m_key != 'p')) {
+		if ((!(m_flag & 8) && !(m_unk0x22c0_d & 2)) || (((GRAPH_CORE*) Graph)->m_flags & 1) ||
+			((m_unk0x22c0_d & 1) && m_input.m_key != 'p')) {
 			CurrentTime = PrevCurrentTime;
-			WaitMessage();
-			return 0;
+			Platform_Sleep(10);
+			return m_quit;
 		}
 	}
 	else if ((!(m_flag & 8) && !(m_unk0x22c0_d & 2)) || (((GRAPH_CORE*) Graph)->m_flags & 1)) {
 		CurrentTime = PrevCurrentTime;
-		WaitMessage();
-		return 0;
+		Platform_Sleep(10);
+		return m_quit;
 	}
 
-	int draw = ((m_flag & 8) || !(((GRAPH_CORE*) Graph)->m_flags & 0x80)) && !Graph->m_movie.m_graph;
+	int draw = (m_flag & 8) || !(((GRAPH_CORE*) Graph)->m_flags & 0x80);
 	if (!draw || !((GRAPH_CORE*) Graph)->PreTact()) {
 		++m_noTact;
 		int demo = DemoTact();
@@ -109,13 +98,9 @@ int MAP_STEAM::Tact()
 		}
 		int active = demo && draw;
 
-		((PLANE*) this)->PLANE::CheckFlightProperties();
+		PLANE_INTERNAL::RetailExactEmptyCheck(this);
 		m_menu.Control(&m_input);
 		ScriptRun(-1, 0, 0, 0);
-		if (active && Graph->m_movie.m_graph) {
-			active = 0;
-			draw = 0;
-		}
 		if (Flagman(m_curArmy) && !(Flagman(m_curArmy)->m_flag & 0x1800) && Const->m_unk0x50) {
 			{
 				GAMMA gamma(GAMMA::DECODE, Const->m_unk0x50);
@@ -133,8 +118,10 @@ int MAP_STEAM::Tact()
 			}
 		}
 		if (SpriteUnderCursor() && (m_flag & 0x100000) && (Const->m_unk0x58 || Const->m_unk0x54)) {
-			GAMMA gamma(GAMMA::DECODE,
-				(SpriteUnderCursor()->m_flag & 0x1800) == 0x800 ? Const->m_unk0x54 : Const->m_unk0x58);
+			GAMMA gamma(
+				GAMMA::DECODE,
+				(SpriteUnderCursor()->m_flag & 0x1800) == 0x800 ? Const->m_unk0x54 : Const->m_unk0x58
+			);
 			SpriteUnderCursor()->SetGamma(gamma);
 			SPRITE* cursor = SpriteUnderCursor();
 			SPRITE* child = cursor->m_child;
@@ -179,39 +166,34 @@ int MAP_STEAM::Tact()
 			}
 		}
 		if (m_flag & 0x10) {
-			for (int i = m_menu.m_n - 1; i >= 0; --i)
+			for (int i = m_menu.m_n - 1; i >= 0; --i) {
 				((SPRITE*) m_menu.m_data[i])->Tact();
+			}
 		}
 		else {
 			for (int layer = 0; layer < 16; ++layer) {
 				int iter = m_layers[layer].m_n;
 				SPRITE* sprite;
-				for (sprite = FirstSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter))
+				for (sprite = FirstSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {
 					sprite->Tact();
+				}
 			}
 		}
 		m_mousetips.Tact(&m_input);
 		ControlShiftCoor();
 		if (!(m_flag & 0x10) && (m_flag & 0x80)) {
-			if ((m_flag & 0x40000) && RealCurrentTime - s_bannerTime > 2000) {
-				SPRITE* banner = Map->CreateSprite(Map->Vid(2),
-					((GRAPH_CORE*) Graph)->GetWidth() * 0.5f, 32.0f, 0.0f, ANGLE(0), 0);
-				STRING text(
-					// STRING: ALIEN 0x47f7a0
-					"Presentation version. Not for sale!");
-				s_bannerTime = RealCurrentTime;
-				banner->Action(95, 1, 0, 0);
-				banner->Action(120, (int) &text, 0, 0);
-				banner->Action(40, 1000, 0, 0);
-				banner->m_actions.InsertFirst(ACT(15, 0, 0, 0));
-			}
-			for (int i = 0; i < 4; ++i)
+			// there was used to be "Presentation version. Not for sale!" banner
+			// removed because it was too annoying
+			for (int i = 0; i < 4; ++i) {
 				m_player[i]->Control(&m_input);
+			}
 		}
-		if (active)
+		if (active) {
 			DrawSecondaryInfo();
-		if (draw)
+		}
+		if (draw) {
 			((GRAPH_CORE*) Graph)->PostTact(1);
+		}
 		Sound->Tact();
 	}
 	return 0;
@@ -233,16 +215,24 @@ void MAP_STEAM::DrawSecondaryInfo()
 	if (m_unk0x22c0[0] & 4) {
 		SPRITE* s = (SPRITE*) Hash->m_list.LastIterate(&Hash->m_iter);
 		while (s) {
-			if (!s->m_parent)
-				GRAPH_CORE::PrintfXY((GRAPH_CORE*) Graph, s->m_x - Map->m_shiftX,
-									 s->m_y - s->m_z - Map->m_shiftY, "%i", s->m_unk0x54);
+			if (!s->m_parent) {
+				GRAPH_CORE::PrintfXY(
+					(GRAPH_CORE*) Graph,
+					s->m_x - Map->m_shiftX,
+					s->m_y - s->m_z - Map->m_shiftY,
+					"%i",
+					s->m_unk0x54
+				);
+			}
 			HASH_MAP* h = Hash;
-			if (h->m_iter > h->m_list.m_n)
+			if (h->m_iter > h->m_list.m_n) {
 				h->m_iter = h->m_list.m_n;
+			}
 			int idx = h->m_iter - 1;
 			h->m_iter = idx;
-			if (idx < 0)
+			if (idx < 0) {
 				break;
+			}
 			s = (SPRITE*) h->m_list.m_data[idx];
 		}
 	}
@@ -251,31 +241,34 @@ void MAP_STEAM::DrawSecondaryInfo()
 		while (s) {
 			s->DrawGoalLine();
 			HASH_MAP* h = Hash;
-			if (h->m_iter > h->m_list.m_n)
+			if (h->m_iter > h->m_list.m_n) {
 				h->m_iter = h->m_list.m_n;
+			}
 			int idx = h->m_iter - 1;
 			h->m_iter = idx;
-			if (idx < 0)
+			if (idx < 0) {
 				break;
+			}
 			s = (SPRITE*) h->m_list.m_data[idx];
 		}
 	}
 }
 
 // FUNCTION: ALIEN 0x405bd0
-SPRITE* MAP_STEAM::CreateSprite(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir,
-	SPRITE* p_parent)
+SPRITE* MAP_STEAM::CreateSprite(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent)
 {
-	if (!p_vid)
+	if (!p_vid) {
 		return 0;
+	}
 	VID* vid = p_vid;
-	if (vid->m_unk0x47c & 0x10)
+	if (vid->m_unk0x47c & 0x10) {
 		vid = REGION::ConvertVid(vid, p_x, p_y, p_z);
+	}
 	int limit = vid->m_unk0x394[0];
-	if (limit >= 0
-		&& (int) (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2]
-			   + vid->m_entitiesNumber[3]) >= limit)
+	if (limit >= 0 && (int) (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] +
+							 vid->m_entitiesNumber[3]) >= limit) {
 		return 0;
+	}
 	SPRITE* sprite;
 	switch (vid->m_sprClass) {
 	case 0:
@@ -308,8 +301,9 @@ SPRITE* MAP_STEAM::CreateSprite(VID* p_vid, float p_x, float p_y, float p_z, ANG
 	}
 	if (!(m_flag & 0x20) && sprite) {
 		int script = sprite->m_vid->m_unk0x408[14];
-		if (script >= 0)
+		if (script >= 0) {
 			ScriptRun(script, sprite, 0, 0);
+		}
 	}
 	return sprite;
 }

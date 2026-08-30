@@ -1,5 +1,3 @@
-#define DECOMP_COLOR_COPY_OUT_OF_LINE
-
 #include "gfx/graph_core.h"
 
 // FUNCTION: ALIEN 0x416670

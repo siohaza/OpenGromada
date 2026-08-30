@@ -1,9 +1,8 @@
-#define DECOMP_INLINE_STRING_DTOR
 #include "gfx/picture_font.h"
 
 #include "util/string.h"
 
-static inline PICTURE_BASE* FontImplOf(const PICTURE& p_picture)
+inline static PICTURE_BASE* FontImplOf(const PICTURE& p_picture)
 {
 	return p_picture.m_impl;
 }
@@ -12,13 +11,15 @@ static inline PICTURE_BASE* FontImplOf(const PICTURE& p_picture)
 int PICTURE_FONT::Load(STRING p_name, STRING p_alpha, STRING p_z)
 {
 	Close();
-	int result = m_source.Load(p_name, p_alpha,
-		STRING(p_z.m_str, STRING::CALL_COPY_NONNULL));
-	if (result)
+	int result = m_source.Load(p_name, p_alpha, STRING(p_z.m_str));
+	if (result) {
 		return result;
-	m_color.m_impl->SetSize(m_source.m_color.m_impl->m_width / 16 - 1,
-							m_source.m_color.m_impl->m_height / 16 - 1,
-							m_source.m_color.m_impl->m_bpp);
+	}
+	m_color.m_impl->SetSize(
+		m_source.m_color.m_impl->m_width / 16 - 1,
+		m_source.m_color.m_impl->m_height / 16 - 1,
+		m_source.m_color.m_impl->m_bpp
+	);
 	m_color.m_impl->m_noFrames = 256;
 	m_unk0x42c = 1;
 	PICTURE_BASE* source = FontImplOf(m_source.m_color);
@@ -49,25 +50,27 @@ int PICTURE_FONT::NextFrame()
 			m_color.m_impl->PutData(x, y, data);
 		}
 	}
-	if (0)
-		return 0;
+	// The original fell off the end here; non-zero means success, matching
+	// PICTURE_BASE::NextFrame() and Rewind().
+	return 1;
 }
 
 // FUNCTION: ALIEN 0x42cf10
 int PICTURE_FONT::Rewind()
 {
 	PICTURE_MAKEVID::Rewind();
-	int result = (int) m_color.m_impl;
-	for (int i = 0; i < ((PICTURE_BASE*) result)->m_height; ++i) {
+	PICTURE_BASE* impl = m_color.m_impl;
+	for (int i = 0; i < impl->m_height; ++i) {
 		int x = 0;
-		if (((PICTURE_BASE*) result)->m_width > 0) {
+		if (impl->m_width > 0) {
 			do {
 				int data = m_source.m_color.m_impl->GetData(x, i);
 				m_color.m_impl->PutData(x, i, data);
 				++x;
 			} while (x < m_color.m_impl->m_width);
 		}
-		result = (int) m_color.m_impl;
+		impl = m_color.m_impl;
 	}
-	return result;
+	// The original returned this pointer as an int; callers only test it.
+	return impl != 0;
 }

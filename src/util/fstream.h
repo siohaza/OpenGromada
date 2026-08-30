@@ -12,16 +12,15 @@ class FSTREAM : public STREAM {
 public:
 	virtual ~FSTREAM()
 	{
-		if (m_file)
+		if (m_file) {
 			fclose(m_file);
+		}
 	}
 	virtual int Read(void* p_dest, int p_size);
 	virtual int Write(const void* p_src, int p_size);
 
 	FILE* m_file; // 0x04
 };
-
-DECOMP_SIZE_ASSERT(FSTREAM, 0x8)
 
 // SYNTHETIC: ALIEN 0x4083f0
 // FSTREAM::`scalar deleting destructor'

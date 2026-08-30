@@ -1,36 +1,29 @@
+#include "audio/sound.h"
+#include "game/map.h"
+#include "sprite/sprite.h"
+#include "ui/mouse.h"
+#include "util/myerror.h"
+#include "util/resource.h"
 #include "video/vid.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "audio/sound.h"
-#include "game/map.h"
-#include "util/resource.h"
-#include "sprite/sprite.h"
-#include "ui/mouse.h"
-#include "util/myerror.h"
-
 // STUB: ALIEN 0x413a30
 int VID::Error(int p_type, const char* p_msg, int p_size)
 {
 	int idx = m_idx;
-	return (int) MYERROR::Error(::Error,
+	return MYERROR::Error(
+		::Error,
 		// STRING: ALIEN 0x482b0c
-		"VID [%i-%s]", p_type, p_msg, p_size, idx, m_name);
-}
-
-static void GridDotRange(const VID* p_vid, const SPRITE* p_sprite, int* p_begin, int* p_end)
-{
-	int frame = p_sprite->m_noCadr;
-	if (p_vid->m_dotFrameStarts) {
-		*p_begin = frame < p_vid->m_dotFrameCount ? p_vid->m_dotFrameStarts[frame] : 0;
-		*p_end = frame < p_vid->m_dotFrameCount - 1 ? p_vid->m_dotFrameStarts[frame + 1] : p_vid->m_nLinkDots;
-	}
-	else {
-		*p_begin = 0;
-		*p_end = p_vid->m_nLinkDots;
-	}
+		"VID [%i-%s]",
+		p_type,
+		p_msg,
+		p_size,
+		idx,
+		m_name
+	);
 }
 
 // FUNCTION: ALIEN 0x413c30
@@ -84,49 +77,65 @@ void VID::LoadParameters(RESOURCE* p_res)
 	p_res->Read(&b, 4);
 	p_res->Read(&a, 4);
 	start = a;
-	if (start < -255)
+	if (start < -255) {
 		start = -255;
-	else if (start > 255)
+	}
+	else if (start > 255) {
 		start = 255;
+	}
 	unsigned int neg = 0;
 	unsigned int pos = 0;
-	if (start < 0)
+	if (start < 0) {
 		neg = -start << 24;
-	else
+	}
+	else {
 		pos = start << 24;
+	}
 	start = r;
-	if (start < -255)
+	if (start < -255) {
 		start = -255;
-	else if (start > 255)
+	}
+	else if (start > 255) {
 		start = 255;
+	}
 	neg &= 0xff00ffff;
 	pos &= 0xff00ffff;
-	if (start < 0)
+	if (start < 0) {
 		neg |= -start << 16;
-	else
+	}
+	else {
 		pos |= start << 16;
+	}
 	start = g;
-	if (start < -255)
+	if (start < -255) {
 		start = -255;
-	else if (start > 255)
+	}
+	else if (start > 255) {
 		start = 255;
+	}
 	neg &= 0xffff00ff;
 	pos &= 0xffff00ff;
-	if (start < 0)
+	if (start < 0) {
 		neg |= -start << 8;
-	else
+	}
+	else {
 		pos |= start << 8;
+	}
 	start = b;
-	if (start < -255)
+	if (start < -255) {
 		start = -255;
-	else if (start > 255)
+	}
+	else if (start > 255) {
 		start = 255;
+	}
 	neg &= 0xffffff00;
 	pos &= 0xffffff00;
-	if (start < 0)
+	if (start < 0) {
 		neg |= -start;
-	else
+	}
+	else {
 		pos |= start;
+	}
 	m_colorAdd = pos;
 	m_colorSub = neg;
 	p_res->Read(&m_gammaR, 4);
@@ -138,48 +147,62 @@ void VID::LoadParameters(RESOURCE* p_res)
 		m_gammaG = 1.0f;
 		m_gammaR = 1.0f;
 	}
-	if (*(int*) &m_unk0x3c == 0x497423f0) {
-		*(int*) &m_unk0x3c = 0;
+	if (m_unk0x3c == 999999.0f) {
+		m_unk0x3c = 0.0f;
 	}
 	else if (m_unk0x3c == 0.0f) {
-		*(int*) &m_unk0x3c = 0x497423f0;
+		m_unk0x3c = 999999.0f;
 	}
 	else {
 		m_unk0x3c = 256.0f / m_unk0x3c;
 	}
-	if (*(int*) &m_unk0x2c != 0x497423f0)
+	if (m_unk0x2c != 999999.0f) {
 		m_unk0x2c = m_unk0x2c * 0.001f;
-	if (*(int*) &m_unk0x30 != 0x497423f0)
+	}
+	if (m_unk0x30 != 999999.0f) {
 		m_unk0x30 = m_unk0x30 * 0.001f;
-	if (*(int*) &m_unk0x34 != 0x497423f0)
+	}
+	if (m_unk0x34 != 999999.0f) {
 		m_unk0x34 = m_unk0x34 * 0.000001f;
-	if (*(int*) &m_unk0x38 != 0x497423f0)
+	}
+	if (m_unk0x38 != 999999.0f) {
 		m_unk0x38 = m_unk0x38 * 0.000001f;
+	}
 	m_canMove = m_unk0x2c != 0.0f || m_unk0x30 != 0.0f || (m_flag & 6) != 0 || (m_flag & 0x1000) != 0;
 	if (!m_noDir) {
-		Error(4,
+		Error(
+			4,
 			// STRING: ALIEN 0x482b88
-			"NoDir==0", 0);
+			"NoDir==0",
+			0
+		);
 		exit(1);
 	}
 	int i;
 	for (i = 0; i < 17; ++i) {
-		if (!m_aniDuration[i])
+		if (!m_aniDuration[i]) {
 			m_aniDuration[i] = m_defaultAniPeriod;
+		}
 	}
 	m_unk0x384 = m_footprintWidth * 0.5f;
 	m_unk0x388 = m_footprintHeight * 0.5f;
 	m_unk0x390 = 128 / (int) m_noDir;
 	short noCadr = m_dotFrameCount;
 	if (!noCadr) {
-		Error(4,
+		Error(
+			4,
 			// STRING: ALIEN 0x482b7c
-			"noCadr==0", 0);
+			"noCadr==0",
+			0
+		);
 	}
 	else if (noCadr < (int) m_noDir) {
-		Error(4,
+		Error(
+			4,
 			// STRING: ALIEN 0x482b6c
-			"noCadr < noDir", 0);
+			"noCadr < noDir",
+			0
+		);
 		m_noDir = m_dotFrameCount;
 	}
 	int total = 0;
@@ -187,9 +210,12 @@ void VID::LoadParameters(RESOURCE* p_res)
 		total += m_noAnimCadr[i] * (int) m_noDir;
 	}
 	if (total > m_dotFrameCount) {
-		Error(13,
+		Error(
+			13,
 			// STRING: ALIEN 0x482b4c
-			"noCadr for noAnimCadr and noDir", 0);
+			"noCadr for noAnimCadr and noDir",
+			0
+		);
 		int k = 16;
 		while (k >= 0) {
 			if (total - m_noAnimCadr[k] * (int) m_noDir <= m_dotFrameCount) {
@@ -205,9 +231,12 @@ void VID::LoadParameters(RESOURCE* p_res)
 	int firstAni = -1;
 	for (i = 0; i < 17; ++i) {
 		if (!Sound->ValidateSFX(m_aniSfx[i]) && m_idx != -1) {
-			Error(4,
+			Error(
+				4,
 				// STRING: ALIEN 0x482b48
-				"sfx", m_aniSfx[i]);
+				"sfx",
+				m_aniSfx[i]
+			);
 			m_aniSfx[i] = 0;
 		}
 		if (m_noAnimCadr[i]) {
@@ -217,8 +246,9 @@ void VID::LoadParameters(RESOURCE* p_res)
 				firstAni = i;
 				if (i > 0) {
 					for (int m = 0; m < i; ++m) {
-						if (!m_aniDirCadrs[m])
+						if (!m_aniDirCadrs[m]) {
 							m_aniDirCadrs[m] = m_aniDirCadrs[i];
+						}
 					}
 				}
 			}
@@ -229,24 +259,28 @@ void VID::LoadParameters(RESOURCE* p_res)
 		}
 		else {
 			m_aniBegCadr[i] = 0;
-			m_aniDirCadrs[i] = m_aniDirCadrs[firstAni];
+			m_aniDirCadrs[i] = firstAni >= 0 ? m_aniDirCadrs[firstAni] : 0;
 		}
 		start += m_noDir * m_noAnimCadr[i];
 		if (start > m_dotFrameCount) {
-			Error(10,
+			Error(
+				10,
 				// STRING: ALIEN 0x482b28
-				"noCadr and noAnimCadr and noDir", i);
+				"noCadr and noAnimCadr and noDir",
+				i
+			);
 			m_aniBegCadr[i] = 0;
-			m_aniDirCadrs[i] = m_aniDirCadrs[firstAni];
+			m_aniDirCadrs[i] = firstAni >= 0 ? m_aniDirCadrs[firstAni] : 0;
 		}
 	}
-	if (m_sprClass == 8)
+	if (m_sprClass == 8) {
 		m_unk0x47c |= 0x20u;
-	if (m_sprClass == 8 && (Map->m_flag & 1))
+	}
+	if (m_sprClass == 8 && (Map->m_flag & 1)) {
 		m_sprClass = 0;
+	}
 	if (m_flag & 8) {
-		float* dots = new float[3
-			* (((int) m_footprintWidth + 17) / 8 * ((int) m_footprintWidth + 17) / 8 + 1)];
+		float* dots = new float[3 * (((int) m_footprintWidth + 17) / 8 * ((int) m_footprintWidth + 17) / 8 + 1)];
 		int yi = 0;
 		if (0.0f < m_footprintHeight) {
 			float y = 0.0f;
@@ -288,8 +322,9 @@ void VID::LoadParameters(RESOURCE* p_res)
 		dots[3 * m_nLinkDots + 2] = m_unk0x24;
 		float* old = m_dotCoords;
 		++m_nLinkDots;
-		if (old)
+		if (old) {
 			delete[] old;
+		}
 		m_dotCoords = new float[3 * m_nLinkDots];
 		int k = 0;
 		if (m_nLinkDots > 0) {
@@ -307,8 +342,9 @@ void VID::LoadParameters(RESOURCE* p_res)
 // FUNCTION: ALIEN 0x4145b0
 void VID::SetGridZ(SPRITE* p_sprite)
 {
-	if (p_sprite == Mouse)
+	if (p_sprite == Mouse) {
 		return;
+	}
 	int begin;
 	int end;
 	if (m_dotFrameStarts) {
@@ -322,15 +358,21 @@ void VID::SetGridZ(SPRITE* p_sprite)
 	if (!(Map->m_flag & 1) && p_sprite->m_vid->m_sprClass == 8) {
 		for (int i = begin; i < end; ++i) {
 			float* dot = m_dotCoords + 3 * i;
-			Map->SetGroundZ(p_sprite->X() + m_dotCoords[3 * i], p_sprite->Y() + m_dotCoords[3 * i + 1],
-				p_sprite->Z() + m_dotCoords[3 * i + 2]);
+			Map->SetGroundZ(
+				p_sprite->X() + m_dotCoords[3 * i],
+				p_sprite->Y() + m_dotCoords[3 * i + 1],
+				p_sprite->Z() + m_dotCoords[3 * i + 2]
+			);
 		}
 	}
 	else {
 		for (int i = begin; i < end; ++i) {
 			float* dot = m_dotCoords + 3 * i;
-			Map->SetTempGroundZ(p_sprite->X() + m_dotCoords[3 * i], p_sprite->Y() + m_dotCoords[3 * i + 1],
-				p_sprite->Z() + m_dotCoords[3 * i + 2]);
+			Map->SetTempGroundZ(
+				p_sprite->X() + m_dotCoords[3 * i],
+				p_sprite->Y() + m_dotCoords[3 * i + 1],
+				p_sprite->Z() + m_dotCoords[3 * i + 2]
+			);
 		}
 	}
 }
@@ -338,8 +380,9 @@ void VID::SetGridZ(SPRITE* p_sprite)
 // FUNCTION: ALIEN 0x4146b0
 void VID::ResetGridZ(SPRITE* p_sprite)
 {
-	if (p_sprite == Mouse || (!(Map->m_flag & 1) && p_sprite->m_vid->m_sprClass == 8))
+	if (p_sprite == Mouse || (!(Map->m_flag & 1) && p_sprite->m_vid->m_sprClass == 8)) {
 		return;
+	}
 	int begin;
 	int end;
 	if (m_dotFrameStarts) {
@@ -352,7 +395,10 @@ void VID::ResetGridZ(SPRITE* p_sprite)
 	}
 	for (int i = begin; i < end; ++i) {
 		float* dot = m_dotCoords + 3 * i;
-		Map->ClearTempGroundZ(p_sprite->X() + m_dotCoords[3 * i], p_sprite->Y() + m_dotCoords[3 * i + 1],
-			p_sprite->Z() + m_dotCoords[3 * i + 2]);
+		Map->ClearTempGroundZ(
+			p_sprite->X() + m_dotCoords[3 * i],
+			p_sprite->Y() + m_dotCoords[3 * i + 1],
+			p_sprite->Z() + m_dotCoords[3 * i + 2]
+		);
 	}
 }

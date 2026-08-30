@@ -1,36 +1,18 @@
-#define DECOMP_INLINE_SPRITE_LIST_CTOR
-#define DECOMP_INLINE_STRING_DTOR
-#define DECOMP_INLINE_STRING_CHARP_CTOR
 #include "game/player.h"
-#include <stdlib.h>
-#include "util/profile.h"
 
 #include "game/map.h"
 #include "sprite/sprite.h"
 #include "util/myerror.h"
+#include "util/profile.h"
 #include "video/vid.h"
 
-inline void MAN::ReleaseRef()
-{
-	int refs = m_noRef - 1;
-	m_noRef = refs;
-	if (refs <= 0) {
-		if (refs < 0)
-			MYERROR::Error(::Error, "SPRITE %i", 4,
-				"noRef at Release",
-				refs, m_vid ? m_vid->m_idx : -1);
-		else if (this)
-			ScalarDeletingDestructor(1);
-	}
-}
+#include <stdlib.h>
 
 // FUNCTION: ALIEN 0x413060
-PLAYER::PLAYER(int p_control, int p_army)
-	: m_army(p_army)
-	, m_underCursor(0)
+PLAYER::PLAYER(int p_control, int p_army) : m_army(p_army)
 {
 	m_flagman = 0;
-	(PTR_SPRITE&) m_underCursor = 0;
+	m_underCursor = 0;
 	m_control = p_control;
 	m_money = 1000;
 }
@@ -38,10 +20,12 @@ PLAYER::PLAYER(int p_control, int p_army)
 // FUNCTION: ALIEN 0x413140
 void PLAYER::SetFlagman(SPRITE* p_sprite)
 {
-	if (p_sprite)
+	if (p_sprite) {
 		++p_sprite->m_noRef;
-	if (m_flagman)
+	}
+	if (m_flagman) {
 		((SPRITE*) m_flagman)->ReleaseRef();
+	}
 	m_flagman.m_ptr = p_sprite;
 }
 
@@ -54,29 +38,36 @@ void PLAYER::PutMessage(const STRING&, float, float)
 PLAYER::~PLAYER()
 {
 	Release();
-	if (m_underCursor)
-		MYERROR::Error(::Error,
-			"SPRITE %i", 10,
+	if (m_underCursor) {
+		MYERROR::Error(
+			::Error,
+			"SPRITE %i",
+			10,
 			// STRING: ALIEN 0x482a90
-			"PTR_SPRITE with this sprite not clear", 0,
-			m_underCursor->m_vid ? m_underCursor->m_vid->m_idx : -1);
+			"PTR_SPRITE with this sprite not clear",
+			0,
+			m_underCursor->m_vid ? m_underCursor->m_vid->m_idx : -1
+		);
+	}
 }
 
 // FUNCTION: ALIEN 0x413280
 void PLAYER::DeletePointerToSprite(SPRITE* p_sprite)
 {
 	m_stateBar.Delete(p_sprite);
-	if (m_flagman == p_sprite)
+	if (m_flagman == p_sprite) {
 		m_flagman = 0;
-	if ((PTR_SPRITE&) m_underCursor == p_sprite)
-		(PTR_SPRITE&) m_underCursor = 0;
+	}
+	if (m_underCursor == p_sprite) {
+		m_underCursor = 0;
+	}
 }
 
 // FUNCTION: ALIEN 0x413360
 void PLAYER::Release()
 {
 	m_flagman = 0;
-	(PTR_SPRITE&) m_underCursor = 0;
+	m_underCursor = 0;
 	m_money = 1000;
 }
 
@@ -90,10 +81,12 @@ int PLAYER::Save(STREAM* p_stream) const
 void PLAYER::Load(STREAM* p_stream)
 {
 	MAN* man = (MAN*) Map->ReadPointer(p_stream);
-	if (man)
+	if (man) {
 		++man->m_noRef;
-	if (m_flagman)
+	}
+	if (m_flagman) {
 		((SPRITE*) m_flagman)->ReleaseRef();
+	}
 	m_flagman.m_ptr = man;
 }
 
@@ -104,10 +97,11 @@ STRING PLAYER::GetMouseTipsString() const
 		STRING dflt(empty_str);
 		STRING app(
 			// STRING: ALIEN 0x482ab8
-			"Units");
+			"Units"
+		);
 		char buffer[128];
 		int idx = m_underCursor->m_vid->m_idx;
-		STRING key(_itoa(idx, buffer, 10), STRING::CALL_COPY);
+		STRING key(_itoa(idx, buffer, 10));
 		return Strings->GetString(app, key, dflt);
 	}
 	return STRING(empty_str);

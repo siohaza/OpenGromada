@@ -1,9 +1,0 @@
-address|name|size|type
-0x434940|CD3DFont::CD3DFont|96|library
-0x4349a0|CD3DFont::~CD3DFont|32|library
-0x4349c0|CD3DFont::InitDeviceObjects|976|library
-0x434d90|CD3DFont::RestoreDeviceObjects|640|library
-0x435010|CD3DFont::InvalidateDeviceObjects|112|library
-0x435080|CD3DFont::DeleteDeviceObjects|48|library
-0x4350b0|CD3DFont::DrawText|1456|library
-0x45516c|_Direct3DCreate8@4|6|library

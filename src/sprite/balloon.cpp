@@ -1,7 +1,5 @@
 #include "sprite/balloon.h"
 
-#include <math.h>
-
 #include "game/building.h"
 #include "game/const.h"
 #include "game/engine.h"
@@ -10,6 +8,8 @@
 #include "video/vid.h"
 #include "video/vid_exdata.h"
 #include "world/hash_map.h"
+
+#include <math.h>
 
 // FUNCTION: ALIEN 0x44dd80
 BALLOON::BALLOON(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent)
@@ -24,18 +24,21 @@ void BALLOON::MoveToNearestBase()
 {
 	SPRITE* best = 0;
 	HASH_MAP* h = Hash;
-	if (!h->m_list.m_n)
+	if (!h->m_list.m_n) {
 		return;
+	}
 	int i = h->m_list.m_n - 1;
 	h->m_iter = i;
 	SPRITE* s = (SPRITE*) h->m_list.m_data[i];
-	if (!s)
+	if (!s) {
 		return;
+	}
 	for (;;) {
 		if (s->m_vid->m_unk0x5c == m_vid && !((s->m_flag ^ m_flag) & 0x1800) &&
 			(!s->m_child || s->m_child->m_vid != s->m_vid->m_unk0x5c) && !((ENGINE*) s)->m_unk0xd8) {
-			if (!best)
+			if (!best) {
 				best = s;
+			}
 			else {
 				float tx = s->m_x;
 				float a = (float) fabs(tx - m_x);
@@ -67,18 +70,22 @@ void BALLOON::MoveToNearestBase()
 					d2 *= 0.5f;
 					d2 += d;
 				}
-				if (d1 < d2)
+				if (d1 < d2) {
 					best = s;
+				}
 			}
 		}
 		h = Hash;
-		if (h->m_iter > h->m_list.m_n)
+		if (h->m_iter > h->m_list.m_n) {
 			h->m_iter = h->m_list.m_n;
-		if (--h->m_iter < 0)
+		}
+		if (--h->m_iter < 0) {
 			break;
+		}
 		s = (SPRITE*) h->m_list.m_data[h->m_iter];
-		if (!s)
+		if (!s) {
 			break;
+		}
 	}
 	if (best) {
 		((ENGINE*) best)->m_unk0xd8 = 1;
@@ -100,8 +107,11 @@ void BALLOON::ConnectToBase()
 		return;
 	}
 	m_unk0x24 = 0.0f;
-	ChangeCoor(m_goal->X() + m_goal->m_vid->m_unk0x4c, m_goal->Y() + m_goal->m_vid->m_unk0x50,
-		m_goal->Z() + m_goal->m_vid->m_unk0x54);
+	ChangeCoor(
+		m_goal->X() + m_goal->m_vid->m_unk0x4c,
+		m_goal->Y() + m_goal->m_vid->m_unk0x50,
+		m_goal->Z() + m_goal->m_vid->m_unk0x54
+	);
 	m_unk0x8c = m_goal->Action(94, 0, 0, 0);
 	m_goal->AddLink(this);
 	((ENGINE*) m_goal)->m_unk0xd8 = 1;
@@ -112,10 +122,12 @@ void BALLOON::ConnectToBase()
 void BALLOON::ZSpeedInitialization()
 {
 	float groundZ = Map->GetGroundZ_vid(m_vid, m_x, m_y);
-	if (m_parent)
+	if (m_parent) {
 		m_landingState = 0;
-	else if (m_goal && m_goal->m_vid->m_linkVid == m_vid && !((m_goal->m_flag ^ m_flag) & 0x1800))
+	}
+	else if (m_goal && m_goal->m_vid->m_linkVid == m_vid && !((m_goal->m_flag ^ m_flag) & 0x1800)) {
 		((ENGINE*) m_goal)->m_unk0xd8 = 1;
+	}
 	switch ((unsigned char) m_landingState) {
 	case 2: {
 		m_unk0x24 = -m_vid->m_unk0x30;
@@ -129,11 +141,13 @@ void BALLOON::ZSpeedInitialization()
 			ChangeCoor(m_goal->X(), m_goal->Y(), Z());
 			unsigned int duration = m_vid->m_aniDuration[m_ani];
 			unsigned int time = CurrentTime - PrevCurrentTime;
-			if (time <= duration)
+			if (time <= duration) {
 				time = duration;
+			}
 			Rotate(Goal()->Direction(), time);
-			if (Z() <= m_goal->Z() + m_goal->m_vid->m_unk0x54)
+			if (Z() <= m_goal->Z() + m_goal->m_vid->m_unk0x54) {
 				ConnectToBase();
+			}
 		}
 		break;
 	}
@@ -167,8 +181,9 @@ void BALLOON::ZSpeedInitialization()
 int BALLOON::IsBalloonMoveFinished()
 {
 	SPRITE* goal = m_goal;
-	if (goal && (float) fabs(goal->m_x - m_x) < 10.0f && (float) fabs(goal->m_y - m_y) < 10.0f)
+	if (goal && (float) fabs(goal->m_x - m_x) < 10.0f && (float) fabs(goal->m_y - m_y) < 10.0f) {
 		return 1;
+	}
 	return (m_flag & 0x4000) && (m_flag & 0x8000);
 }
 
@@ -176,20 +191,22 @@ int BALLOON::IsBalloonMoveFinished()
 void BALLOON::CheckFlightProperties()
 {
 	if (m_parent) {
-		if ((CurrentTime & 0xfffffc00) > m_tactTime)
+		if ((CurrentTime & 0xfffffc00) > m_tactTime) {
 			AddAmmoTick(Const->m_balloonAddAmmo);
+		}
 		SPRITE* goal = m_goal;
-		if (!goal
-			|| (m_parent->m_goal == goal
-				&& ((m_parent->m_flag & 0x7c) == 108 || (m_parent->m_flag & 0x7c) == 104))
-			|| NearDistanceTo(goal->m_x - m_parent->m_x, goal->m_y - m_parent->m_y)
-				>= m_parent->m_vid->m_exData->m_unk0x18
-			|| m_unk0x50) {
+		if (!goal ||
+			(m_parent->m_goal == goal && ((m_parent->m_flag & 0x7c) == 108 || (m_parent->m_flag & 0x7c) == 104)) ||
+			NearDistanceTo(goal->m_x - m_parent->m_x, goal->m_y - m_parent->m_y) >=
+				m_parent->m_vid->m_exData->m_unk0x18 ||
+			m_unk0x50) {
 			unsigned int duration = m_vid->m_aniDuration[m_ani];
 			unsigned int dt = CurrentTime - PrevCurrentTime > duration ? CurrentTime - PrevCurrentTime : duration;
-			if (!Rotate(m_parent->Direction(), dt).m_dir)
+			if (!Rotate(m_parent->Direction(), dt).m_dir) {
 				ChangeAnimation(0); // ANI_STAND
-		} else {
+			}
+		}
+		else {
 			if ((m_flag & 0x7c) == 0x20) {
 				SetCommand(3, m_goal);
 				m_unk0x90 = 1;
@@ -200,9 +217,9 @@ void BALLOON::CheckFlightProperties()
 			SPRITE* target = m_goal;
 			SPRITE* best = m_unk0x6c;
 			if (best && best != target) {
-				if (NearDistanceTo(best->m_x - m_x, best->m_y - m_y)
-					< m_vid->m_exData->m_unk0x18)
+				if (NearDistanceTo(best->m_x - m_x, best->m_y - m_y) < m_vid->m_exData->m_unk0x18) {
 					Attack(m_unk0x6c);
+				}
 			}
 			if (target && target->m_vid == EmptyVid) {
 				m_parent->SetCommand(0, 0);
@@ -225,8 +242,9 @@ void BALLOON::CheckFlightProperties()
 		float dx = (float) fabs(best->m_x - m_x);
 		float dy = (float) fabs(best->m_y - m_y);
 		float dist = dx > dy ? dx + dy * 0.5f : dx * 0.5f + dy;
-		if (dist < m_vid->m_exData->m_unk0x14 && m_ammo / 64 > 0)
+		if (dist < m_vid->m_exData->m_unk0x14 && m_ammo / 64 > 0) {
 			Attack(m_unk0x6c);
+		}
 	}
 	if (m_ammo / 64 <= 0 || !m_goal) {
 		SPRITE* goal = m_goal;
@@ -234,26 +252,26 @@ void BALLOON::CheckFlightProperties()
 			VID* linkVid = goal->m_vid->m_linkVid;
 			if (linkVid == m_vid && !((m_flag ^ goal->m_flag) & 0x1800)) {
 				SPRITE* child = goal->m_child;
-				if (!child || child->m_vid != linkVid)
+				if (!child || child->m_vid != linkVid) {
 					goto keepPad;
+				}
 			}
 		}
-		if (m_goal)
+		if (m_goal) {
 			SetCommand(0, 0);
+		}
 		MoveToNearestBase();
 	}
-keepPad:
-	{
-		SPRITE* goal = m_goal;
-		if (goal && goal->m_vid->m_linkVid == m_vid
-			&& !((m_flag ^ goal->m_flag) & 0x1800)) {
-			SPRITE* child = goal->m_child;
-			if (child && child->m_vid == m_goal->m_vid->m_linkVid) {
-				SetCommand(0, 0);
-				MoveToNearestBase();
-			}
+keepPad: {
+	SPRITE* goal = m_goal;
+	if (goal && goal->m_vid->m_linkVid == m_vid && !((m_flag ^ goal->m_flag) & 0x1800)) {
+		SPRITE* child = goal->m_child;
+		if (child && child->m_vid == m_goal->m_vid->m_linkVid) {
+			SetCommand(0, 0);
+			MoveToNearestBase();
 		}
 	}
+}
 	if (m_landingState != 2 && (m_flag & 0x7c) == 4) {
 		if (IsBalloonMoveFinished()) {
 			SPRITE* goal = m_goal;
@@ -278,35 +296,37 @@ int BALLOON::FlightToTargetAdditionalActions()
 	if (!goal || goal->m_vid->m_unk0x5c != m_vid || ((goal->m_flag ^ m_flag) & 0x1800)) {
 		unsigned int dur = m_vid->m_aniDuration[m_ani];
 		unsigned int dt = CurrentTime - PrevCurrentTime;
-		if (dt <= dur)
+		if (dt <= dur) {
 			dt = dur;
+		}
 		m_unk0x04 = AttackTact(dt);
 	}
-	if (m_unk0x90 && m_goal && (float) fabs(m_goal->m_x - m_x) < 10.0f &&
-		(float) fabs(m_goal->m_y - m_y) < 10.0f) {
+	if (m_unk0x90 && m_goal && (float) fabs(m_goal->m_x - m_x) < 10.0f && (float) fabs(m_goal->m_y - m_y) < 10.0f) {
 		ChangeAnimation(0xf);
 	}
 	else {
 		SPRITE* g = m_goal;
-		if (g && g->m_vid->m_unk0x5c == m_vid && !((g->m_flag ^ m_flag) & 0x1800) &&
-			m_ammo / 64 > 0 && (m_unk0x8c & 1)) {
+		if (g && g->m_vid->m_unk0x5c == m_vid && !((g->m_flag ^ m_flag) & 0x1800) && m_ammo / 64 > 0 &&
+			(m_unk0x8c & 1)) {
 			SPRITE* enemy = SeekEnemy();
-			if (enemy)
+			if (enemy) {
 				return SetCommand(4, enemy);
+			}
 		}
 	}
-
+	return 0;
 }
-
 // FUNCTION: ALIEN 0x44e680
 int BALLOON::SetCommand(int p_cmd, SPRITE* p_goal)
 {
 	SPRITE* goal = m_goal;
 	m_unk0x90 = 0;
-	if (goal && goal->m_vid->m_unk0x5c == m_vid && !((goal->m_flag ^ m_flag) & 0x1800))
-		*(int*) ((char*) goal + 0xd8) = 0;
-	if (p_goal && p_goal->m_vid->m_unk0x5c == m_vid && !((p_goal->m_flag ^ m_flag) & 0x1800))
-		*(int*) ((char*) p_goal + 0xd8) = 1;
+	if (goal && goal->m_vid->m_unk0x5c == m_vid && !((goal->m_flag ^ m_flag) & 0x1800)) {
+		static_cast<ENGINE*>(goal)->m_unk0xd8 = 0;
+	}
+	if (p_goal && p_goal->m_vid->m_unk0x5c == m_vid && !((p_goal->m_flag ^ m_flag) & 0x1800)) {
+		static_cast<ENGINE*>(p_goal)->m_unk0xd8 = 1;
+	}
 	return SPRITE::SetCommand(p_cmd, p_goal);
 }
 
@@ -322,8 +342,7 @@ void BALLOON::MoveTact()
 		return;
 	}
 	if (m_goal && m_speed != 0.0f) {
-		Rotate(GlideDirection(DirectionTo(Goal())
-			+ (m_speed < 0.0f ? 0x80 : 0)), CurrentTime - PrevCurrentTime);
+		Rotate(GlideDirection(DirectionTo(Goal()) + (m_speed < 0.0f ? 0x80 : 0)), CurrentTime - PrevCurrentTime);
 	}
 	if ((m_x != x || m_y != y) && !CanPlaceWithCrushAndGlide(&x, &y, &z)) {
 		MoveTactMapLimit(x, y);

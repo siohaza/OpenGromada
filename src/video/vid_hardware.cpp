@@ -1,41 +1,54 @@
 #include "video/vid_hardware.h"
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <dxsdk/d3d8.h>
-
 #include "compress/qs1_coder.h"
 #include "game/gametime.h"
 #include "game/map.h"
+#include "game/terrain_camera.h"
 #include "gfx/color.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
+#include "gfx/render_math.h"
 #include "gfx/texture.h"
 #include "sprite/ex_sprite_data.h"
 #include "sprite/sprite.h"
+#include "util/packed.h"
 #include "util/resource.h"
+#include "video/vid_exdata.h"
+
+#include <bit>
+#include <cmath>
+#include <new>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 extern float FSin[256];
 
-static inline VID_CHILD& VIDHardwareChild(VID_HARDWARE* p_vid, int p_idx)
+inline static VID_CHILD& VIDHardwareChild(VID_HARDWARE* p_vid, int p_idx)
 {
 	return ((VID_CHILD*) p_vid->m_unk0x484)[p_idx];
 }
 
-static inline TEXTURE*& VIDHardwareTexture(VID_HARDWARE* p_vid, int p_idx)
+inline static TEXTURE*& VIDHardwareTexture(VID_HARDWARE* p_vid, int p_idx)
 {
 	return ((TEXTURE**) p_vid->m_unk0x48c)[p_idx];
 }
 
-static inline void VIDHardwareWordSet(char* p_dst, int p_value, int p_count)
+inline static void VIDHardwareWordSet(char* p_dst, int p_value, int p_count)
 {
 	while (p_count > 0) {
-		*(unsigned short*) p_dst = (unsigned short) p_value;
+		PackedWrite<unsigned short>(p_dst, (unsigned short) p_value);
 		p_dst += 2;
 		--p_count;
 	}
+}
+
+// Round shared UI boundaries consistently.
+static int ScaledUIBoundary(int p_source, float p_scale)
+{
+	double scaled = (double) p_source * (double) p_scale;
+	return scaled >= 0.0 ? (int) std::floor(scaled + 0.5) : (int) std::ceil(scaled - 0.5);
 }
 
 // FUNCTION: ALIEN 0x412750
@@ -49,8 +62,9 @@ void* VID_HARDWARE::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	VID_HARDWARE* result = this;
 	this->~VID_HARDWARE();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -60,20 +74,25 @@ VID_HARDWARE::VID_HARDWARE(VID_HARDWARE& p_other)
 	m_weaponPtr = p_other.m_weaponPtr;
 	p_other.m_weaponPtr = this;
 	m_layer = p_other.m_layer;
-	*(unsigned short*) &m_pixelFlag = *(unsigned short*) &p_other.m_pixelFlag;
-	*(unsigned short*) &m_unk0x2f2[2] = *(unsigned short*) &p_other.m_unk0x2f2[2];
-	*(unsigned short*) &m_unk0x2f2[0] = *(unsigned short*) &p_other.m_unk0x2f2[0];
-	*(unsigned short*) &m_unk0x2f2[4] = *(unsigned short*) &p_other.m_unk0x2f2[4];
-	*(unsigned short*) &m_unk0x2f2[6] = *(unsigned short*) &p_other.m_unk0x2f2[6];
+	m_pixelFlag16 = p_other.m_pixelFlag16;
+	m_defaultAniPeriod = p_other.m_defaultAniPeriod;
+	m_dotFrameCount = p_other.m_dotFrameCount;
+	m_unk0x2f6 = p_other.m_unk0x2f6;
+	m_messageLineHeight = p_other.m_messageLineHeight;
 	m_unk0x484 = p_other.m_unk0x484;
 	m_unk0x48c = p_other.m_unk0x48c;
 	m_unk0x488 = p_other.m_unk0x488;
+	m_terrainCoverage = 0;
 }
 
-#pragma optimize("y", off)
 // STUB: ALIEN 0x419750
 VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 {
+	m_terrainCoverage = new (std::nothrow) TERRAIN_COVERAGE(p_w, p_h);
+	if (m_terrainCoverage && !m_terrainCoverage->Valid()) {
+		delete m_terrainCoverage;
+		m_terrainCoverage = 0;
+	}
 	m_footprintWidth = 256.0f;
 	m_footprintHeight = 256.0f;
 	m_idx = p_idx;
@@ -82,16 +101,16 @@ VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 	m_messageLineHeight = (short) p_h;
 	m_noDir = 1;
 	m_layer = 0;
-	*(STRING*) &m_name =
+	SetName(
 		// STRING: ALIEN 0x482c3c
-		"Self Created Hardware Prerendered Ground ";
+		"Self Created Hardware Prerendered Ground "
+	);
 	int cells = (p_w / 256 + 1) * (p_h / 256 + 1) + 1;
 	m_pixelFlag16 = 0x225;
 	VID_CHILD* children = (VID_CHILD*) operator new(sizeof(VID_CHILD) * cells);
-	m_unk0x484 = (undefined4) children;
+	m_unk0x484 = children;
 	if (!m_unk0x484) {
-		Error(2,
-			"texcoor", cells);
+		Error(2, "texcoor", cells);
 		exit(1);
 	}
 	m_unk0x488 = 0;
@@ -100,8 +119,9 @@ VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 	for (int yOff = 0; yOff < p_h; yOff += 256) {
 		int remW = p_w;
 		for (int xOff = 0; xOff < p_w; xOff += 256) {
-			if (index)
+			if (index) {
 				VIDHardwareChild(this, index - 1).m_next = index;
+			}
 			VIDHardwareChild(this, index).m_texture = (short) m_unk0x488;
 			VIDHardwareChild(this, index).m_x = 0;
 			VIDHardwareChild(this, index).m_y = 0;
@@ -116,71 +136,51 @@ VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 		}
 		remH -= 256;
 	}
-	TEXTURE** textures = (TEXTURE**) operator new(4 * (short) m_unk0x488);
-	m_unk0x48c = (undefined4) textures;
+	TEXTURE** textures = (TEXTURE**) operator new(sizeof(TEXTURE*) * (short) m_unk0x488);
+	m_unk0x48c = textures;
 	if (!m_unk0x48c) {
-		Error(2,
+		Error(
+			2,
 			// STRING: ALIEN 0x482c28
-			"textures", (short) m_unk0x488);
+			"textures",
+			(short) m_unk0x488
+		);
 		return;
 	}
 	for (int t = 0; t < (short) m_unk0x488; t += 2) {
 		VID_CHILD* cell = &VIDHardwareChild(this, t / 2);
-		TEXTURE* color = new TEXTURE(VIDHardwareChild(this, t / 2).m_w,
-			VIDHardwareChild(this, t / 2).m_h, D3DFMT_R5G6B5, 0);
+		TEXTURE* color =
+			new TEXTURE(VIDHardwareChild(this, t / 2).m_w, VIDHardwareChild(this, t / 2).m_h, D3DFMT_R5G6B5, 0);
 		VIDHardwareTexture(this, t) = color;
 		int pitch = 0;
-		void* bits = (void*) VIDHardwareTexture(this, t)->Lock(&pitch, 0);
+		void* bits = VIDHardwareTexture(this, t)->Lock(&pitch, 0);
 		memset(bits, 0, pitch * VIDHardwareTexture(this, t)->m_height);
-		if (VIDHardwareTexture(this, t)->m_texture)
-			VIDHardwareTexture(this, t)->m_texture->UnlockRect(0);
-		TEXTURE* zTex = new TEXTURE(VIDHardwareChild(this, t / 2).m_w,
-			VIDHardwareChild(this, t / 2).m_h, D3DFMT_D16, 2);
+		TEXTURE* zTex =
+			new TEXTURE(VIDHardwareChild(this, t / 2).m_w, VIDHardwareChild(this, t / 2).m_h, D3DFMT_D16, 2);
 		VIDHardwareTexture(this, t + 1) = zTex;
-		unsigned short* zbits = (unsigned short*) (void*)
-			VIDHardwareTexture(this, t + 1)->Lock(&pitch, 0);
+		unsigned short* zbits = (unsigned short*) VIDHardwareTexture(this, t + 1)->Lock(&pitch, 0);
 		unsigned int words = pitch / 2 * VIDHardwareTexture(this, t + 1)->m_height;
 		unsigned short* fill = zbits;
-		unsigned int d = words >> 1;
-		#ifdef _M_IX86
-		__asm {
-			mov eax, 400h
-			mov edi, fill
-			mov ecx, words
-			cld
-			mov bx, ax
-			shl eax, 10h
-			mov ax, bx
-			shr ecx, 1
-			jnb skip
-			mov word ptr [edi], ax
-			add edi, 2
-		skip:
-			jecxz done
-			rep stosd
-		done:
-		}
-		#else
 		VIDHardwareWordSet((char*) fill, 1024, words);
-		#endif
-		if (VIDHardwareTexture(this, t + 1)->m_texture)
-			VIDHardwareTexture(this, t + 1)->m_texture->UnlockRect(0);
 	}
 }
-#pragma optimize("", on)
 
 // FUNCTION: ALIEN 0x419ad0
 VID_HARDWARE::~VID_HARDWARE()
 {
+	delete m_terrainCoverage;
+	m_terrainCoverage = 0;
 	if (m_weaponPtr == this) {
-		if (m_unk0x484)
+		if (m_unk0x484) {
 			operator delete((void*) m_unk0x484);
+		}
 		m_unk0x484 = 0;
 		if (m_unk0x48c) {
 			for (short i = --m_unk0x488; i >= 0; i = m_unk0x488) {
-				TEXTURE* t = ((TEXTURE**) m_unk0x48c)[i];
-				if (t)
+				TEXTURE* t = m_unk0x48c[i];
+				if (t) {
 					delete t;
+				}
 				--m_unk0x488;
 			}
 			operator delete((void*) m_unk0x48c);
@@ -195,38 +195,53 @@ void VID_HARDWARE::DrawVidToVid(const SPRITE* p_sprite)
 {
 	if ((m_pixelFlag16 & 1) && (m_pixelFlag16 & 4) && m_noDir == 1) {
 		if (!(p_sprite->m_vid->m_flag & 0x20000)) {
-			int savedXMin = viewXMin;
-			int savedXMax = viewXMax;
-			int savedYMin = viewYMin;
-			int savedYMax = viewYMax;
+			GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+			float savedXMin = graph->m_viewXMin;
+			float savedXMax = graph->m_viewXMax;
+			float savedYMin = graph->m_viewYMin;
+			float savedYMax = graph->m_viewYMax;
 			int sx = (int) p_sprite->m_x;
 			int sy = (int) (p_sprite->m_y - p_sprite->m_z);
-			for (VID_CHILD* child = (VID_CHILD*) m_unk0x484; child;
-				child = &((VID_CHILD*) m_unk0x484)[child->m_next]) {
+			for (VID_CHILD* child = m_unk0x484; child; child = &(m_unk0x484)[child->m_next]) {
 				int halfW = child->m_w / 2;
-				if (abs(child->m_offsetX - sx + child->m_x + halfW)
-						< halfW + p_sprite->m_vid->m_unk0x2f6 / 2) {
+				if (abs(child->m_offsetX - sx + child->m_x + halfW) < halfW + p_sprite->m_vid->m_unk0x2f6 / 2) {
 					int halfH = child->m_h / 2;
-					if (abs(child->m_offsetY - sy + child->m_y + halfH)
-						< halfH + p_sprite->m_vid->m_messageLineHeight / 2) {
-						viewXMin = child->m_x;
-						viewXMax = child->m_x + child->m_w;
-						viewYMin = child->m_y;
-						viewYMax = child->m_y + child->m_h;
-						p_sprite->m_vid->DrawToVid(p_sprite, child,
-							((TEXTURE**) m_unk0x48c)[child->m_texture],
-							((TEXTURE**) m_unk0x48c)[child->m_texture + 1]);
+					if (abs(child->m_offsetY - sy + child->m_y + halfH) <
+						halfH + p_sprite->m_vid->m_messageLineHeight / 2) {
+						graph->SetViewPort(
+							(float) child->m_x,
+							(float) child->m_y,
+							(float) (child->m_x + child->m_w),
+							(float) (child->m_y + child->m_h)
+						);
+						TerrainCoverageBegin(
+							m_terrainCoverage,
+							child->m_offsetX - child->m_x,
+							child->m_offsetY - child->m_y
+						);
+						p_sprite->m_vid->DrawToVid(
+							p_sprite,
+							child,
+							m_unk0x48c[child->m_texture],
+							m_unk0x48c[child->m_texture + 1]
+						);
+						TerrainCoverageEnd();
 					}
 				}
-				if (!child->m_next)
+				if (!child->m_next) {
 					break;
+				}
 			}
-			viewXMin = savedXMin;
-			viewXMax = savedXMax;
-			viewYMin = savedYMin;
-			viewYMax = savedYMax;
+			graph->SetViewPort(savedXMin, savedYMin, savedXMax, savedYMax);
 		}
 	}
+}
+
+TERRAIN_COVERAGE* VID_HARDWARE::TakeTerrainCoverage()
+{
+	TERRAIN_COVERAGE* result = m_terrainCoverage;
+	m_terrainCoverage = 0;
+	return result;
 }
 
 // STUB: ALIEN 0x419d20
@@ -235,43 +250,59 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 
 	QS1_CODER* colorCoder = 0;
 	QS1_CODER* zCoder = 0;
-	if (p_res->GoNext(0x46525553 /* 'SURF' */ ))
-		Error(5,
+	if (p_res->GoNext(0x46525553 /* 'SURF' */)) {
+		Error(
+			5,
 			// STRING: ALIEN 0x482d10
-			"SURF", 0);
+			"SURF",
+			0
+		);
+	}
 	p_res->Read(&m_unk0x488, 2);
-	if (!(short) m_unk0x488)
-		return;
-	m_unk0x48c = (undefined4) operator new(4 * (short) m_unk0x488);
-	if (!m_unk0x48c) {
-		Error(2,
-			"textures", (short) m_unk0x488);
+	if (!(short) m_unk0x488) {
 		return;
 	}
-	for (int t = 0; t < (short) m_unk0x488; ++t)
-		((TEXTURE**) m_unk0x48c)[t] = 0;
+	m_unk0x48c = (TEXTURE**) operator new(sizeof(TEXTURE*) * (short) m_unk0x488);
+	if (!m_unk0x48c) {
+		Error(2, "textures", (short) m_unk0x488);
+		return;
+	}
+	for (int t = 0; t < (short) m_unk0x488; ++t) {
+		m_unk0x48c[t] = 0;
+	}
 
 	void* unpack = operator new(0x20008);
 	if (!unpack) {
-		Error(2,
+		Error(
+			2,
 			// STRING: ALIEN 0x482d04
-			"(unpack)", 0);
+			"(unpack)",
+			0
+		);
 		return;
 	}
 
 	if (m_pixelFlag16 & 0x100) {
-		if (m_pixelFlag16 & 0x800)
+		if (m_pixelFlag16 & 0x800) {
 			colorCoder = new QS1_CODER(1);
-		else
+		}
+		else {
 			colorCoder = new QS1_CODER(2);
+		}
 		zCoder = new QS1_CODER(2);
 	}
 
 	unsigned char palette[768];
 	int pitch;
 	int i = 0;
-	for (i = 0; i < (short) m_unk0x488; ) {
-		((GRAPH*) Graph)->DrawLoadBar((Map->m_noVid > 0 && Map->m_vids[0]) ? Map->m_vids[0] : EmptyVid);
+	for (i = 0; i < (short) m_unk0x488;) {
+		if (Graph) {
+			VID* progress = EmptyVid;
+			if (Map && Map->m_noVid > 0 && Map->m_vids[0]) {
+				progress = Map->m_vids[0];
+			}
+			((GRAPH*) Graph)->DrawLoadBar(progress);
+		}
 		short w = 0;
 		short h = 0;
 		p_res->Read(&w, 2);
@@ -279,70 +310,90 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 
 		int format;
 		if (m_pixelFlag16 & 0x800) {
-			if ((m_pixelFlag16 & 2) && (m_pixelFlag16 & 1))
-				((TEXTURE**) m_unk0x48c)[i] =
-					new TEXTURE(w, h, 0x33545844 , 0); // DXT3
-			else
-				((TEXTURE**) m_unk0x48c)[i] =
-					new TEXTURE(w, h, 0x31545844 , 0); // DXT1
+			if ((m_pixelFlag16 & 2) && (m_pixelFlag16 & 1)) {
+				m_unk0x48c[i] = new TEXTURE(w, h, 0x33545844, 0); // DXT3
+			}
+			else {
+				m_unk0x48c[i] = new TEXTURE(w, h, 0x31545844, 0); // DXT1
+			}
 		}
-		else if (m_pixelFlag16 & 8)
-			((TEXTURE**) m_unk0x48c)[i] = new TEXTURE(w, h, 41 , 0); // P8
-		else if ((m_pixelFlag16 & 2) && (m_pixelFlag16 & 1))
-			((TEXTURE**) m_unk0x48c)[i] = new TEXTURE(w, h, 26 , 0); // A4R4G4B4
-		else
-			((TEXTURE**) m_unk0x48c)[i] = new TEXTURE(w, h, 23 , 0); // R5G6B5
-		if (!((TEXTURE**) m_unk0x48c)[i]->m_texture && !((TEXTURE**) m_unk0x48c)[i]->m_data) {
-			Error(3,
+		else if (m_pixelFlag16 & 8) {
+			m_unk0x48c[i] = new TEXTURE(w, h, 41, 0); // P8
+		}
+		else if ((m_pixelFlag16 & 2) && (m_pixelFlag16 & 1)) {
+			m_unk0x48c[i] = new TEXTURE(w, h, 26, 0); // A4R4G4B4
+		}
+		else {
+			m_unk0x48c[i] = new TEXTURE(w, h, 23, 0); // R5G6B5
+		}
+		if (!m_unk0x48c[i]->m_data) {
+			Error(
+				3,
 				// STRING: ALIEN 0x482c84
-				"texture", 0);
+				"texture",
+				0
+			);
 
-			if (colorCoder)
+			if (colorCoder) {
 				delete colorCoder;
-			if (zCoder)
+			}
+			if (zCoder) {
 				delete zCoder;
+			}
 			operator delete(unpack);
 			return;
 		}
 
 		if (m_pixelFlag16 & 8) {
-			Error(10,
+			Error(
+				10,
 				// STRING: ALIEN 0x482cf8
-				"palette %i", ((TEXTURE**) m_unk0x48c)[i]->m_format == 41);
+				"palette %i",
+				m_unk0x48c[i]->m_format == 41
+			);
 			p_res->Read(palette, 768);
-			if (((TEXTURE**) m_unk0x48c)[i]->m_format == 41) {
+			if (m_unk0x48c[i]->m_format == 41) {
 				unsigned char quads[1024];
 				const unsigned char* src = palette;
 				unsigned char* dst = quads;
 				for (int p = 0; p < 256; ++p) {
-					*(COLOR*) dst = COLOR(src[0], src[1], src[2]);
+					PackedWrite<unsigned int>(dst, (unsigned int) COLOR(src[0], src[1], src[2]).m_value);
 					src += 3;
 					dst += 4;
 				}
-				((TEXTURE**) m_unk0x48c)[i]->SetPalette(quads);
+				m_unk0x48c[i]->SetPalette(quads);
 			}
 		}
 
 		int offset = 0;
 		p_res->Read(&offset, 4);
 		int decoded = p_res->ReadPacked(unpack, offset, colorCoder);
-		if (decoded)
-			Error(5,
+		if (decoded) {
+			Error(
+				5,
 				// STRING: ALIEN 0x482ce8
-				"Can't decode", i);
+				"Can't decode",
+				i
+			);
+		}
 
 		if ((m_pixelFlag16 & 8) || offset >= 2 * w * h) {
 
-			unsigned char* locked = (unsigned char*) ((TEXTURE**) m_unk0x48c)[i]->Lock(&pitch, 0);
+			unsigned char* locked = (unsigned char*) m_unk0x48c[i]->Lock(&pitch, 0);
 			if (!locked) {
-				Error(0,
+				Error(
+					0,
 					// STRING: ALIEN 0x482c74
-					"texture surface", 0);
+					"texture surface",
+					0
+				);
 
-				if (colorCoder)
+				if (colorCoder) {
 					delete colorCoder;
-				if (zCoder)
+				}
+				if (zCoder) {
 					delete zCoder;
+				}
 				operator delete(unpack);
 				return;
 			}
@@ -350,20 +401,19 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 				for (int y = 0; y < h; ++y) {
 					unsigned short* row = (unsigned short*) (locked + pitch * y);
 					if (m_pixelFlag16 & 8) {
-						if (((TEXTURE**) m_unk0x48c)[i]->m_format != 41) {
+						if (m_unk0x48c[i]->m_format != 41) {
 							for (int x = 0; x < w; ++x) {
 								unsigned char idx = ((unsigned char*) unpack)[x + y * w];
 								const unsigned char* pe = palette + 3 * idx;
-								row[x] = (unsigned short) (((pe[2] >> 3) & 0x1f)
-									| ((pe[0] & 0xf8) << RGB16_rShift)
-									| (RGB16_gMask & (pe[1] << RGB16_gShift)));
+								row[x] = (unsigned short) (((pe[2] >> 3) & 0x1f) | ((pe[0] & 0xf8) << RGB16_rShift) |
+														   (RGB16_gMask & (pe[1] << RGB16_gShift)));
 							}
 						}
 						else {
 							memcpy(row, (unsigned char*) unpack + y * w, w);
 						}
 					}
-					else if (((TEXTURE**) m_unk0x48c)[i]->m_format != 23 && ((TEXTURE**) m_unk0x48c)[i]->m_format != 26) {
+					else if (m_unk0x48c[i]->m_format != 23 && m_unk0x48c[i]->m_format != 26) {
 						unsigned short* s = (unsigned short*) unpack + y * w;
 						for (int x = 0; x < w; ++x) {
 							unsigned short v = s[x];
@@ -374,24 +424,27 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 						memcpy(row, (unsigned short*) unpack + y * w, 2 * w);
 					}
 				}
-				if (((TEXTURE**) m_unk0x48c)[i]->m_texture)
-					((TEXTURE**) m_unk0x48c)[i]->m_texture->UnlockRect(0);
 			}
 		}
 		else {
 
-			Error(10,
+			Error(
+				10,
 				// STRING: ALIEN 0x482cdc
-				"Load DXT", 0);
-			void* locked = (void*) ((TEXTURE**) m_unk0x48c)[i]->Lock(&pitch, 0);
-			if (!locked)
-				Error(0,
+				"Load DXT",
+				0
+			);
+			void* locked = m_unk0x48c[i]->Lock(&pitch, 0);
+			if (!locked) {
+				Error(
+					0,
 					// STRING: ALIEN 0x482cc8
-					"DXT texture surface", 0);
+					"DXT texture surface",
+					0
+				);
+			}
 			else {
 				memcpy(locked, unpack, offset);
-				if (((TEXTURE**) m_unk0x48c)[i]->m_texture)
-					((TEXTURE**) m_unk0x48c)[i]->m_texture->UnlockRect(0);
 			}
 		}
 
@@ -399,33 +452,39 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		if (m_pixelFlag16 & 4) {
 
 			++i;
-			TEXTURE* ztex = new TEXTURE(w, h, 80 , 2); // D16
-			((TEXTURE**) m_unk0x48c)[i] = ztex;
+			TEXTURE* ztex = new TEXTURE(w, h, 80, 2); // D16
+			m_unk0x48c[i] = ztex;
 			p_res->Read(&offset, 4);
-			if (((TEXTURE**) m_unk0x48c)[i]->m_texture
-				|| ((TEXTURE**) m_unk0x48c)[i]->m_data) {
-				void* locked =
-					(void*) ((TEXTURE**) m_unk0x48c)[i]->Lock(&pitch, 0);
+			if (m_unk0x48c[i]->m_data) {
+				void* locked = m_unk0x48c[i]->Lock(&pitch, 0);
 				if (locked) {
 					if (offset == pitch * h) {
 						int zdec = p_res->ReadPacked(locked, offset, zCoder);
-						if (zdec)
-							Error(5,
+						if (zdec) {
+							Error(
+								5,
 								// STRING: ALIEN 0x482c8c
-								"Can't decode z", offset - zdec);
+								"Can't decode z",
+								offset - zdec
+							);
+						}
 					}
 					else {
-						Error(5,
+						Error(
+							5,
 							// STRING: ALIEN 0x482c9c
-							"ZBuffer: invalid size", offset);
+							"ZBuffer: invalid size",
+							offset
+						);
 					}
-					if (((TEXTURE**) m_unk0x48c)[i]->m_texture)
-						((TEXTURE**) m_unk0x48c)[i]->m_texture->UnlockRect(0);
 				}
 				else {
-					Error(0,
+					Error(
+						0,
 						// STRING: ALIEN 0x482cb4
-						"texture z surface", 0);
+						"texture z surface",
+						0
+					);
 					p_res->m_state = 2;
 					fseek(p_res->m_file, offset, SEEK_CUR);
 				}
@@ -439,21 +498,29 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		++i;
 	}
 
-	if (p_res->GoNext(0x41544144 /* 'DATA' */ ))
-		Error(5,
+	if (p_res->GoNext(0x41544144 /* 'DATA' */)) {
+		Error(
+			5,
 			// STRING: ALIEN 0x482bb8
-			"DATA", 0);
+			"DATA",
+			0
+		);
+	}
 	if (m_pixelFlag16 & 0x10) {
 		p_res->SubLoad((void**) &m_unk0x484, 0);
-		if (!m_unk0x484)
-			Error(5,
+		if (!m_unk0x484) {
+			Error(
+				5,
 				// STRING: ALIEN 0x482c68
-				"tex_coor", 0);
+				"tex_coor",
+				0
+			);
+		}
 	}
 	else {
 		int n = p_res->m_subSize / 20;
-		m_unk0x484 = (undefined4) operator new(36 * n);
-		VID_CHILD* children = (VID_CHILD*) m_unk0x484;
+		m_unk0x484 = (VID_CHILD*) operator new(sizeof(VID_CHILD) * n);
+		VID_CHILD* children = m_unk0x484;
 		for (int c = 0; c < n; ++c) {
 			p_res->Read(&children[c].m_unk0x00, 4);
 			short s;
@@ -476,12 +543,14 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		}
 	}
 
-	p_res->GoNext(0x44414853 /* 'SHAD' */ );
+	p_res->GoNext(0x44414853 /* 'SHAD' */);
 
-	if (colorCoder)
+	if (colorCoder) {
 		delete colorCoder;
-	if (zCoder)
+	}
+	if (zCoder) {
 		delete zCoder;
+	}
 	operator delete(unpack);
 }
 
@@ -515,57 +584,126 @@ void VID_HARDWARE::SetLayer()
 		return;
 	}
 	if (m_pixelFlag16 & 2) {
-		if (flag & 0x10000)
+		if (flag & 0x10000) {
 			m_layer = 9;
-		else
+		}
+		else {
 			m_layer = 12;
+		}
 		return;
 	}
 	m_layer = 8;
 }
 
-static inline float DrawInterpolate(float* p_table, float p_frame)
+inline static float DrawInterpolate(float* p_table, float p_frame)
 {
 	int fi = (int) p_frame;
-	return (fi >= 7) ? p_table[7]
-					 : (p_table[fi + 1] - p_table[fi]) * (p_frame - fi) + p_table[fi];
+	return (fi >= 7) ? p_table[7] : (p_table[fi + 1] - p_table[fi]) * (p_frame - fi) + p_table[fi];
 }
 
-static inline bool DrawInViewPort(const GRAPH_CORE* p_graph, float p_x, float p_y)
+inline static bool DrawInViewPort(const GRAPH_CORE* p_graph, float p_x, float p_y)
 {
-	return p_x >= p_graph->m_viewXMin && p_x < p_graph->m_viewXMax
-		&& p_y >= p_graph->m_viewYMin && p_y < p_graph->m_viewYMax;
+	return p_x >= p_graph->m_viewXMin && p_x < p_graph->m_viewXMax && p_y >= p_graph->m_viewYMin &&
+		   p_y < p_graph->m_viewYMax;
+}
+
+static int CopyScaledUIZBuffer(GRAPH_CORE* p_graph, const int* p_dst, const int* p_src, TEXTURE* p_texture)
+{
+	if (!p_graph->m_zbuffer || !p_texture || !p_texture->m_data) {
+		return 0;
+	}
+	int dstWidth = p_dst[2] - p_dst[0];
+	int dstHeight = p_dst[3] - p_dst[1];
+	int srcWidth = p_src[2] - p_src[0];
+	int srcHeight = p_src[3] - p_src[1];
+	if (dstWidth <= 0 || dstHeight <= 0 || srcWidth <= 0 || srcHeight <= 0) {
+		return 0;
+	}
+
+	int left = p_dst[0] > (int) p_graph->m_viewXMin ? p_dst[0] : (int) p_graph->m_viewXMin;
+	int top = p_dst[1] > (int) p_graph->m_viewYMin ? p_dst[1] : (int) p_graph->m_viewYMin;
+	int right = p_dst[2] < (int) p_graph->m_viewXMax ? p_dst[2] : (int) p_graph->m_viewXMax;
+	int bottom = p_dst[3] < (int) p_graph->m_viewYMax ? p_dst[3] : (int) p_graph->m_viewYMax;
+	if (left < 0) {
+		left = 0;
+	}
+	if (top < 0) {
+		top = 0;
+	}
+	if (right > (int) p_graph->m_width) {
+		right = (int) p_graph->m_width;
+	}
+	if (bottom > (int) p_graph->m_height) {
+		bottom = (int) p_graph->m_height;
+	}
+	if (left >= right || top >= bottom) {
+		return 0;
+	}
+
+	int sourcePitch;
+	unsigned short* source = (unsigned short*) p_texture->Lock(&sourcePitch, 0);
+	if (!source) {
+		return 0;
+	}
+	sourcePitch /= (int) sizeof(unsigned short);
+	unsigned short* destination = (unsigned short*) p_graph->m_zbuffer;
+	for (int y = top; y < bottom; ++y) {
+		int sy = p_src[1] + (int) ((((long long) (y - p_dst[1]) * 2 + 1) * srcHeight) / (2 * dstHeight));
+		if (sy < 0) {
+			sy = 0;
+		}
+		else if (sy >= p_texture->m_height) {
+			sy = p_texture->m_height - 1;
+		}
+		for (int x = left; x < right; ++x) {
+			int sx = p_src[0] + (int) ((((long long) (x - p_dst[0]) * 2 + 1) * srcWidth) / (2 * dstWidth));
+			if (sx < 0) {
+				sx = 0;
+			}
+			else if (sx >= p_texture->m_width) {
+				sx = p_texture->m_width - 1;
+			}
+			destination[(size_t) y * p_graph->m_zpitch + x] = source[(size_t) sy * sourcePitch + sx];
+		}
+	}
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x41a7f0
 int VID_HARDWARE::Draw(SPRITE* p_sprite)
 {
 	if (m_unk0x488) {
-		VID_CHILD* frameChild = (VID_CHILD*) ((char*) m_unk0x484 + 36 * p_sprite->m_noCadr);
+		VID_CHILD* frameChild = &m_unk0x484[p_sprite->m_noCadr];
 		if (frameChild->m_h) {
 			int needEx = m_unk0x47c;
 			if (!(needEx & 0x40)) {
+				GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+				bool uiSprite = p_sprite->m_uiScale != 0;
+				int savedMinFilter = graph->m_state.m_minFilter;
+				int savedMagFilter = graph->m_state.m_magFilter;
+				if (uiSprite) {
+					graph->SetTextureStageState(D3DTSS_MINFILTER, D3DTEXF_POINT);
+					graph->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_POINT);
+				}
 				int baseX = (int) (p_sprite->m_x - Map->m_shiftX);
 				int baseY = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY);
 				int zval = (int) p_sprite->m_z;
 				int segments = 1;
-				float scaleX = m_gammaR;
-				float scaleY = m_gammaG;
+				float scaleX = m_gammaR * p_sprite->UIDrawScale();
+				float scaleY = m_gammaG * p_sprite->UIDrawScale();
 
 				if (needEx & 2) {
 					EX_SPRITE_DATA* ex = p_sprite->m_exData;
-					float* tbl = (float*) m_exData;
-					scaleX *= DrawInterpolate(tbl + 57, ex->m_unk0x1c);
-					scaleY *= DrawInterpolate(tbl + 65, ex->m_unk0x1c);
+					scaleX *= DrawInterpolate(m_exData->m_unk0xe4, ex->m_unk0x1c);
+					scaleY *= DrawInterpolate(m_exData->m_unk0x104, ex->m_unk0x1c);
 				}
 				if (needEx & 4) {
 					EX_SPRITE_DATA* ex = p_sprite->m_exData;
-					float* tbl = (float*) m_exData;
-					float ox = DrawInterpolate(tbl + 81, ex->m_unk0x1c);
+					float ox = DrawInterpolate(m_exData->m_unk0x144, ex->m_unk0x1c);
 					baseX += (int) ox;
-					float oy = DrawInterpolate(tbl + 89, ex->m_unk0x1c);
+					float oy = DrawInterpolate(m_exData->m_unk0x164, ex->m_unk0x1c);
 					baseY += (int) oy;
-					float oz = DrawInterpolate(tbl + 97, ex->m_unk0x1c);
+					float oz = DrawInterpolate(m_exData->m_unk0x184, ex->m_unk0x1c);
 					zval += (int) oz;
 				}
 				if (m_flag & 0x200000) {
@@ -582,40 +720,111 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 					unsigned int flag = m_flag;
 					if (flag & 0x200000) {
 						EX_SPRITE_DATA* ex = p_sprite->m_exData;
-						baseX = (int) (p_sprite->m_x - Map->m_shiftX
-							+ (ex->m_x - p_sprite->X()) * s / segments);
-						baseY = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY
-							+ (ex->m_y - ex->m_z - p_sprite->m_y + p_sprite->m_z) * s / segments);
+						baseX = (int) (p_sprite->m_x - Map->m_shiftX + (ex->m_x - p_sprite->X()) * s / segments);
+						baseY = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY +
+									   (ex->m_y - ex->m_z - p_sprite->m_y + p_sprite->m_z) * s / segments);
 						zval = (int) ((ex->m_z - p_sprite->Z()) * s / segments + p_sprite->m_z);
 					}
+					bool alphaDepthGate = false;
+					bool alphaAnchorVisible = false;
 					if (!(flag & 0x8000) && !(m_pixelFlag16 & 4)) {
 						GRAPH_CORE* g = (GRAPH_CORE*) Graph;
-						if (!DrawInViewPort(g, (float) baseX, (float) baseY)
-							|| ((unsigned short*) g->m_zbuffer)[baseX + baseY * g->m_unk0x250] > 8 * zval + 1024)
-							continue;
+						int threshold = 8 * zval + 1024;
+						if ((m_pixelFlag16 & 2) && !uiSprite) {
+							alphaDepthGate = true;
+							alphaAnchorVisible = RENDER_MATH::AlphaSpriteAnchorVisible(
+								(const unsigned short*) g->m_zbuffer,
+								g->m_zpitch,
+								(int) g->m_width,
+								(int) g->m_height,
+								(int) g->m_viewXMin,
+								(int) g->m_viewYMin,
+								(int) g->m_viewXMax,
+								(int) g->m_viewYMax,
+								baseX,
+								baseY,
+								threshold,
+								m_footprintWidth,
+								m_footprintHeight
+							);
+						}
+						else {
+							if (!DrawInViewPort(g, (float) baseX, (float) baseY)) {
+								continue;
+							}
+							if (((unsigned short*) g->m_zbuffer)[baseX + baseY * g->m_zpitch] > threshold) {
+								continue;
+							}
+						}
 					}
 
-					VID_CHILD* child = (VID_CHILD*) ((char*) m_unk0x484 + 36 * p_sprite->m_noCadr);
+					VID_CHILD* child = &m_unk0x484[p_sprite->m_noCadr];
 					while (child) {
-						int cxOff = child->m_offsetX - m_unk0x2f6 / 2;
-						int cyOff = child->m_offsetY - m_messageLineHeight / 2;
-						int sx = baseX + (int) (cxOff * scaleX);
 						int clipW = child->m_w;
-						int sy = baseY + (int) (cyOff * scaleY);
 						int clipH = child->m_h;
-						if (sx + clipW >= viewXMin && sx < viewXMax && sy + clipH >= viewYMin
-							&& sy < viewYMax) {
-							if (m_pixelFlag16 & 4) {
-								if (sx + clipW > viewXMax)
-									clipW = viewXMax - sx;
-								if (sy + clipH > viewYMax)
-									clipH = viewYMax - sy;
+						int sx;
+						int sy;
+						int drawW;
+						int drawH;
+						if (uiSprite) {
+							int spriteLeft = baseX - ScaledUIBoundary(m_unk0x2f6, scaleX) / 2;
+							int spriteTop = baseY - ScaledUIBoundary(m_messageLineHeight, scaleY) / 2;
+							int childLeft = ScaledUIBoundary(child->m_offsetX, scaleX);
+							int childTop = ScaledUIBoundary(child->m_offsetY, scaleY);
+							int childRight = ScaledUIBoundary(child->m_offsetX + clipW, scaleX);
+							int childBottom = ScaledUIBoundary(child->m_offsetY + clipH, scaleY);
+							sx = spriteLeft + childLeft;
+							sy = spriteTop + childTop;
+							drawW = childRight - childLeft;
+							drawH = childBottom - childTop;
+						}
+						else {
+							int cxOff = child->m_offsetX - m_unk0x2f6 / 2;
+							int cyOff = child->m_offsetY - m_messageLineHeight / 2;
+							sx = baseX + (int) (cxOff * scaleX);
+							sy = baseY + (int) (cyOff * scaleY);
+							drawW = (int) (clipW * scaleX);
+							drawH = (int) (clipH * scaleY);
+						}
+						bool childVisible = uiSprite ? drawW > 0 && drawH > 0 && sx + drawW > ViewXMin() &&
+														   sx < ViewXMax() && sy + drawH > ViewYMin() && sy < ViewYMax()
+													 : sx + drawW >= ViewXMin() && sx < ViewXMax() &&
+														   sy + drawH >= ViewYMin() && sy < ViewYMax();
+						if (childVisible) {
+							if ((m_pixelFlag16 & 4) && !uiSprite) {
+								if (sx + clipW > ViewXMax()) {
+									clipW = ViewXMax() - sx;
+								}
+								if (sy + clipH > ViewYMax()) {
+									clipH = ViewYMax() - sy;
+								}
 							}
 							int dst[4];
 							dst[0] = sx;
 							dst[1] = sy;
-							dst[2] = sx + (int) (clipW * scaleX);
-							dst[3] = sy + (int) (clipH * scaleY);
+							dst[2] = sx + (uiSprite ? drawW : (int) (clipW * scaleX));
+							dst[3] = sy + (uiSprite ? drawH : (int) (clipH * scaleY));
+							if (alphaDepthGate && !alphaAnchorVisible) {
+								GRAPH_CORE* g = (GRAPH_CORE*) Graph;
+								if (!RENDER_MATH::AlphaSpriteChildVisible(
+										(const unsigned short*) g->m_zbuffer,
+										g->m_zpitch,
+										(int) g->m_width,
+										(int) g->m_height,
+										(int) g->m_viewXMin,
+										(int) g->m_viewYMin,
+										(int) g->m_viewXMax,
+										(int) g->m_viewYMax,
+										dst,
+										8 * zval + 1024
+									)) {
+									if (!child->m_next) {
+										break;
+									}
+									child = &m_unk0x484[child->m_next];
+									continue;
+								}
+							}
 							int src[4];
 							src[0] = child->m_x;
 							src[1] = child->m_y;
@@ -624,23 +833,34 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 
 							int zfunc;
 							if (m_pixelFlag16 & 4) {
-								zfunc = ((GRAPH_CORE*) Graph)->CopyToZBuffer(
-									dst, src, ((TEXTURE**) m_unk0x48c)[child->m_texture + 1]);
-								if (zfunc)
-									Error(1,
+								zfunc = uiSprite ? CopyScaledUIZBuffer(
+													   (GRAPH_CORE*) Graph,
+													   dst,
+													   src,
+													   m_unk0x48c[child->m_texture + 1]
+												   )
+												 : ((GRAPH_CORE*) Graph)
+													   ->CopyToZBuffer(dst, src, m_unk0x48c[child->m_texture + 1]);
+								if (zfunc) {
+									Error(
+										1,
 										// STRING: ALIEN 0x482d18
-										"zbuffer", zfunc);
+										"zbuffer",
+										zfunc
+									);
+								}
 							}
 
 							float z1 = zval * 0.00012207031f + 0.015625f;
-							if ((m_flag & 0x10000) && m_unk0x60 != 0.0f)
+							if ((m_flag & 0x10000) && m_unk0x60 != 0.0f) {
 								z1 = 0.5f * (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 0.00012207031f) + z1;
+							}
 							float z2;
 							if ((m_flag & 0x8000) || (m_pixelFlag16 & 4)) {
 								z1 = z2 = 0.99999988f;
 								((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_ZFUNC, 8);
 							}
-							else if (*(float*) ((char*) this + 0x24) > *(float*) ((char*) this + 0x20)) {
+							else if (m_unk0x24 > m_footprintHeight) {
 								float d = clipH * 0.00012207031f;
 								z2 = z1 - d;
 								z1 = d + z1;
@@ -651,10 +871,12 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 								((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_ZFUNC, 7);
 							}
 							if (m_pixelFlag16 & 2) {
-								if (m_pixelFlag16 & 1)
+								if (m_pixelFlag16 & 1) {
 									((GRAPH_CORE*) Graph)->SetAlphaBlend(5, 6);
-								else
+								}
+								else {
 									((GRAPH_CORE*) Graph)->SetAlphaBlend(9, 2);
+								}
 							}
 							else {
 								((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_ALPHABLENDENABLE, 0);
@@ -662,31 +884,37 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 
 							if (m_flag & 0x800) {
 								GAMMA composited;
-								composited.Add(*(GAMMA*) &m_colorSub,
-									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
-								((TEXTURE**) m_unk0x48c)[child->m_texture]->Draw_z(z1, *(int*) &z2, dst, src,
-									&composited);
+								composited.Add(
+									GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
+									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma())
+								);
+								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &composited);
 							}
 							else {
 								int graphNeg = ((GRAPH_CORE*) Graph)->m_gammaSet.m_a;
 								int graphPos = ((GRAPH_CORE*) Graph)->m_gammaSet.m_b;
 								GAMMA composited;
-								composited.Add(*(GAMMA*) &m_colorSub,
-									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
+								composited.Add(
+									GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
+									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma())
+								);
 								GAMMA withGraph;
 								withGraph.Add(composited, GAMMA(GAMMA::RAW_COPY, graphNeg, graphPos));
-								((TEXTURE**) m_unk0x48c)[child->m_texture]->Draw_z(z1, *(int*) &z2, dst, src,
-									&withGraph);
+								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &withGraph);
 							}
 						}
-						if (!child->m_next)
+						if (!child->m_next) {
 							break;
-						child = (VID_CHILD*) ((char*) m_unk0x484 + 36 * child->m_next);
+						}
+						child = &m_unk0x484[child->m_next];
 					}
+				}
+				if (uiSprite) {
+					graph->SetTextureStageState(D3DTSS_MINFILTER, savedMinFilter);
+					graph->SetTextureStageState(D3DTSS_MAGFILTER, savedMagFilter);
 				}
 			}
 		}
 	}
-	if (0)
-		return 0;
+	return 0;
 }

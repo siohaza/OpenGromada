@@ -5,8 +5,8 @@
 
 class STREAM {
 public:
-	virtual ~STREAM() {} // vtable+0x00
-	virtual int Read(void* p_dest, int p_size) = 0; // vtable+0x04
+	virtual ~STREAM() {}                                  // vtable+0x00
+	virtual int Read(void* p_dest, int p_size) = 0;       // vtable+0x04
 	virtual int Write(const void* p_src, int p_size) = 0; // vtable+0x08
 };
 

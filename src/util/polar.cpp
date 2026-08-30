@@ -37,8 +37,9 @@ ANGLE Decart2Polar(int p_x, int p_y, int* p_dist)
 			angle -= g_cordicTable[shift];
 		}
 	}
-	if (p_dist)
+	if (p_dist) {
 		*p_dist = (636750 * x) >> 20;
+	}
 	return ANGLE((char) (angle >> 1));
 }
 
@@ -46,17 +47,20 @@ ANGLE Decart2Polar(int p_x, int p_y, int* p_dist)
 ANGLE Decart2Polar_f(float p_x, float p_y)
 {
 	if (p_y == 0.0f) {
-		if (p_x == 0.0f)
+		if (p_x == 0.0f) {
 			return ANGLE(0);
-		if (p_x > 0.0f)
+		}
+		if (p_x > 0.0f) {
 			return ANGLE(64);
+		}
 		return ANGLE(-64);
 	}
 
 	float angle = (float) atan(-(p_x / p_y)) * 40.743668f;
 	if (p_y < 0.0f) {
-		if (p_x < 0.0f)
+		if (p_x < 0.0f) {
 			angle += 256.0f;
+		}
 	}
 	else {
 		angle += 128.0f;

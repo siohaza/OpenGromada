@@ -1,14 +1,9 @@
 
-#define DECOMP_COLOR_COPY_OUT_OF_LINE
-#define DECOMP_INLINE_MAP_NEXTSPRITE
-#define DECOMP_INLINE_MAP_VIDIO
-#define DECOMP_INLINE_MAP_NEXTSPRITE_CURSOR
-#define DECOMP_INLINE_MAP_FIRSTSPRITE
 
 #include "game/region.h"
 
-#include "game/map.h"
 #include "game/gametime.h"
+#include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
@@ -44,8 +39,9 @@ void* REGION::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	REGION* result = this;
 	this->~REGION();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -53,15 +49,21 @@ void* REGION::ScalarDeletingDestructor(unsigned int p_flags)
 REGION::~REGION()
 {
 	Map->DeletePointerToSprite(this);
-	if (m_fogTable)
+	if (m_fogTable) {
 		operator delete(m_fogTable);
+	}
 }
 
 // FUNCTION: ALIEN 0x449730
 void REGION::DrawSecondaryInfo()
 {
-	Graph->Box((float) (X1Scr() - 1.0f), (float) (Y1Scr() - 1.0f),
-		(float) (X2Scr() + 1.0f), (float) (Y2Scr() + 1.0f), COLOR(255, 255, 255));
+	Graph->Box(
+		(float) (X1Scr() - 1.0f),
+		(float) (Y1Scr() - 1.0f),
+		(float) (X2Scr() + 1.0f),
+		(float) (Y2Scr() + 1.0f),
+		COLOR(255, 255, 255)
+	);
 }
 
 // FUNCTION: ALIEN 0x449790
@@ -98,13 +100,18 @@ float REGION::Y2Scr() const
 }
 
 // FUNCTION: ALIEN 0x449810
-VID* REGION::Draw()
+void REGION::Draw()
 {
 	int savedCadr = m_noCadr;
 	float savedX = m_x;
 	float savedY = m_y;
 	VID* vid = m_vid;
 	if (vid != EmptyVid) {
+		GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+		float savedViewXMin = graph->m_viewXMin;
+		float savedViewXMax = graph->m_viewXMax;
+		float savedViewYMin = graph->m_viewYMin;
+		float savedViewYMax = graph->m_viewYMax;
 		if (!(m_flag & 8)) {
 			float halfH = m_y - m_z;
 			float baseY = m_h;
@@ -113,10 +120,7 @@ VID* REGION::Draw()
 			int xMax = (int) ((double) m_x + m_w * 0.5f - Map->m_shiftX);
 			int yMin = (int) (halfH - baseY - Map->m_shiftY);
 			int xMin = (int) (m_x - m_w * 0.5f - Map->m_shiftX);
-			VID::viewXMin = xMin;
-			VID::viewXMax = xMax;
-			VID::viewYMin = yMin;
-			VID::viewYMax = yMax;
+			graph->SetViewPort((float) xMin, (float) yMin, (float) xMax, (float) yMax);
 		}
 		int tile = 0;
 		float rowY = savedY - m_h * 0.5f;
@@ -137,14 +141,7 @@ VID* REGION::Draw()
 			rowY += m_vid->m_messageLineHeight;
 		}
 		if (!(m_flag & 8)) {
-			float y1 = Graph->m_viewYMax;
-			float x1 = Graph->m_viewXMax;
-			float x0 = Graph->m_viewXMin;
-			float y0 = Graph->m_viewYMin;
-			VID::viewXMin = (int) x0;
-			VID::viewXMax = (int) x1;
-			VID::viewYMin = (int) y0;
-			VID::viewYMax = (int) y1;
+			graph->SetViewPort(savedViewXMin, savedViewYMin, savedViewXMax, savedViewYMax);
 		}
 	}
 	m_x = savedX;
@@ -157,10 +154,12 @@ VID* REGION::Draw()
 		if (flag & 1) {
 			if ((CurrentTime & 7) < m_unk0x74) {
 				int target = 8 * fogZ2;
-				if (m_unk0x70 < target)
+				if (m_unk0x70 < target) {
 					m_unk0x70 += 2;
-				else if (m_unk0x70 > target)
+				}
+				else if (m_unk0x70 > target) {
 					m_unk0x70 = 0;
+				}
 			}
 			m_unk0x74 = CurrentTime & 7;
 		}
@@ -169,35 +168,51 @@ VID* REGION::Draw()
 		}
 
 		if (flag & 8) {
-			Graph->DrawFog(((GRAPH_CORE*) Graph)->GetViewXMin(),
-				((GRAPH_CORE*) Graph)->GetViewYMin(), ((GRAPH_CORE*) Graph)->GetViewXMax(),
-				((GRAPH_CORE*) Graph)->GetViewYMax(), m_fogZ1, m_fogZ2, m_fogColor,
-				(int) m_fogTable, m_unk0x70, flag & 2);
+			Graph->DrawFog(
+				((GRAPH_CORE*) Graph)->GetViewXMin(),
+				((GRAPH_CORE*) Graph)->GetViewYMin(),
+				((GRAPH_CORE*) Graph)->GetViewXMax(),
+				((GRAPH_CORE*) Graph)->GetViewYMax(),
+				m_fogZ1,
+				m_fogZ2,
+				m_fogColor,
+				m_fogTable,
+				m_unk0x70,
+				flag & 2
+			);
 		}
 		else {
-			Graph->DrawFog(X1Scr(), Y1Scr(), X2Scr(), Y2Scr(), m_fogZ1, m_fogZ2, m_fogColor,
-				(int) m_fogTable, m_unk0x70, flag & 2);
+			Graph->DrawFog(
+				X1Scr(),
+				Y1Scr(),
+				X2Scr(),
+				Y2Scr(),
+				m_fogZ1,
+				m_fogZ2,
+				m_fogColor,
+				m_fogTable,
+				m_unk0x70,
+				flag & 2
+			);
 		}
 	}
 	else {
 		m_unk0x70 = 0;
 	}
-	if (0)
-		return 0;
 }
 
 // FUNCTION: ALIEN 0x449be0
 VID* REGION::ConvertVid(VID* p_vid, float p_x, float p_y, float p_z)
 {
 	int iter;
-	for (SPRITE* sprite = Map->FirstSprite(10, &iter); sprite;
-		 sprite = Map->NextSprite(10, &iter)) {
+	for (SPRITE* sprite = Map->FirstSprite(10, &iter); sprite; sprite = Map->NextSprite(10, &iter)) {
 		REGION* region = (REGION*) sprite;
-		if (region->m_vid->m_sprClass == 23 && region->m_z + 25.0f > p_z
-			&& ((region->m_flag & 8) || region->IsInsideXY(p_x, p_y))) {
+		if (region->m_vid->m_sprClass == 23 && region->m_z + 25.0f > p_z &&
+			((region->m_flag & 8) || region->IsInsideXY(p_x, p_y))) {
 			for (int i = 0; i < 6; ++i) {
-				if (region->m_vidFrom[i] == p_vid)
+				if (region->m_vidFrom[i] == p_vid) {
 					return region->m_vidFrom[i + 6];
+				}
 			}
 		}
 	}
@@ -210,36 +225,42 @@ void REGION::SetFogParameters(int p_z1, int p_z2, COLOR p_color)
 	m_fogZ2 = p_z2;
 	m_fogZ1 = p_z1;
 	m_fogColor = p_color;
-	if (m_fogTable)
+	if (m_fogTable) {
 		operator delete(m_fogTable);
-	if (m_fogZ1 >= m_fogZ2)
+	}
+	if (m_fogZ1 >= m_fogZ2) {
 		return;
+	}
 
-	unsigned short* table =
-		(unsigned short*) operator new(16 * (m_fogZ2 - m_fogZ1) + 2);
+	unsigned short* table = (unsigned short*) operator new(16 * (m_fogZ2 - m_fogZ1) + 2);
 	m_fogTable = table;
-	if (!table)
-		MYERROR::LogExit(::Error,
+	if (!table) {
+		MYERROR::LogExit(
+			::Error,
 			// STRING: ALIEN 0x4847f4
-			"Enough memory for DrawFog", 8 * (m_fogZ2 - m_fogZ1) + 1);
+			"Enough memory for DrawFog %i",
+			8 * (m_fogZ2 - m_fogZ1) + 1
+		);
+	}
 
 	int count = 8 * (m_fogZ2 - m_fogZ1);
-	if (count < 0)
+	if (count < 0) {
 		return;
+	}
 	int num = 255 * count;
 	for (int i = count; count >= 0; --count, num -= 255) {
 		int value;
-		if (((GRAPH_CORE*) Graph)->m_texE0C->m_format != 41)
-			((unsigned short*) m_fogTable)[count] =
-				((GRAPH_CORE*) Graph)->m_snowRamp[num / (m_fogZ2 - m_fogZ1) / 8];
-		else // D3DFMT_P8
-			((unsigned short*) m_fogTable)[count] =
-				(unsigned short) (num / (m_fogZ2 - m_fogZ1) / 8);
+		if (((GRAPH_CORE*) Graph)->m_texE0C->m_format != 41) {
+			((unsigned short*) m_fogTable)[count] = ((GRAPH_CORE*) Graph)->m_snowRamp[num / (m_fogZ2 - m_fogZ1) / 8];
+		}
+		else { // D3DFMT_P8
+			((unsigned short*) m_fogTable)[count] = (unsigned short) (num / (m_fogZ2 - m_fogZ1) / 8);
+		}
 	}
 }
 
 // FUNCTION: ALIEN 0x449e20
-decomp_intptr REGION::Action(int p_action, int p_a, int p_b, int p_c)
+decomp_intptr REGION::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	int fogZ2;
 	int fogZ1;
@@ -267,13 +288,15 @@ decomp_intptr REGION::Action(int p_action, int p_a, int p_b, int p_c)
 		stream->Read(&m_unk0x9c, 4);
 		VID* vid = Map->ReadVid(stream);
 		m_unk0x98 = vid;
-		if (!vid)
+		if (!vid) {
 			m_unk0x98 = EmptyVid;
+		}
 		for (p_c = 0; p_c < 6; ++p_c) {
 			m_vidFrom[p_c] = Map->ReadVid(stream);
 			m_vidFrom[p_c + 6] = Map->ReadVid(stream);
-			if (m_vidFrom[p_c])
+			if (m_vidFrom[p_c]) {
 				m_vidFrom[p_c]->m_unk0x47c |= 0x10;
+			}
 		}
 		return 0;
 	}

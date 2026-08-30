@@ -1,11 +1,10 @@
-#define DECOMP_INLINE_LIST_SPRITE_SPECIAL_MEMBERS
 #include "world/group.h"
 
-#include "sprite/list_sprite.h"
-#include "sprite/sprite.h"
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
+#include "sprite/list_sprite.h"
+#include "sprite/sprite.h"
 
 // FUNCTION: ALIEN 0x43ab90
 GROUP::GROUP(GROUP* p_prev, SPRITE* p_sprite)
@@ -14,10 +13,12 @@ GROUP::GROUP(GROUP* p_prev, SPRITE* p_sprite)
 		m_next = p_prev->m_next;
 		p_prev->m_next = this;
 	}
-	else
+	else {
 		m_next = this;
-	if (p_sprite)
+	}
+	if (p_sprite) {
 		Insert(p_sprite);
+	}
 }
 
 // FUNCTION: ALIEN 0x43abd0
@@ -25,8 +26,9 @@ void* GROUP::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	GROUP* result = this;
 	this->~GROUP();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -35,8 +37,9 @@ GROUP::~GROUP()
 {
 	GROUP* next = m_next;
 	GROUP* prev = m_next;
-	while (prev->m_next != this)
+	while (prev->m_next != this) {
 		prev = prev->m_next;
+	}
 	prev->m_next = next;
 }
 
@@ -45,9 +48,13 @@ void GROUP::DrawNumber(int p_n)
 {
 	for (int i = 0; i < m_n; ++i) {
 		SPRITE* sprite = (SPRITE*) ((LIST_SPRITE*) this)->m_data[i];
-		GRAPH_CORE::PrintfXY((GRAPH_CORE*) Graph,
+		GRAPH_CORE::PrintfXY(
+			(GRAPH_CORE*) Graph,
 			sprite->m_x - Map->m_shiftX,
-			sprite->m_y - sprite->m_z - Map->m_shiftY, "%i", p_n);
+			sprite->m_y - sprite->m_z - Map->m_shiftY,
+			"%i",
+			p_n
+		);
 	}
 }
 

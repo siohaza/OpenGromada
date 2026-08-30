@@ -1,52 +1,42 @@
-#define DECOMP_INLINE_INT2STR
-#define DECOMP_INLINE_STRING_DTOR
 #include "logic/logicstack.h"
+
+#include "util/myerror.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "util/myerror.h"
-
 // FUNCTION: ALIEN 0x41f7b0
-LOGICSTACK::LOGICSTACK()
+LOGICSTACK::LOGICSTACK() : m_type(0), m_unk0x01{}, m_num(0), m_str()
 {
-	m_type = 0;
-	m_num = 0;
-	m_str = STRING::EMPTY;
 }
 
+LOGICSTACK::~LOGICSTACK() = default;
+
 // FUNCTION: ALIEN 0x4243a0
-LOGICSTACK::LOGICSTACK(int p_value)
+LOGICSTACK::LOGICSTACK(int p_value) : m_type(2), m_unk0x01{}, m_num(p_value), m_str()
 {
-	m_type = 2;
-	m_num = p_value;
-	m_str = STRING::EMPTY;
+}
+
+LOGICSTACK::LOGICSTACK(const STRING& p_value) : m_type(1), m_unk0x01{}, m_num(0), m_str(p_value)
+{
 }
 
 // FUNCTION: ALIEN 0x4243c0
 LOGICSTACK& LOGICSTACK::operator=(const LOGICSTACK& p_other)
 {
-	m_type = p_other.m_type;
-	m_num = p_other.m_num;
-	*(STRING*) &m_str = *(const STRING*) &p_other.m_str;
+	if (this != &p_other) {
+		m_type = p_other.m_type;
+		m_num = p_other.m_num;
+		m_str = p_other.m_str;
+	}
 	return *this;
 }
 
 // FUNCTION: ALIEN 0x4243f0
 LOGICSTACK::LOGICSTACK(const LOGICSTACK& p_other)
+	: m_type(p_other.m_type), m_unk0x01{}, m_num(p_other.m_num), m_str(p_other.m_str)
 {
-	m_type = p_other.m_type;
-	m_num = p_other.m_num;
-	char* s = p_other.m_str;
-	if (*s) {
-		unsigned int len = strlen(s);
-		m_str = (char*) operator new((len & 0xfffffff0) + 16);
-		memcpy(m_str, s, len);
-		m_str[len] = 0;
-	}
-	else
-		m_str = STRING::EMPTY;
 }
 
 // FUNCTION: ALIEN 0x4244b0
@@ -55,14 +45,21 @@ char LOGICSTACK::Read(STREAM* p_stream)
 	p_stream->Read(this, 1);
 	if ((m_type & 8) != 0) {
 		if ((m_type & 1) != 0) {
-			STRING* v4 = (STRING*) &m_str;
-			v4->Read_res(p_stream);
-			for (int i = 0; i < (int) strlen(v4->m_str); ++i)
-				v4->m_str[i] ^= 0x17;
+			m_str.Read_res(p_stream);
+			for (int i = 0; i < (int) strlen(m_str.m_str); ++i) {
+				m_str.m_str[i] ^= 0x17;
+			}
+			return 1;
 		}
-		else
-			return p_stream->Read(&m_num, 4);
+		else {
+			// The saved format is 32-bit; m_num is wider in memory.
+			int stored = 0;
+			char r = p_stream->Read(&stored, 4);
+			m_num = stored;
+			return r;
+		}
 	}
+	return 1;
 }
 
 // FUNCTION: ALIEN 0x424520
@@ -71,16 +68,21 @@ char LOGICSTACK::Write(STREAM* p_stream) const
 	p_stream->Write(this, 1);
 	if ((m_type & 8) != 0) {
 		if ((m_type & 1) != 0) {
-			char* str = m_str;
-			for (int i = 0; i < (int) strlen(m_str); ++i)
-				m_str[i] ^= 0x17;
-			p_stream->Write(m_str, strlen(m_str) + 1);
-			for (int j = 0; j < (int) strlen(m_str); ++j)
-				m_str[j] ^= 0x17;
+			for (int i = 0; i < (int) strlen(m_str.m_str); ++i) {
+				m_str.m_str[i] ^= 0x17;
+			}
+			p_stream->Write(m_str.m_str, strlen(m_str.m_str) + 1);
+			for (int j = 0; j < (int) strlen(m_str.m_str); ++j) {
+				m_str.m_str[j] ^= 0x17;
+			}
+			return 1;
 		}
-		else
-			return p_stream->Write(&m_num, 4);
+		else {
+			int stored = (int) m_num;
+			return p_stream->Write(&stored, 4);
+		}
 	}
+	return 1;
 }
 
 // script: Applies binary operator opcodes 6 through 23 to the current stack value.
@@ -89,22 +91,28 @@ void LOGICSTACK::BinarOperator(int p_operation, const LOGICSTACK& p_other)
 {
 	int value;
 	int other;
+	decomp_intptr otherValue;
 	if (p_other.m_type & 1) {
-		if (p_other.m_str[1] != 'x')
-			other = atoi(p_other.m_str);
+		if (p_other.m_str.m_str[1] != 'x') {
+			other = atoi(p_other.m_str.m_str);
+		}
 		else {
-			sscanf(p_other.m_str, "%i", &value);
+			sscanf(p_other.m_str.m_str, "%i", &value);
 			other = value;
 		}
+		otherValue = other;
 	}
-	else
-		other = p_other.m_num;
+	else {
+		otherValue = p_other.m_num;
+		other = (int) otherValue;
+	}
 
 	if (m_type & 1) {
-		if (m_str[1] != 'x')
-			m_num = atoi(m_str);
+		if (m_str.m_str[1] != 'x') {
+			m_num = atoi(m_str.m_str);
+		}
 		else {
-			sscanf(m_str, "%i", &value);
+			sscanf(m_str.m_str, "%i", &value);
 			m_num = value;
 		}
 	}
@@ -112,7 +120,7 @@ void LOGICSTACK::BinarOperator(int p_operation, const LOGICSTACK& p_other)
 	switch (p_operation) {
 	case 8:
 		if ((p_other.m_type & 1) && (m_type & 1)) {
-			*(STRING*) &m_str += *(const STRING*) &p_other.m_str;
+			m_str += p_other.m_str;
 			m_type = 1;
 		}
 		else {
@@ -130,10 +138,12 @@ void LOGICSTACK::BinarOperator(int p_operation, const LOGICSTACK& p_other)
 		m_type = 2;
 		break;
 	case 6:
-		if (other)
+		if (other) {
 			value = m_num / other;
-		else
+		}
+		else {
 			value = 0xfffffff;
+		}
 		m_num = value;
 		m_type = 2;
 		break;
@@ -162,18 +172,22 @@ void LOGICSTACK::BinarOperator(int p_operation, const LOGICSTACK& p_other)
 		m_type = 2;
 		break;
 	case 21:
-		if (m_num && other)
+		if (m_num && other) {
 			value = 1;
-		else
+		}
+		else {
 			value = 0;
+		}
 		m_num = value;
 		m_type = 2;
 		break;
 	case 14:
-		if (m_num || other)
+		if (m_num || other) {
 			value = 1;
-		else
+		}
+		else {
 			value = 0;
+		}
 		m_num = value;
 		m_type = 2;
 		break;
@@ -194,58 +208,92 @@ void LOGICSTACK::BinarOperator(int p_operation, const LOGICSTACK& p_other)
 		m_type = 2;
 		break;
 	case 13:
-		if ((p_other.m_type & 1) && (m_type & 1))
-			value = !strcmp(m_str, p_other.m_str);
-		else
-			value = m_num == other;
+		if ((p_other.m_type & 1) && (m_type & 1)) {
+			value = !strcmp(m_str.m_str, p_other.m_str.m_str);
+		}
+		else {
+			value = m_num == otherValue;
+		}
 		m_num = value;
 		m_type = 2;
 		break;
 	case 20:
-		if ((p_other.m_type & 1) && (m_type & 1))
-			value = strcmp(m_str, p_other.m_str) != 0;
-		else
-			value = m_num != other;
+		if ((p_other.m_type & 1) && (m_type & 1)) {
+			value = strcmp(m_str.m_str, p_other.m_str.m_str) != 0;
+		}
+		else {
+			value = m_num != otherValue;
+		}
 		m_num = value;
 		m_type = 2;
 		break;
 	default:
-		MYERROR::Log(::Error,
+		MYERROR::Log(
+			::Error,
 			// STRING: ALIEN 0x483640
-			"!!!ERROE!!!LOGIC::Unknown Binary command %i", p_operation);
+			"!!!ERROE!!!LOGIC::Unknown Binary command %i",
+			p_operation
+		);
 		m_type = 2;
 		break;
 	}
 }
 
 // FUNCTION: ALIEN 0x439dd0
-LOGICSTACK::LOGICSTACK(const void* p_object)
+LOGICSTACK::LOGICSTACK(const void* p_object) : m_type(18), m_unk0x01{}, m_num((intptr_t) p_object), m_str()
 {
-	m_type = 18;
-	m_num = (int) p_object;
-	m_str = STRING::EMPTY;
-	if (!p_object)
+	if (!p_object) {
 		m_type = 2;
+	}
 }
 
 // FUNCTION: ALIEN 0x439df0
 int LOGICSTACK::Int()
 {
 	if (m_type & 1) {
-		if (m_str[1] != 'x')
-			return atoi(m_str);
+		if (m_str.m_str[1] != 'x') {
+			return atoi(m_str.m_str);
+		}
 
 		int value;
-		sscanf(m_str, "%i", &value);
+		sscanf(m_str.m_str, "%i", &value);
 		return value;
 	}
 	return m_num;
 }
 
+decomp_intptr LOGICSTACK::Value() const
+{
+	return (m_type & 1) ? m_str.Int() : m_num;
+}
+
+void LOGICSTACK::AssignValue(const LOGICSTACK& p_source)
+{
+	m_type &= 0xaf;
+	m_num = p_source.Value();
+	if (p_source.m_type & 0x10) {
+		m_type |= 0x10;
+	}
+}
+
 // FUNCTION: ALIEN 0x439e30
 STRING* LOGICSTACK::String()
 {
-	return (m_type & 2)
-		? &(*(STRING*) &m_str = Int2Str(m_num))
-		: (STRING*) &m_str;
+	return (m_type & 2) ? &(m_str = Int2Str((int) m_num)) : &m_str;
+}
+
+void LOGICSTACK::Inc()
+{
+	m_type &= ~0x10;
+	if (m_type & 0x22) {
+		++m_num;
+	}
+}
+
+void LOGICSTACK::Dec()
+{
+	m_type &= ~0x10;
+	if (m_type & 0x22) {
+		--m_num;
+	}
 }

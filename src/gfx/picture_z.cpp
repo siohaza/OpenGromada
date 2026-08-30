@@ -13,15 +13,21 @@ struct Z_HEADER {
 int PICTURE_Z::Load(const STRING& p_name)
 {
 	Z_HEADER header;
-	if (PICTURE_BASE::Load(p_name))
+	if (PICTURE_BASE::Load(p_name)) {
 		return 1;
+	}
 	fread(&header, sizeof(header), 1, m_file);
 	if (header.m_magic != 0x6675425a) {
 		Close();
-		MYERROR::Error(::Error,
-			"PICTURE '%s'", 4,
+		MYERROR::Error(
+			::Error,
+			"PICTURE '%s'",
+			4,
 			// STRING: ALIEN 0x483908
-			"Z format file", 0, m_name);
+			"Z format file",
+			0,
+			m_name.m_str
+		);
 		return 1;
 	}
 	m_noFrames = header.m_frames;
@@ -32,18 +38,16 @@ int PICTURE_Z::Load(const STRING& p_name)
 	return 0;
 }
 
-#pragma optimize("y", off)
-
 // FUNCTION: ALIEN 0x4288c0
 int PICTURE_Z::NextFrame()
 {
 	int y;
-	if (!m_pixels)
-		return (int) MYERROR::Error(::Error,
-			"PICTURE '%s'", 10,
-			"Picture has not opened", m_frame, m_name.m_str);
-	if (++m_frame >= m_noFrames)
+	if (!m_pixels) {
+		return MYERROR::Error(::Error, "PICTURE '%s'", 10, "Picture has not opened", m_frame, m_name.m_str);
+	}
+	if (++m_frame >= m_noFrames) {
 		return Rewind();
+	}
 	for (y = 0; y < m_height; ++y) {
 		for (int x = 0; x < m_width;) {
 			unsigned short count;
@@ -52,29 +56,15 @@ int PICTURE_Z::NextFrame()
 				unsigned short* dst;
 				int run = count & 0x7fff;
 				dst = ((unsigned short*) m_pixels) + x + m_width * y;
-				__asm {
-					mov eax, 8000h
-					mov edi, dst
-					mov ecx, run
-					cld
-					mov bx, ax
-					shl eax, 10h
-					mov ax, bx
-					shr ecx, 1
-					jnb skip
-					mov word ptr [edi], ax
-					add edi, 2
-				skip:
-					jecxz done
-					rep stosd
-				done:
+				for (int i = 0; i < run; ++i) {
+					dst[i] = 0x8000;
 				}
-			} else {
-				fread(((unsigned short*) m_pixels) + x + m_width * y,
-					count, sizeof(unsigned short), m_file);
+			}
+			else {
+				fread(((unsigned short*) m_pixels) + x + m_width * y, count, sizeof(unsigned short), m_file);
 			}
 			x += count & 0x7fff;
 		}
 	}
+	return 1;
 }
-#pragma optimize("", on)

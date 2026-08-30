@@ -2,9 +2,8 @@ reccmp-user.yml
 reccmp-build.yml
 
 # Build output
-/build/
-/build-cmake/
-/build-docker/
+/build*/
+/CMakeFiles/
 *.obj
 *.pdb
 *.ilk
@@ -18,3 +17,5 @@ reccmp-build.yml
 report.html
 *.svg
 __pycache__/
+build-portable/
+build-asan/

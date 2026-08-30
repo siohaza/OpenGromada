@@ -5,17 +5,11 @@
 
 class NAMED_LIST_STRUCT_STRING {
 public:
-	STRING m_name; // 0x00
+	STRING m_name;  // 0x00
 	STRING m_value; // 0x04
 
 	NAMED_LIST_STRUCT_STRING();
-#ifdef DECOMP_INLINE_NAMED_LIST_STRUCT_STRING_DTOR
-	~NAMED_LIST_STRUCT_STRING()
-	{
-	}
-#else
 	~NAMED_LIST_STRUCT_STRING();
-#endif
 	NAMED_LIST_STRUCT_STRING& operator=(const NAMED_LIST_STRUCT_STRING& p_other);
 };
 

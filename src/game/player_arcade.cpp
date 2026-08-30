@@ -1,53 +1,66 @@
-#define DECOMP_INLINE_STRING_DTOR
 #include "game/player_arcade.h"
-
-#include <math.h>
 
 #include "game/gametime.h"
 #include "game/input_as.h"
 #include "game/man.h"
 #include "game/map.h"
 #include "game/message.h"
+#include "gfx/graph.h"
+#include "gfx/graph_core.h"
 #include "sprite/sprite.h"
+#include "ui/ui_scaling.h"
 #include "util/myerror.h"
 #include "util/polar.h"
 #include "world/group.h"
 #include "world/groups.h"
+
+#include <math.h>
 
 extern int g_relativeControl;
 
 // FUNCTION: ALIEN 0x43a8c0
 unsigned int PLAYER_ARCADE::SetCleverAttack(int p_on)
 {
-	unsigned int result = (((p_on != 0) & 1) << 1) | (*(unsigned int*) &m_msg & 0xfffffffd);
-	*(unsigned int*) &m_msg = result;
-	return result;
+	m_cleverAttackFlags = (m_cleverAttackFlags & ~2u) | (p_on ? 2u : 0u);
+	return m_cleverAttackFlags;
 }
-
-#include "gfx/graph.h"
 
 // FUNCTION: ALIEN 0x43e8c0
 PLAYER_ARCADE::PLAYER_ARCADE(int p_control, int p_army)
-	: PLAYER(p_control, p_army)
-	, m_msg(4, -1, 398.0f, 388.0f, 5, 5000)
+	: PLAYER(p_control, p_army), m_cleverAttackFlags(0), m_msg(4, -1, 398.0f, 388.0f, 5, 5000)
 {
-	MESSAGE& msg = m_msg;
-	float height = Graph->m_height;
-	msg.m_z = Graph->m_width - 242.0f;
-	msg.m_y = height - 92.0f;
+	RefreshUILayout();
 	m_msg.m_lineSpacing = 1;
+}
+
+void PLAYER_ARCADE::RefreshUILayout()
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	if (!graph) {
+		return;
+	}
+	UI_SCALING::MENU_POINT point = UI_SCALING::TransformScriptPoint(
+		graph->m_width - 242.0f,
+		graph->m_height - 92.0f,
+		0.0f,
+		graph->m_width,
+		graph->m_height,
+		graph->m_uiScale * graph->m_uiPresentationScale
+	);
+	m_msg.m_z = point.m_x;
+	m_msg.m_y = point.m_y;
 }
 
 // FUNCTION: ALIEN 0x43e930
 void PLAYER_ARCADE::PutMessage(const STRING& p_msg, float p_x, float p_y)
 {
-	((MESSAGE*) &m_msg)->Put(p_msg, p_x, p_y);
+	m_msg.Put(p_msg, p_x, p_y);
 }
 
 // FUNCTION: ALIEN 0x43e9f0
 void PLAYER_ARCADE::DeletePointerToSprite(SPRITE* p_sprite)
 {
-	((PLAYER_MSG*) &m_msg)->vf04(p_sprite);
+	m_msg.DeletePointerToSprite(p_sprite);
 	PLAYER::DeletePointerToSprite(p_sprite);
 }
 
@@ -86,8 +99,9 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 					int j = 0;
 					do {
 						SPRITE* s = ((SPRITE**) grp->m_data)[j];
-						if ((s->m_flag & 0x7c) == 0)
+						if ((s->m_flag & 0x7c) == 0) {
 							s->SetCommand(cmd, lastGoal);
+						}
 						++j;
 					} while (j < grp->m_n);
 				}
@@ -98,65 +112,71 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 
 	m_msg.Shift();
 	MAN* flagman = (MAN*) (SPRITE*) m_flagman;
-	if (!flagman || (int) flagman->m_vid->m_sprClass != 7)
+	if (!flagman || (int) flagman->m_vid->m_sprClass != 7) {
 		return;
+	}
 
 	if (p_input->m_button & 0x8000) {
 		float gz;
-		flagman->Action(33, (int) p_input->m_worldX,
-			(int) (Map->GetGroundZScr(p_input->m_worldX, p_input->m_worldY)
-				+ p_input->m_worldY), 0);
+		flagman->Action(
+			33,
+			(int) p_input->m_worldX,
+			(int) (Map->GetGroundZScr(p_input->m_worldX, p_input->m_worldY) + p_input->m_worldY),
+			0
+		);
 	}
 	if ((p_input->m_button & 0x700) || (p_input->m_button & 0x80)) {
 		MAN* f = (MAN*) (SPRITE*) m_flagman;
-		if ((f->m_flag & 0x7c) == 4)
+		if ((f->m_flag & 0x7c) == 4) {
 			f->SetCommandWithoutLink(0, 0);
+		}
 	}
 	if (p_input->m_button & 0x4000) {
 		MAN* f = (MAN*) (SPRITE*) m_flagman;
 		VID* vid = f->m_vid;
-		if ((int) vid->m_sprClass == 7
-			&& f->UNIT::m_ammo / 64 < vid->m_aniFireCount[8]) {
+		if ((int) vid->m_sprClass == 7 && f->UNIT::m_ammo / 64 < vid->m_aniFireCount[8]) {
 			int weapon = f->m_child->m_vid->m_idx - 11;
 			if (!f->ChangeWeapon(weapon)) {
-				do
+				do {
 					--weapon;
-				while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon));
+				} while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon));
 			}
 		}
-		((MAN*) (SPRITE*) m_flagman)->Action(37,
-			(int) p_input->m_worldX, (int) p_input->m_worldY, 0);
+		((MAN*) (SPRITE*) m_flagman)->Action(37, (int) p_input->m_worldX, (int) p_input->m_worldY, 0);
 	}
 
 	unsigned int key = p_input->m_key;
 	if (key >= 0x30 && key <= 0x39) {
 		MAN* f = (MAN*) (SPRITE*) m_flagman;
-		if ((int) f->m_vid->m_sprClass == 7)
+		if ((int) f->m_vid->m_sprClass == 7) {
 			f->ChangeWeapon(key - 48);
+		}
 	}
 
 	int weapon = ((MAN*) (SPRITE*) m_flagman)->m_vid->m_linkVid->m_idx - 10;
 	int wheel = p_input->m_wheel;
 	if (wheel == 0) {
 		int k = p_input->m_unk0x1c;
-		if (k == INPUT_AS::nextKey1)
+		if (k == INPUT_AS::nextKey1) {
 			wheel = 1;
-		else if (k == INPUT_AS::prevKey1)
+		}
+		else if (k == INPUT_AS::prevKey1) {
 			wheel = -1;
+		}
 	}
 	while (wheel > 0) {
 		if (weapon < 10) {
-			do
+			do {
 				++weapon;
-			while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon) && weapon < 10);
+			} while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon) && weapon < 10);
 		}
 		--wheel;
 	}
 	if (wheel < 0) {
 		if (weapon > 0) {
-			do
+			do {
 				--weapon;
-			while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon) && weapon > 0);
+			} while (!((MAN*) (SPRITE*) m_flagman)->ChangeWeapon(weapon) && weapon > 0);
 		}
 	}
 
@@ -166,8 +186,9 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 	ANGLE cursor;
 	cursor = Decart2Polar_f(dx, dy);
 	ANGLE aim(0);
-	if (g_relativeControl)
+	if (g_relativeControl) {
 		aim.m_dir = cursor.m_dir;
+	}
 
 	if ((p_input->m_button & 0x400) && (p_input->m_button & 0x100)) {
 		Flagman()->Rotate(aim + (unsigned char) 32 + (unsigned char) 8, CurrentTime - PrevCurrentTime);
@@ -195,12 +216,14 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 	}
 	else {
 		MAN* fm = (MAN*) (SPRITE*) m_flagman;
-		if ((fm->m_flag & 0x7c) != 4)
+		if ((fm->m_flag & 0x7c) != 4) {
 			fm->Stop();
+		}
 	}
 
-	if ((p_input->m_button & 0x700) || (p_input->m_button & 0x80))
+	if ((p_input->m_button & 0x700) || (p_input->m_button & 0x80)) {
 		((MAN*) (SPRITE*) m_flagman)->StartMove();
+	}
 
 	MAN* fm = (MAN*) (SPRITE*) m_flagman;
 	SPRITE* child = fm->m_child;
@@ -209,9 +232,9 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 			if (g_playerHeadAiming) {
 				int hdt;
 				ANGLE childDir;
-				if (!Flagman()->Rotate(Flagman()->Child()->Direction(),
-						CurrentTime - PrevCurrentTime).m_dir)
+				if (!Flagman()->Rotate(Flagman()->Child()->Direction(), CurrentTime - PrevCurrentTime).m_dir) {
 					g_playerHeadAiming = 0;
+				}
 			}
 			else {
 				unsigned char cd = child->m_dir;
@@ -228,10 +251,6 @@ void PLAYER_ARCADE::Control(INPUT_AS* p_input)
 
 	SPRITE* under = m_underCursor;
 	if (under && (((SPRITE*) under)->m_vid->m_unk0x0c & 2)) {
-		SPRITE* u = m_underCursor;
-		if (u) {
-			int refs;
-		}
-		(PTR_SPRITE&) m_underCursor = 0;
+		m_underCursor = 0;
 	}
 }

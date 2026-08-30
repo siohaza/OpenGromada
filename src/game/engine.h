@@ -5,30 +5,13 @@
 
 class VID;
 
+#include "game/unit.h"
 #include "sprite/list_sprite.h"
 #include "sprite/r_dot.h"
 #include "sprite/r_pos.h"
-#include "game/unit.h"
 #include "sprite/sprite.h"
 
-class R_DOT_REF {
-public:
-	R_DOT_REF()
-	{
-		m_dot = 0;
-		m_unk0x08 = 0;
-	}
-
-	R_DOT* m_dot; // 0x00
-	int m_pos; // 0x04
-	int m_unk0x08; // 0x08
-	int m_link; // 0x0c
-
-	R_DOT* LinkedDot() const { return m_dot ? m_dot->m_links[m_link].m_dot : 0; }
-	int LinkDist() const { return m_dot ? m_dot->m_links[m_link].m_dist : 0; }
-	int LinkBackLink() const { return m_dot ? m_dot->m_links[m_link].m_backLink : 0; }
-	ANGLE LinkedDotAngle() const { return ANGLE(m_dot ? m_dot->m_links[m_link].m_dir.m_dir : 0); }
-};
+using R_DOT_REF = R_POS;
 
 // VTABLE: ALIEN 0x47aabc
 
@@ -39,7 +22,8 @@ public:
 
 	ENGINE(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent);
 
-	int Action(int p_cmd, int p_a, int p_b, int p_c);
+	decomp_intptr Action(int p_cmd, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c);
+	static decomp_intptr PreserveDelegatedActionResult(decomp_intptr p_result) { return p_result; }
 	void SetRDot();
 	void ActNextCommandFighter();
 	void DeleteAttackToEngine();
@@ -50,28 +34,28 @@ public:
 	void DrawSecondaryInfo();
 	void DrawGoalLine();
 
-	int m_unk0x90; // 0x90
-	ENGINE* m_prevEngine; // 0x94
-	ENGINE* m_nextEngine; // 0x98
-	SPRITE* m_commandOwner; // 0x9c
-	R_DOT* m_commandDot; // 0xa0
-	R_DOT* m_secondaryCommandDot; // 0xa4
-	R_DOT* m_commandPathDot; // 0xa8
-	int m_unk0xac; // 0xac
-	float m_unk0xb0; // 0xb0
-	int m_unk0xb4; // 0xb4
-	R_DOT_REF m_curDotRef; // 0xb8
-	R_DOT_REF m_lastDotRef; // 0xc8
-	int m_unk0xd8; // 0xd8
-	int m_unk0xdc; // 0xdc
-	float m_unk0xe0; // 0xe0
-	float m_unk0xe4; // 0xe4
-	float m_unk0xe8; // 0xe8
-	int m_unk0xec; // 0xec
-	int m_unk0xf0; // 0xf0
-	undefined4 m_unk0xf4; // 0xf4
+	int m_unk0x90;                    // 0x90
+	ENGINE* m_prevEngine;             // 0x94
+	ENGINE* m_nextEngine;             // 0x98
+	SPRITE* m_commandOwner;           // 0x9c
+	R_DOT* m_commandDot;              // 0xa0
+	R_DOT* m_secondaryCommandDot;     // 0xa4
+	R_DOT* m_commandPathDot;          // 0xa8
+	int m_unk0xac;                    // 0xac
+	float m_unk0xb0;                  // 0xb0
+	int m_unk0xb4;                    // 0xb4
+	R_DOT_REF m_curDotRef;            // 0xb8
+	R_DOT_REF m_lastDotRef;           // 0xc8
+	int m_unk0xd8;                    // 0xd8
+	int m_unk0xdc;                    // 0xdc
+	float m_unk0xe0;                  // 0xe0
+	float m_unk0xe4;                  // 0xe4
+	float m_unk0xe8;                  // 0xe8
+	int m_unk0xec;                    // 0xec
+	int m_unk0xf0;                    // 0xf0
+	undefined4 m_unk0xf4;             // 0xf4
 	unsigned char m_pathLinks[0x9c4]; // 0xf8
-	int m_noPathLinks; // 0xabc
+	int m_noPathLinks;                // 0xabc
 
 	static SPRITE_LIST PathDots;
 
@@ -119,8 +103,5 @@ public:
 	int TrainWeaponRange();
 	void CheckPrevNextEngine();
 };
-
-DECOMP_SIZE_ASSERT(R_DOT_REF, 0x10)
-DECOMP_SIZE_ASSERT(ENGINE, 0xac0)
 
 #endif

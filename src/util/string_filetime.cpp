@@ -1,57 +1,48 @@
-#define DECOMP_INLINE_STRING_COPY_LIFETIME
+#include "platform/paths.h"
 #include "util/string.h"
 
-#include <windows.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <time.h>
 
 // FUNCTION: ALIEN 0x406900
 STRING FFileTime(const STRING& p_name)
 {
-	FILETIME creation;
-	FILETIME access;
-	FILETIME write;
 	STRING result;
-	const char* name = p_name.m_str;
-	HANDLE file = CreateFileA(name, 0x80000000, 0, 0, OPEN_EXISTING,
-		FILE_ATTRIBUTE_NORMAL, 0);
-	GetFileTime(file, &creation, &access, &write);
-	CloseHandle(file);
 
-	FILETIME local;
-	SYSTEMTIME system;
-	char text[80];
+	struct stat st;
+	memset(&st, 0, sizeof(st));
+	if (stat(Platform_ResolvePath(p_name.m_str), &st) != 0) {
+		return result;
+	}
 
-	// STRING: ALIEN 0x481858
-	result += "Cr-";
-	FileTimeToLocalFileTime(&write, &local);
-	FileTimeToSystemTime(&local, &system);
-	GetDateFormatA(LOCALE_USER_DEFAULT, 0, &system,
+	const time_t times[3] = {st.st_ctime, st.st_atime, st.st_mtime};
+	static const char* const labels[3] = {
+		// STRING: ALIEN 0x481858
+		"Cr-",
+		// STRING: ALIEN 0x481838
+		" La-",
+		// STRING: ALIEN 0x481830
+		" Lw-",
+	};
+
+	for (int i = 0; i < 3; ++i) {
+		char text[80];
+		struct tm local;
+#if defined(_WIN32)
+		localtime_s(&local, &times[i]);
+#else
+		localtime_r(&times[i], &local);
+#endif
+		result += labels[i];
 		// STRING: ALIEN 0x48184c
-		"yyyy-MM-dd", text, 80);
-	result += text;
-	result += " ";
-	GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &system,
+		strftime(text, sizeof(text), "%Y-%m-%d", &local);
+		result += text;
+		result += " ";
 		// STRING: ALIEN 0x481840
-		"hh:mm:ss", text, 80);
-	result += text;
+		strftime(text, sizeof(text), "%H:%M:%S", &local);
+		result += text;
+	}
 
-	// STRING: ALIEN 0x481838
-	result += " La-";
-	FileTimeToLocalFileTime(&write, &local);
-	FileTimeToSystemTime(&local, &system);
-	GetDateFormatA(LOCALE_USER_DEFAULT, 0, &system, "yyyy-MM-dd", text, 80);
-	result += text;
-	result += " ";
-	GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &system, "hh:mm:ss", text, 80);
-	result += text;
-
-	// STRING: ALIEN 0x481830
-	result += " Lw-";
-	FileTimeToLocalFileTime(&write, &local);
-	FileTimeToSystemTime(&local, &system);
-	GetDateFormatA(LOCALE_USER_DEFAULT, 0, &system, "yyyy-MM-dd", text, 80);
-	result += text;
-	result += " ";
-	GetTimeFormatA(LOCALE_USER_DEFAULT, 0, &system, "hh:mm:ss", text, 80);
-	result += text;
 	return result;
 }

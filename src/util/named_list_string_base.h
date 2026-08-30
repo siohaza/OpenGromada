@@ -1,10 +1,10 @@
 #ifndef NAMED_LIST_STRING_BASE_H
 #define NAMED_LIST_STRING_BASE_H
 
-#include <string.h>
-
 #include "util/decomp.h"
 #include "util/named_list_struct_string.h"
+
+#include <string.h>
 
 // VTABLE: ALIEN 0x47a33c
 
@@ -20,8 +20,9 @@ public:
 	// FUNCTION: ALIEN 0x412da0
 	~NAMED_LIST_STRING_BASE()
 	{
-		if (m_data)
+		if (m_data) {
 			delete[] m_data;
+		}
 		m_data = 0;
 		m_n = 0;
 	}
@@ -31,8 +32,9 @@ public:
 	{
 		NAMED_LIST_STRING_BASE* result = this;
 		this->~NAMED_LIST_STRING_BASE();
-		if (p_flags & 1)
+		if (p_flags & 1) {
 			operator delete(result);
+		}
 		return result;
 	}
 
@@ -41,8 +43,9 @@ public:
 		int i = m_n;
 		while (i) {
 			--i;
-			if (!strcmp(m_data[i].m_name.m_str, p_name.m_str))
+			if (!strcmp(m_data[i].m_name.m_str, p_name.m_str)) {
 				return i;
+			}
 		}
 		return -1;
 	}
@@ -53,16 +56,15 @@ public:
 	{
 		m_max = 0;
 		m_n = 0;
-		if (m_data)
+		if (m_data) {
 			delete[] m_data;
+		}
 		m_data = 0;
 	}
 
-	int m_n; // 0x04
-	int m_max; // 0x08
+	int m_n;                          // 0x04
+	int m_max;                        // 0x08
 	NAMED_LIST_STRUCT_STRING* m_data; // 0x0c
 };
-
-DECOMP_SIZE_ASSERT(NAMED_LIST_STRING_BASE, 0x10)
 
 #endif

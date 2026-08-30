@@ -1,17 +1,18 @@
-#define DECOMP_INLINE_SPRITE_DIRECTIONTO
 #include "sprite/plane.h"
-
-#include <stdlib.h>
 
 #include "game/gametime.h"
 #include "game/map.h"
+#include "sprite/plane_internal.h"
 #include "util/angle.h"
+#include "util/game_random.h"
 #include "util/polar.h"
 #include "video/vid.h"
 
-inline ANGLE::ANGLE(float p_x, float p_y)
+#include <stdlib.h>
+
+void PLANE_INTERNAL::RetailExactEmptyCheck(void* p_object)
 {
-	AngleAssign(this, Decart2Polar_f(p_x, p_y));
+	((PLANE*) p_object)->PLANE::CheckFlightProperties();
 }
 
 // FUNCTION: ALIEN 0x44ce60
@@ -23,7 +24,7 @@ PLANE::PLANE(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p
 }
 
 // FUNCTION: ALIEN 0x44ceb0
-decomp_intptr PLANE::Action(int p_action, int p_a, int p_b, int p_c)
+decomp_intptr PLANE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	switch (p_action) {
 	case 0x82:
@@ -46,35 +47,42 @@ decomp_intptr PLANE::Action(int p_action, int p_a, int p_b, int p_c)
 int PLANE::FreeFlight()
 {
 	if (m_ani == 4) {
-		if (rand() % 3)
+		if (GameRand() % 3) {
 			ChangeDirection(ANGLE((char) (Direction().m_dir - 0x20)));
-		else
+		}
+		else {
 			ChangeAnimation(2);
-	}
-	else if (m_ani == 5) {
-		if (rand() % 3)
-			ChangeDirection(ANGLE((char) (Direction().m_dir + 0x20)));
-		else
-			ChangeAnimation(2);
-	}
-	else if (m_ani == 2) {
-		if (rand() % 11 == 0) {
-			if (rand() % 2 != 0)
-				ChangeAnimation(4);
-			else
-				ChangeAnimation(5);
 		}
 	}
-	else
-		ChangeAnimation(2);
-	if (rand() % 21 == 0 && (m_unk0x8c & 1)) {
-		SPRITE* enemy = SeekEnemy();
-		if (enemy)
-			return SetCommand(4, enemy);
+	else if (m_ani == 5) {
+		if (GameRand() % 3) {
+			ChangeDirection(ANGLE((char) (Direction().m_dir + 0x20)));
+		}
+		else {
+			ChangeAnimation(2);
+		}
 	}
-
+	else if (m_ani == 2) {
+		if (GameRand() % 11 == 0) {
+			if (GameRand() % 2 != 0) {
+				ChangeAnimation(4);
+			}
+			else {
+				ChangeAnimation(5);
+			}
+		}
+	}
+	else {
+		ChangeAnimation(2);
+	}
+	if (GameRand() % 21 == 0 && (m_unk0x8c & 1)) {
+		SPRITE* enemy = SeekEnemy();
+		if (enemy) {
+			return SetCommand(4, enemy);
+		}
+	}
+	return 0;
 }
-
 // FUNCTION: ALIEN 0x44d0a0
 void PLANE::CheckFlightProperties()
 {
@@ -86,30 +94,33 @@ int PLANE::FlightToTargetAdditionalActions()
 	unsigned int prev = PrevCurrentTime;
 	unsigned int dur = m_vid->m_aniDuration[m_ani];
 	unsigned int dt = CurrentTime - prev;
-	if (dt <= dur)
+	if (dt <= dur) {
 		dt = dur;
+	}
 	int result = AttackTact(dt);
 	m_unk0x04 = result;
 	if (m_unk0x8c & 1) {
-		if (result != 6 || rand() % 21 == 0) {
+		if (result != 6 || GameRand() % 21 == 0) {
 			SPRITE* enemy = SeekEnemy();
-			if (enemy)
+			if (enemy) {
 				return SetCommand(4, enemy);
+			}
 		}
 	}
-
+	return 0;
 }
-
 // FUNCTION: ALIEN 0x44d120
 int PLANE::FlightToTarget()
 {
 	ANGLE dir = DirectionTo(m_goal);
 	unsigned int dur = m_vid->m_aniDuration[m_ani];
 	unsigned int dt = CurrentTime - PrevCurrentTime;
-	if (dt <= dur)
+	if (dt <= dur) {
 		dt = dur;
-	if (Rotate(dir, dt).m_dir == 0)
+	}
+	if (Rotate(dir, dt).m_dir == 0) {
 		ChangeAnimation(2);
+	}
 	return FlightToTargetAdditionalActions();
 }
 
@@ -125,10 +136,12 @@ void PLANE::ZSpeedInitialization()
 	z = m_z;
 	groundZ = Map->GetGroundZ_vid(m_vid, m_x, m_y);
 	groundZ += m_vid->m_unk0x60;
-	if (groundZ + 10.0f < z)
+	if (groundZ + 10.0f < z) {
 		m_unk0x24 = -m_vid->m_unk0x30;
-	else
+	}
+	else {
 		m_unk0x24 = 0;
+	}
 }
 
 // FUNCTION: ALIEN 0x44d250
@@ -161,18 +174,22 @@ int PLANE::PlaneNextCommand(int p_a, int p_b)
 {
 	int result = m_ani;
 	if (result < 0xf && result != 0xc) {
-		if (result >= 7 && result != 0xa)
+		if (result >= 7 && result != 0xa) {
 			ChangeAnimation(0);
+		}
 		ZSpeedInitialization();
 		CheckFlightProperties();
-		result = (int) m_parent;
-		if (!result) {
-			if (!(m_flag & 0x80))
+		if (!m_parent) {
+			if (!(m_flag & 0x80)) {
 				m_flag |= 0x80;
-			if (m_goal)
+			}
+			if (m_goal) {
 				return FlightToTargetAdditionalActions();
+			}
 			return FreeFlight();
 		}
+		// The original returned m_parent here as a truthy int.
+		return 1;
 	}
 	return result;
 }

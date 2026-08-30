@@ -2,6 +2,14 @@
 
 #include "util/myerror.h"
 
+void LIST_ACT::SetNumber(int p_n)
+{
+	m_n = p_n;
+	if (p_n > m_max) {
+		Expand(p_n);
+	}
+}
+
 // FUNCTION: ALIEN 0x405ef0
 void LIST_ACT::InsertFirst(ACT p_act)
 {
@@ -11,12 +19,14 @@ void LIST_ACT::InsertFirst(ACT p_act)
 		if (newMax > max) {
 			ACT* oldData = m_data;
 			m_data = new ACT[newMax];
-			if (!m_data)
+			if (!m_data) {
 				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			}
 			if (oldData) {
-				for (int i = 0; i < m_max; ++i)
+				for (int i = 0; i < m_max; ++i) {
 					m_data[i] = oldData[i];
-				operator delete(oldData);
+				}
+				delete[] oldData;
 			}
 			m_max = newMax;
 		}
@@ -39,12 +49,14 @@ void LIST_ACT::Insert(ACT p_act)
 		if (newMax > max) {
 			ACT* oldData = m_data;
 			m_data = new ACT[newMax];
-			if (!m_data)
+			if (!m_data) {
 				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			}
 			if (oldData) {
-				for (int i = 0; i < m_max; ++i)
+				for (int i = 0; i < m_max; ++i) {
 					m_data[i] = oldData[i];
-				operator delete(oldData);
+				}
+				delete[] oldData;
 			}
 			m_max = newMax;
 		}
@@ -63,12 +75,14 @@ void LIST_ACT::InsertBefore(int p_idx, ACT p_act)
 		if (newMax > max) {
 			ACT* oldData = m_data;
 			m_data = new ACT[newMax];
-			if (!m_data)
+			if (!m_data) {
 				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			}
 			if (oldData) {
-				for (int i = 0; i < m_max; ++i)
+				for (int i = 0; i < m_max; ++i) {
 					m_data[i] = oldData[i];
-				operator delete(oldData);
+				}
+				delete[] oldData;
 			}
 			m_max = newMax;
 		}
@@ -89,9 +103,9 @@ void LIST_ACT::Expand(int p_max)
 		ACT* oldData = m_data;
 		ACT* newData = new ACT[p_max];
 		m_data = newData;
-		if (!newData)
-			MYERROR::LogExit(::Error,
-				"!!!ERROR!!!::LIST: Not enough memory %i", p_max);
+		if (!newData) {
+			MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", p_max);
+		}
 		if (oldData) {
 			int i = 0;
 			if (m_max > 0) {
@@ -100,7 +114,7 @@ void LIST_ACT::Expand(int p_max)
 					++i;
 				} while (i < m_max);
 			}
-			operator delete(oldData);
+			delete[] oldData;
 		}
 		m_max = max;
 	}

@@ -17,4 +17,6 @@ public:
 
 extern REGISTRY* Registry;
 
+int Registry_GetIntExact(const STRING& p_path, const STRING& p_name, int p_default);
+
 #endif

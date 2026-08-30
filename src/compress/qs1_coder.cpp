@@ -23,21 +23,25 @@ int QS1_CODER::Write(const void* p_buf, int p_size, FILE* p_file)
 	unsigned int i = 0;
 	R_CODER rc;
 	rc.m_file = 0;
-	if (!p_file || !p_size)
+	if (!p_file || !p_size) {
 		return 0;
-	if ((unsigned int) p_size < 10)
+	}
+	if ((unsigned int) p_size < 10) {
 		return fwrite(buffer, 1, p_size, p_file);
+	}
 
-	rc.start_encoding(0, 0, (int) p_file);
+	rc.start_encoding(0, 0, p_file);
 	int syFreq;
 	int ltFreq;
 	int interleaved = 0;
 	while (i < (unsigned int) p_size) {
 		int sym;
-		if (m_mode == 2)
+		if (m_mode == 2) {
 			sym = (i < half) ? buffer[interleaved] : buffer[interleaved - 2 * half + 1];
-		else
+		}
+		else {
 			sym = buffer[i];
+		}
 		QSMODEL* model = &m_models[prevSym];
 		model->GetFreq(sym, &syFreq, &ltFreq);
 		rc.EncodeShift(syFreq, ltFreq, 12);
@@ -60,30 +64,38 @@ int QS1_CODER::Read(void* p_buffer, int p_count, FILE* p_stream)
 	int prevSym = 0;
 	R_CODER rc;
 	rc.m_file = 0;
-	if (!p_stream || !p_count)
+	if (!p_stream || !p_count) {
 		return 0;
-	if ((unsigned int) p_count < 10)
+	}
+	if ((unsigned int) p_count < 10) {
 		return fread(p_buffer, 1, p_count, p_stream);
-	if (rc.StartDecoding(p_stream) < 0)
+	}
+	if (rc.StartDecoding(p_stream) < 0) {
 		return 0;
+	}
 	int sym;
 	int ltFreq;
 	while (1) {
 		ltFreq = rc.DecodeCulShift(12);
 		sym = m_models[prevSym].GetSym(ltFreq);
-		if (sym == 256)
+		if (sym == 256) {
 			break;
+		}
 		if ((unsigned int) done >= (unsigned int) p_count) {
-			fprintf(stderr,
-					// STRING: ALIEN 0x483694
-					"!!!ERROR!!! decode");
+			fprintf(
+				stderr,
+				// STRING: ALIEN 0x483694
+				"!!!ERROR!!! decode"
+			);
 			break;
 		}
 		if (m_mode == 2) {
-			if ((unsigned int) done < half)
+			if ((unsigned int) done < half) {
 				((char*) p_buffer)[2 * done++] = sym;
-			else
+			}
+			else {
 				((char*) p_buffer)[2 * done++ - 2 * half + 1] = sym;
+			}
 		}
 		else {
 			((char*) p_buffer)[done++] = sym;

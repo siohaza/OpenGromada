@@ -1,12 +1,12 @@
 #ifndef GRAPH_H
 #define GRAPH_H
 
-#include "util/decomp.h"
-#include "util/string.h"
-#include "util/stream.h"
-#include "util/angle.h"
 #include "gfx/color.h"
 #include "gfx/graph_core.h"
+#include "util/angle.h"
+#include "util/decomp.h"
+#include "util/stream.h"
+#include "util/string.h"
 
 class VID;
 
@@ -14,9 +14,9 @@ class GRAPH : public GRAPH_CORE {
 public:
 	GRAPH(SETTINGS* p_settings) : GRAPH_CORE(p_settings) {}
 
-	int Init(void* p_hWnd);
+	int Init();
 	int ScreenShot(STRING* p_name, int p_x, int p_y, int p_w, int p_h);
-	void DrawDebugText(const char* p_format, ...);
+	void DrawDebugText(const char* p_format, ...) DECOMP_PRINTF(2, 3);
 	void DrawLoadBar(VID* p_vid);
 	void Tact(int p_draw);
 	void DrawSquall();
@@ -32,8 +32,18 @@ public:
 	void PutPixel(float p_x, float p_y, COLOR p_color);
 	void PutBigPixel(float p_x, float p_y, COLOR p_color);
 	void Box(float p_x, float p_y, float p_x1, float p_y1, COLOR p_color);
-	void DrawFog(float p_x0, float p_y0, float p_x1, float p_y1, int p_zTop, int p_zBottom,
-		COLOR p_color, int p_ramp, int p_zBase, int p_blend);
+	void DrawFog(
+		float p_x0,
+		float p_y0,
+		float p_x1,
+		float p_y1,
+		int p_zTop,
+		int p_zBottom,
+		COLOR p_color,
+		const unsigned short* p_ramp,
+		int p_zBase,
+		int p_blend
+	);
 	void DrawVid(VID* p_vid, int p_cadr, float p_x, float p_y, float p_z);
 	void Line(float p_x, float p_y, float p_x1, float p_y1, COLOR p_color);
 	int PlayMovie(const char* p_filename);
@@ -46,8 +56,6 @@ public:
 	unsigned char* SetWind(int p_force, ANGLE p_direction);
 	unsigned char* WindDirection(unsigned char* p_out);
 };
-
-DECOMP_SIZE_ASSERT(GRAPH, 0xe30)
 
 extern GRAPH* Graph;
 

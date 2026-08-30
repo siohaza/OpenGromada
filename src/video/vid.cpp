@@ -1,35 +1,32 @@
-
-#define DECOMP_GAMMA_DEFAULT_CTOR_ZERO
-#define DECOMP_INLINE_MAP_NEXTSPRITE
-#define DECOMP_INLINE_MAP_NEXTSPRITE_CURSOR
-#define DECOMP_INLINE_MAP_NEXTSPRITE_BYVALUE
-#define DECOMP_INLINE_MAP_FIRSTSPRITE
-
-#define DECOMP_INLINE_VID_ENTITIES_NUMBER_TOTAL
-
 #include "video/vid.h"
+
+#include "game/const.h"
+#include "game/map.h"
+#include "gfx/gamma.h"
+#include "gfx/graph.h"
+#include "sprite/sprite.h"
+#include "util/string.h"
+#include "video/vid_exdata.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-#include "game/const.h"
-#include "game/map.h"
-#include "sprite/sprite.h"
-#include "gfx/gamma.h"
-#include "video/vid_exdata.h"
-#include "util/string.h"
-
-// GLOBAL: ALIEN 0x490744
-int VID::viewXMin;
-
-// GLOBAL: ALIEN 0x482ac0
-int VID::viewXMax = 640;
-
-// GLOBAL: ALIEN 0x490748
-int VID::viewYMin;
-
-// GLOBAL: ALIEN 0x482ac4
-int VID::viewYMax = 480;
+int VID::ViewXMin()
+{
+	return Graph ? (int) Graph->m_viewXMin : 0;
+}
+int VID::ViewXMax()
+{
+	return Graph ? (int) Graph->m_viewXMax : 640;
+}
+int VID::ViewYMin()
+{
+	return Graph ? (int) Graph->m_viewYMin : 0;
+}
+int VID::ViewYMax()
+{
+	return Graph ? (int) Graph->m_viewYMax : 480;
+}
 
 // GLOBAL: ALIEN 0x490740
 VID* EmptyVid = new VID();
@@ -48,7 +45,7 @@ VID::VID() : m_name(STRING::EMPTY), m_colorSub(0), m_colorAdd(0), m_fname(STRING
 	m_gammaR = 1.0f;
 	m_gammaG = 1.0f;
 	m_gammaB = 1.0f;
-	m_unk0x47c &= 0xffffff80;
+	m_unk0x47c = 0;
 	m_sprClass = 6;
 	m_unk0x0c = 0;
 	m_flag = 0;
@@ -58,14 +55,14 @@ VID::VID() : m_name(STRING::EMPTY), m_colorSub(0), m_colorAdd(0), m_fname(STRING
 	m_unk0x384 = 12.0f;
 	m_unk0x388 = 8.0f;
 	m_weaponPtr = this;
-	*(unsigned short*) &m_pixelFlag = 0;
+	m_pixelFlag16 = 0;
 	m_mirror = this;
 	m_layer = 15;
 	m_idx = -1;
 	m_defaultMaxHp = 0;
 	m_noDir = 1;
 	m_unk0x390 = 0;
-	*(unsigned short*) &m_unk0x2f2[0] = 71;
+	m_defaultAniPeriod = 71;
 	m_nLinkVid = 0;
 	m_linkVid = 0;
 	m_weapon = 0;
@@ -100,8 +97,7 @@ void VID::DrawVidToVid(const SPRITE*)
 
 int VID::Draw(SPRITE*)
 {
-	if (0)
-		return 0;
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x413880
@@ -115,8 +111,9 @@ void* VID::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	VID* result = this;
 	this->~VID();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -132,29 +129,55 @@ VID::~VID()
 	VID* weapon = m_weaponPtr;
 	if (weapon != this) {
 		VID* last = m_weaponPtr;
-		while (last->m_weaponPtr != this)
+		while (last->m_weaponPtr != this) {
 			last = last->m_weaponPtr;
+		}
 		last->m_weaponPtr = weapon;
 	}
 
-	if (m_unk0x46c)
+	if (m_unk0x46c) {
 		operator delete(m_unk0x46c);
+	}
 	m_unk0x46c = 0;
-	if (m_unk0x470)
+	if (m_unk0x470) {
 		operator delete(m_unk0x470);
+	}
 	memset(&m_unk0x470, 0, sizeof(m_unk0x470));
-	if (m_fname != STRING::EMPTY)
+	if (m_fname != STRING::EMPTY) {
 		operator delete(m_fname);
+	}
 	char* name = m_name;
-	if (name != STRING::EMPTY)
+	if (name != STRING::EMPTY) {
 		operator delete(name);
+	}
+}
+
+static void AssignVidString(char*& p_destination, const char* p_source)
+{
+	STRING replacement(p_source);
+	if (p_destination != STRING::EMPTY) {
+		operator delete(p_destination);
+	}
+	p_destination = replacement.m_str;
+	replacement.m_str = STRING::EMPTY;
+}
+
+void VID::SetName(const char* p_name)
+{
+	AssignVidString(m_name, p_name);
+}
+
+void VID::SetFileName(const char* p_name)
+{
+	AssignVidString(m_fname, p_name);
 }
 
 // FUNCTION: ALIEN 0x413980
 unsigned int VID::ResetSprites()
 {
-	for (int i = 0; i < 20; ++i)
+	for (int i = 0; i < 20; ++i) {
 		m_unk0x408[i] = -1;
+	}
 	int hp = m_defaultMaxHp;
 	m_unk0x394[4] = -1;
 	m_unk0x394[3] = -1;
@@ -192,23 +215,29 @@ void VID::SetChildAndLink()
 			m_linkVid = Map->GetVid(m_nLinkVid)->m_mirror;
 		}
 		else {
-			Error(4,
-				  // STRING: ALIEN 0x482b20
-				  "LinkVid", nLink);
+			Error(
+				4,
+				// STRING: ALIEN 0x482b20
+				"LinkVid",
+				nLink
+			);
 		}
 	}
 	int* p = m_exData->m_unk0x84;
 	int n = 8;
 	do {
-		if (p[-8] || p[0] || p[8] || p[16])
+		if (p[-8] || p[0] || p[8] || p[16]) {
 			m_unk0x47c |= 1;
-		if (p[24] != 0x3f800000 || p[32] != 0x3f800000 || p[40] != 0x3f800000)
+		}
+		if (p[24] != 0x3f800000 || p[32] != 0x3f800000 || p[40] != 0x3f800000) {
 			m_unk0x47c |= 2;
-		if (((float*) p)[48] != 0.0f || ((float*) p)[56] != 0.0f ||
-			((float*) p)[64] != 0.0f)
+		}
+		if (((float*) p)[48] != 0.0f || ((float*) p)[56] != 0.0f || ((float*) p)[64] != 0.0f) {
 			m_unk0x47c |= 4;
-		if (p[72] || p[80] || p[88])
+		}
+		if (p[72] || p[80] || p[88]) {
 			m_unk0x47c |= 8;
+		}
 		++p;
 		--n;
 	} while (n);
@@ -218,26 +247,27 @@ void VID::SetChildAndLink()
 	else if ((m_unk0x47c & 0xF) != 0 || (m_flag & 0x400) != 0) {
 		m_unk0x478 = 1;
 	}
-	int* pChild = m_unk0x20c;
-	int k = 17;
-	do {
-		int c = *pChild;
+	// Resolve animation child VIDs without crossing array bounds.
+	for (int i = 0; i < 17; ++i) {
+		int c = m_unk0x20c[i];
 		if (c) {
-			if (Map->VidExists(abs(*pChild))) {
-				VID* m = Map->GetVid(abs(*pChild))->m_mirror;
-				pChild[17] = (int) m;
-				if (m->m_flag & 0x80)
+			if (Map->VidExists(abs(c))) {
+				VID* m = Map->GetVid(abs(c))->m_mirror;
+				m_aniChildVid[i] = m;
+				if (m->m_flag & 0x80) {
 					m_unk0x478 = 1;
+				}
 			}
 			else {
-				Error(4,
-					  // STRING: ALIEN 0x482b18
-					  "child", c);
+				Error(
+					4,
+					// STRING: ALIEN 0x482b18
+					"child",
+					c
+				);
 			}
 		}
-		++pChild;
-		--k;
-	} while (k);
+	}
 }
 
 // FUNCTION: ALIEN 0x414570
@@ -247,7 +277,8 @@ int VID::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 	if (p_idx < 4) {
 		m_gamma[p_idx].m_a = p_gamma.m_a;
 		m_gamma[p_idx].m_b = p_gamma.m_b;
-	} else if (p_idx != 4) {
+	}
+	else if (p_idx != 4) {
 		// STRING: ALIEN 0x482b94
 		result = Error(4, "n_gamma in VID::SetGamma", p_idx);
 	}
@@ -258,25 +289,33 @@ int VID::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 int VID::GetFireDamage()
 {
 	int fd;
-	if (m_unk0x5c)
+	if (m_unk0x5c) {
 		fd = m_unk0x5c->GetFireDamage();
-	else
+	}
+	else {
 		fd = 0;
+	}
 	int v5;
-	if (m_aniChildVid[15])
-		v5 = m_aniFireCount[15] * ((VID*) m_aniChildVid[15])->GetFireDamage();
-	else
+	if (m_aniChildVid[15]) {
+		v5 = m_aniFireCount[15] * (m_aniChildVid[15])->GetFireDamage();
+	}
+	else {
 		v5 = 0;
+	}
 	int v7;
-	if (m_aniChildVid[14])
-		v7 = m_aniFireCount[14] * ((VID*) m_aniChildVid[14])->GetFireDamage();
-	else
+	if (m_aniChildVid[14]) {
+		v7 = m_aniFireCount[14] * (m_aniChildVid[14])->GetFireDamage();
+	}
+	else {
 		v7 = 0;
+	}
 	int wterm;
-	if (m_weaponVid)
+	if (m_weaponVid) {
 		wterm = m_aniFireCount[8] * m_weaponVid->GetFireDamage();
-	else
+	}
+	else {
 		wterm = 0;
+	}
 	return m_fireDamage + wterm + v7 + v5 + fd;
 }
 
@@ -284,8 +323,9 @@ int VID::GetFireDamage()
 int VID::GetBuildTime()
 {
 	VID* vid = m_unk0x5c;
-	if (vid && vid->m_unk0x40)
+	if (vid && vid->m_unk0x40) {
 		return vid->m_exData->m_buildTime / 1000;
+	}
 	return m_exData->m_buildTime / 1000;
 }
 
@@ -307,19 +347,22 @@ void VID::SetHpCoeff(int p_army, int p_coeff)
 {
 	p_army &= 3;
 	int oldMax = m_maxHp[p_army];
-	if (p_coeff >= 0)
+	if (p_coeff >= 0) {
 		m_maxHp[p_army] = p_coeff * m_defaultMaxHp / 100;
+	}
 	if (m_defaultMaxHp) {
 		int iter;
 		SPRITE* sprite = Map->FirstSprite(m_layer, &iter);
 		while (sprite) {
-			if (sprite->m_vid == this && ((sprite->m_flag >> 11) & 3) == p_army)
+			if (sprite->m_vid == this && ((sprite->m_flag >> 11) & 3) == p_army) {
 				sprite->ChangeHp(16 * m_maxHp[p_army] * sprite->m_unk0x54 / oldMax / 16);
+			}
 			sprite = Map->NextSprite(m_layer, &iter);
 		}
 	}
-	if (m_unk0x5c)
+	if (m_unk0x5c) {
 		m_unk0x5c->SetHpCoeff(p_army, p_coeff);
+	}
 }
 
 // FUNCTION: ALIEN 0x414990
@@ -327,21 +370,23 @@ VID* VID::SetMaxHp(int p_army, int p_maxHp)
 {
 	p_army &= 3;
 	int oldMax = m_maxHp[p_army];
-	if (p_maxHp >= 0)
+	if (p_maxHp >= 0) {
 		m_maxHp[p_army] = p_maxHp;
+	}
 	if (m_defaultMaxHp) {
 		int iter;
 		SPRITE* sprite = Map->FirstSprite(m_layer, &iter);
 		while (sprite) {
-			if (sprite->m_vid == this && ((sprite->m_flag >> 11) & 3) == p_army)
+			if (sprite->m_vid == this && ((sprite->m_flag >> 11) & 3) == p_army) {
 				sprite->ChangeHp(((sprite->m_unk0x54 * m_maxHp[p_army]) << 8) / oldMax / 256);
+			}
 			sprite = Map->NextSprite(m_layer, &iter);
 		}
 	}
-	if (m_unk0x5c)
+	if (m_unk0x5c) {
 		return m_unk0x5c->SetMaxHp(p_army, p_maxHp);
-	if (0)
-		return 0;
+	}
+	return this;
 }
 
 // FUNCTION: ALIEN 0x414a80
@@ -349,13 +394,11 @@ float VID::CalculateZSpeed(float p_dz, float p_dist)
 {
 	float speed;
 	if (m_flag & 2) {
-		speed = p_dist * Const->m_unk0x08 / m_unk0x2c * 0.5f
-			+ p_dz * m_unk0x2c / p_dist;
+		speed = p_dist * Const->m_unk0x08 / m_unk0x2c * 0.5f + p_dz * m_unk0x2c / p_dist;
 		speed *= speed > 0.0f ? 1.1f : 0.9f;
 	}
 	else if (m_flag & 4) {
-		speed = p_dist * Const->m_unk0x0c / m_unk0x2c * 0.5f
-			+ p_dz * m_unk0x2c / p_dist;
+		speed = p_dist * Const->m_unk0x0c / m_unk0x2c * 0.5f + p_dz * m_unk0x2c / p_dist;
 		speed *= speed > 0.0f ? 1.1f : 0.9f;
 	}
 	else if (m_flag & 0x8000000) {
@@ -367,10 +410,12 @@ float VID::CalculateZSpeed(float p_dz, float p_dist)
 	else {
 		speed = 0.0f;
 	}
-	if (speed > m_unk0x30)
+	if (speed > m_unk0x30) {
 		return m_unk0x30;
-	if (speed < -m_unk0x30)
+	}
+	if (speed < -m_unk0x30) {
 		return -m_unk0x30;
+	}
 	return speed;
 }
 
@@ -396,8 +441,9 @@ int VID::HaveWeapon()
 int VID::GetMaxAmmo()
 {
 	VID* linkVid = m_unk0x5c;
-	if (linkVid && linkVid->m_weaponVid && linkVid->m_unk0x40)
+	if (linkVid && linkVid->m_weaponVid && linkVid->m_unk0x40) {
 		return linkVid->m_exData->m_maxAmmo;
+	}
 	return m_exData->m_maxAmmo;
 }
 
@@ -459,6 +505,5 @@ unsigned int VID::IsLight()
 // FUNCTION: ALIEN 0x442e00
 ANGLE VID::SteppedDirection(ANGLE p_dir) const
 {
-	return m_noDir ? ANGLE((int) (((VID*) this)->RealDirection(p_dir) << 8) / (int) m_noDir)
-		: p_dir;
+	return m_noDir ? ANGLE((int) (((VID*) this)->RealDirection(p_dir) << 8) / (int) m_noDir) : p_dir;
 }

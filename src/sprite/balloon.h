@@ -16,7 +16,7 @@ public:
 	void CheckFlightProperties();
 	int FlightToTargetAdditionalActions();
 
-	int m_unk0x90; // 0x90
+	int m_unk0x90;       // 0x90
 	char m_landingState; // 0x94
 
 	int IsBalloonMoveFinished();

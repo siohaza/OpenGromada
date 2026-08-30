@@ -11,6 +11,4 @@ public:
 	virtual int Load(const STRING& p_name);
 };
 
-DECOMP_SIZE_ASSERT(PICTURE_Z, 0x42c)
-
 #endif

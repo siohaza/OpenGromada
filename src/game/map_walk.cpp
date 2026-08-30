@@ -1,12 +1,6 @@
-
-#define DECOMP_INLINE_MAP_NEXTSPRITE
-#define DECOMP_INLINE_MAP_FIRSTSPRITE
-#define DECOMP_INLINE_MAP_NEXTSPRITE_CURSOR
-
-#include "game/map.h"
-
 #include "game/engine.h"
 #include "game/gametime.h"
+#include "game/map.h"
 #include "gfx/graph.h"
 #include "sprite/sprite.h"
 
@@ -33,10 +27,10 @@ void MAP::DeleteExtraVid()
 {
 	for (int layer = 0; layer < 17; ++layer) {
 		int iter;
-		for (SPRITE* sprite = FirstSprite(layer, &iter); sprite;
-			 sprite = NextSprite(layer, &iter)) {
-			if (sprite->m_vid->m_pixelFlag16 & 0x200)
+		for (SPRITE* sprite = FirstSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {
+			if (sprite->m_vid->m_pixelFlag16 & 0x200) {
 				sprite->ScalarDeletingDestructor(1);
+			}
 		}
 	}
 	int i = m_noVid - 1;
@@ -46,8 +40,9 @@ void MAP::DeleteExtraVid()
 		do {
 			VID* v = *vid;
 			if (v && (v->m_pixelFlag16 & 0x200)) {
-				if (*vid)
+				if (*vid) {
 					v->ScalarDeletingDestructor(1);
+				}
 				*vid = 0;
 			}
 			--vid;

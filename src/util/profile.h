@@ -12,8 +12,6 @@ public:
 	STRING GetString(const STRING& p_app, const STRING& p_key, const STRING& p_default);
 };
 
-DECOMP_SIZE_ASSERT(PROFILE, 0x4)
-
 extern PROFILE* Strings;
 
 #endif

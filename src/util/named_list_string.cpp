@@ -1,9 +1,7 @@
-#define DECOMP_INLINE_NAMED_LIST_STRUCT_STRING_DTOR
-#define DECOMP_INLINE_STRING_DTOR
 #include "util/named_list_string.h"
 
-#include "util/named_list_struct_string.h"
 #include "util/myerror.h"
+#include "util/named_list_struct_string.h"
 
 // FUNCTION: ALIEN 0x40b0c0
 NAMED_LIST_STRING::NAMED_LIST_STRING()
@@ -19,15 +17,14 @@ void NAMED_LIST_STRING::Insert(STRING p_name, STRING p_value)
 			NAMED_LIST_STRUCT_STRING* oldData = m_data;
 			NAMED_LIST_STRUCT_STRING* newData = new NAMED_LIST_STRUCT_STRING[newMax];
 			m_data = newData;
-			if (!newData)
-				MYERROR::LogExit(::Error,
-					"!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			if (!newData) {
+				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			}
 			if (oldData) {
-				for (int i = 0; i < m_max; ++i)
+				for (int i = 0; i < m_max; ++i) {
 					m_data[i] = oldData[i];
-			#pragma inline_depth(0)
+				}
 				delete[] oldData;
-			#pragma inline_depth(8)
 			}
 			m_max = newMax;
 		}

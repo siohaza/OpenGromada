@@ -1,7 +1,4 @@
-#define DECOMP_INLINE_STRING_DTOR
 #include "ui/mousetips.h"
-
-#include <string.h>
 
 #include "game/const.h"
 #include "game/gametime.h"
@@ -9,8 +6,11 @@
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "sprite/sprite.h"
+#include "ui/text_encoding.h"
 #include "util/string.h"
 #include "video/vid.h"
+
+#include <string.h>
 
 // GLOBAL: ALIEN 0x5da538
 static unsigned int MouseLastMove;
@@ -33,34 +33,39 @@ void MOUSETIPS::Tact(INPUT_AS* p_input)
 		OldX = p_input->m_x;
 		OldY = p_input->m_y;
 	}
-	if (RealCurrentTime - MouseLastMove > Const->m_unk0x34 && !(p_input->m_button & 1)
-		&& !p_input->m_key && !(Map->m_menu.m_state & 1) && (Map->m_flag & 0x100000)) {
+	if (RealCurrentTime - MouseLastMove > Const->m_unk0x34 && !(p_input->m_button & 1) && !p_input->m_key &&
+		!(Map->m_menu.m_state & 1) && (Map->m_flag & 0x100000)) {
 		if (!m_sprite) {
 			VID* vid = Map->GetVid(6);
 			OldString = Map->GetMouseTipsString();
 			if (vid != EmptyVid && strcmp(OldString.m_str, empty_str)) {
-				float x = p_input->m_x + 5.0f;
-				float y = p_input->m_y - vid->m_footprintHeight + 3000.0f - 10.0f;
-				float half = vid->m_footprintHeight * 0.5f;
-				if (half + y - 3000.0f <= (double) Graph->m_viewYMin)
-					y = half + p_input->m_y + 3010.0f;
-				if ((int) (strlen(OldString.m_str) + 2) * vid->m_footprintWidth + x >=
-					(double) Graph->m_viewXMax)
-					x = (double) Graph->m_viewXMax -
-						(int) (strlen(OldString.m_str) + 2) * vid->m_footprintWidth;
-				m_sprite = Map->CreateSprite(vid, x, y, 3000.0f, ANGLE(0), 0);
+				int columns = TEXT_ENCODING::Measure(OldString.m_str).m_columns;
+				UI_SCALING::MOUSE_TIP_PLACEMENT placement = UI_SCALING::PlaceMouseTip(
+					p_input->m_x,
+					p_input->m_y,
+					Graph->m_viewXMax,
+					Graph->m_viewYMin,
+					vid->m_footprintWidth,
+					vid->m_footprintHeight,
+					columns,
+					Graph->m_uiScale * Graph->m_uiPresentationScale,
+					3000.0f
+				);
+				m_sprite = Map->CreateSprite(vid, placement.m_x, placement.m_y, 3000.0f, ANGLE(0), 0);
 				if (m_sprite) {
 					STRING tip = "{" + OldString + "}";
-					m_sprite->Action(120, (int) &tip, 0, 0);
+					m_sprite->Action(120, (decomp_intptr) &tip, 0, 0);
 				}
 			}
 			return;
 		}
-		if (RealCurrentTime - MouseLastMove <= Const->m_unk0x34 + 500)
+		if (RealCurrentTime - MouseLastMove <= Const->m_unk0x34 + 500) {
 			return;
+		}
 		MouseLastMove += 500;
-		if (strcmp(Map->GetMouseTipsString().m_str, OldString.m_str) != 0)
+		if (strcmp(Map->GetMouseTipsString().m_str, OldString.m_str) != 0) {
 			Clear();
+		}
 		return;
 	}
 	Clear();
@@ -69,8 +74,9 @@ void MOUSETIPS::Tact(INPUT_AS* p_input)
 void MOUSETIPS::Clear()
 {
 	SPRITE* sprite = m_sprite;
-	if (sprite)
+	if (sprite) {
 		((DELETABLE*) sprite)->vf00(1);
+	}
 	m_sprite = 0;
 }
 
@@ -78,7 +84,8 @@ void MOUSETIPS::Clear()
 SPRITE* MOUSETIPS::DeletePointerToSprite(SPRITE* p_sprite)
 {
 	SPRITE* result = m_sprite;
-	if (result == p_sprite)
+	if (result == p_sprite) {
 		m_sprite = 0;
+	}
 	return result;
 }

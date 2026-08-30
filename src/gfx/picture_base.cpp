@@ -1,8 +1,8 @@
-#define DECOMP_INLINE_STRING_DTOR
 #include "gfx/picture_base.h"
 
-#include "util/string.h"
+#include "platform/paths.h"
 #include "util/myerror.h"
+#include "util/string.h"
 
 #include <string.h>
 
@@ -24,8 +24,9 @@ void* PICTURE_BASE::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	PICTURE_BASE* result = this;
 	this->~PICTURE_BASE();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -46,12 +47,15 @@ PICTURE_BASE::PICTURE_BASE(int p_width, int p_height, int p_bpp)
 // FUNCTION: ALIEN 0x426f50
 int PICTURE_BASE::Close()
 {
-	if (m_pixels)
+	if (m_pixels) {
 		operator delete(m_pixels);
-	int result = (int) m_file;
+	}
+	FILE* file = m_file;
+	int result = 0;
 	m_pixels = 0;
-	if (result)
-		result = fclose((FILE*) result);
+	if (file) {
+		result = fclose(file);
+	}
 	m_file = 0;
 	m_noFrames = 0;
 	m_width = 0;
@@ -62,32 +66,54 @@ int PICTURE_BASE::Close()
 // FUNCTION: ALIEN 0x426f90
 int PICTURE_BASE::SaveTGA(const STRING& p_name, int p_x, int p_y, int p_w, int p_h)
 {
-	unsigned char header[18] = { 0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 1 };
-	if (!m_pixels)
-		return (int) MYERROR::Error(::Error,
+	unsigned char header[18] = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 24, 1};
+	if (!m_pixels) {
+		return MYERROR::Error(
+			::Error,
 			// STRING: ALIEN 0x483770
-			"PICTURE '%s'", 10,
+			"PICTURE '%s'",
+			10,
 			// STRING: ALIEN 0x4837a0
-			"SaveTGA-not picture", 0, m_name);
-	if (p_h == -1)
+			"SaveTGA-not picture",
+			0,
+			m_name.m_str
+		);
+	}
+	if (p_h == -1) {
 		p_h = m_height;
-	if (p_w == -1)
+	}
+	if (p_w == -1) {
 		p_w = m_width;
-	if (p_x + p_w > m_width || p_y + p_h > m_height)
-		return (int) MYERROR::Error(::Error, "PICTURE '%s'", 4,
+	}
+	if (p_x + p_w > m_width || p_y + p_h > m_height) {
+		return MYERROR::Error(
+			::Error,
+			"PICTURE '%s'",
+			4,
 			// STRING: ALIEN 0x483790
-			"size in SaveTGA", 0, m_name);
+			"size in SaveTGA",
+			0,
+			m_name.m_str
+		);
+	}
 	FILE* file = 0;
-	if (*p_name.m_str)
-		file = fopen(p_name.m_str,
+	if (*p_name.m_str) {
+		file = Platform_FOpen(
+			p_name.m_str,
 			// STRING: ALIEN 0x481814
-			"wb");
-	if (!file)
-		return (int) MYERROR::Error(::Error, "PICTURE '%s'", 7, p_name.m_str, 0, m_name);
-	if (m_bpp == 4)
+			"wb"
+		);
+	}
+	if (!file) {
+		return MYERROR::Error(::Error, "PICTURE '%s'", 7, p_name.m_str, 0, m_name.m_str);
+	}
+	if (m_bpp == 4) {
 		header[16] = m_bpp * 8;
-	*(short*) &header[12] = (short) p_w;
-	*(short*) &header[14] = (short) p_h;
+	}
+	header[12] = (unsigned char) p_w;
+	header[13] = (unsigned char) ((unsigned int) p_w >> 8);
+	header[14] = (unsigned char) p_h;
+	header[15] = (unsigned char) ((unsigned int) p_h >> 8);
 	header[0] = 0;
 	header[2] &= ~8;
 	fwrite(header, 18, 1, file);
@@ -111,13 +137,16 @@ int PICTURE_BASE::SaveTGA(const STRING& p_name, int p_x, int p_y, int p_w, int p
 // FUNCTION: ALIEN 0x4271b0
 int PICTURE_BASE::GetData(int p_x, int p_y)
 {
-	if (p_x < 0 || p_y < 0 || p_x >= m_width || p_y >= m_height)
+	if (p_x < 0 || p_y < 0 || p_x >= m_width || p_y >= m_height) {
 		return 0;
+	}
 	switch (m_bpp) {
 	case 4:
 		return ((int*) m_pixels)[m_width * p_y + p_x];
-	case 3:
-		return *(int*) (m_pixels + (m_width * p_y + p_x) * 3) & 0xffffff;
+	case 3: {
+		const unsigned char* pixel = m_pixels + (m_width * p_y + p_x) * 3;
+		return (int) pixel[0] | ((int) pixel[1] << 8) | ((int) pixel[2] << 16);
+	}
 	case 2:
 		return ((unsigned short*) m_pixels)[m_width * p_y + p_x];
 	case 1:
@@ -129,15 +158,18 @@ int PICTURE_BASE::GetData(int p_x, int p_y)
 // FUNCTION: ALIEN 0x427250
 void PICTURE_BASE::PutData(int p_x, int p_y, unsigned int p_data)
 {
-	if (p_x < 0 || p_y < 0 || p_x >= m_width || p_y >= m_height)
+	if (p_x < 0 || p_y < 0 || p_x >= m_width || p_y >= m_height) {
 		return;
+	}
 	switch (m_bpp) {
 	case 4:
 		((unsigned int*) m_pixels)[p_x + p_y * m_width] = p_data;
 		break;
 	case 3: {
-		*(unsigned int*) (m_pixels + 3 * (p_x + p_y * m_width)) &= 0xff000000;
-		*(unsigned int*) (m_pixels + 3 * (p_x + p_y * m_width)) |= p_data & 0xffffff;
+		unsigned char* pixel = m_pixels + 3 * (p_x + p_y * m_width);
+		pixel[0] = (unsigned char) p_data;
+		pixel[1] = (unsigned char) (p_data >> 8);
+		pixel[2] = (unsigned char) (p_data >> 16);
 		break;
 	}
 	case 2:
@@ -157,13 +189,17 @@ void PICTURE_BASE::PutPixel(int p_x, int p_y, COLOR p_color)
 		case 4:
 			((unsigned int*) m_pixels)[p_x + p_y * m_width] = p_color.m_value;
 			break;
-		case 3:
-			*(unsigned int*) (m_pixels + 3 * (p_x + p_y * m_width)) &= 0xff000000;
-			*(unsigned int*) (m_pixels + 3 * (p_x + p_y * m_width)) |= p_color.m_value & 0xffffff;
+		case 3: {
+			unsigned char* pixel = m_pixels + 3 * (p_x + p_y * m_width);
+			pixel[0] = (unsigned char) p_color.m_value;
+			pixel[1] = (unsigned char) (p_color.m_value >> 8);
+			pixel[2] = (unsigned char) (p_color.m_value >> 16);
 			break;
+		}
 		case 2:
 			((unsigned short*) m_pixels)[p_x + p_y * m_width] =
-				(unsigned short) ((p_color.m_value >> 9 & 0x7c00) | (p_color.m_value >> 6 & 0x3e0) | (p_color.m_value >> 3 & 0x1f));
+				(unsigned short) ((p_color.m_value >> 9 & 0x7c00) | (p_color.m_value >> 6 & 0x3e0) |
+								  (p_color.m_value >> 3 & 0x1f));
 			break;
 		case 1:
 			m_pixels[p_x + p_y * m_width] = (unsigned char) p_color.m_value;
@@ -200,10 +236,12 @@ int* PICTURE_BASE::GetPixel(int* p_out, int p_x, int p_y)
 		index = p_x + p_y * width;
 		*p_out = ((unsigned int*) m_pixels)[index];
 		return p_out;
-	case 2:
+	case 2: {
 		index = p_x + p_y * width;
-		*p_out = *(unsigned int*) (m_pixels + 3 * index) & 0xffffff;
+		const unsigned char* pixel = m_pixels + 3 * index;
+		*p_out = (int) pixel[0] | ((int) pixel[1] << 8) | ((int) pixel[2] << 16);
 		return p_out;
+	}
 	case 1: {
 		index = p_x + p_y * width;
 		const RGB555* rgb = &((RGB555*) m_pixels)[index];
@@ -211,9 +249,7 @@ int* PICTURE_BASE::GetPixel(int* p_out, int p_x, int p_y)
 		return p_out;
 	}
 	case 0:
-		*p_out = COLOR(m_pixels[p_x + p_y * width], m_pixels[p_x + p_y * width],
-			m_pixels[p_x + p_y * width])
-			.m_value;
+		*p_out = COLOR(m_pixels[p_x + p_y * width], m_pixels[p_x + p_y * width], m_pixels[p_x + p_y * width]).m_value;
 		return p_out;
 	}
 	*p_out = 0xff000000;
@@ -223,10 +259,11 @@ int* PICTURE_BASE::GetPixel(int* p_out, int p_x, int p_y)
 // FUNCTION: ALIEN 0x4275b0
 int PICTURE_BASE::Rewind()
 {
-	int result = (int) m_pixels;
-	if (result) {
-		if (m_file)
+	int result = 0;
+	if (m_pixels) {
+		if (m_file) {
 			fseek(m_file, m_unk0x428, 0);
+		}
 		m_frame = -1;
 		result = NextFrame();
 	}
@@ -238,8 +275,9 @@ int PICTURE_BASE::NextFrame()
 {
 	int result = m_noFrames;
 	if (result) {
-		if (++m_frame >= result)
+		if (++m_frame >= result) {
 			return Rewind();
+		}
 	}
 	return result;
 }
@@ -250,32 +288,21 @@ int PICTURE_BASE::Load(const STRING& p_name)
 	Close();
 	const char* name = p_name.m_str;
 	if (!strcmp(name, empty_str)) {
-		MYERROR::Error(::Error,
-			"PICTURE '%s'", 4,
+		MYERROR::Error(
+			::Error,
+			"PICTURE '%s'",
+			4,
 			// STRING: ALIEN 0x4837b4
-			"filename", 0, m_name);
+			"filename",
+			0,
+			m_name.m_str
+		);
 		return 1;
 	}
-	char* lower;
-	if (name && *name)
-		((STRING*) &lower)->Copy(name, strlen(name));
-	else
-		lower = STRING::EMPTY;
-	_strlwr(lower);
-	char* stored;
-	if (*lower)
-		((STRING*) &stored)->Copy(lower, strlen(lower));
-	else
-		stored = STRING::EMPTY;
-	if (lower != STRING::EMPTY)
-		operator delete(lower);
-	(STRING&) m_name = *(STRING*) &stored;
-	if (stored != STRING::EMPTY)
-		operator delete(stored);
-	m_file = *p_name.m_str ? fopen(p_name.m_str, "rb") : 0;
+	m_name = name;
+	m_file = *p_name.m_str ? Platform_FOpen(p_name.m_str, "rb") : 0;
 	if (!m_file) {
-		MYERROR::Error(::Error,
-			"PICTURE '%s'", 7, empty_str, 0, m_name);
+		MYERROR::Error(::Error, "PICTURE '%s'", 7, empty_str, 0, m_name.m_str);
 		return 1;
 	}
 	return 0;

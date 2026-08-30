@@ -11,10 +11,17 @@ class ENGINE;
 
 class R_POS {
 public:
-	R_DOT* m_dot; // 0x00
-	undefined m_unk0x04[8]; // 0x04
-	int m_link; // 0x0c
+	R_POS() : m_dot(0), m_pos(0), m_unk0x08(0), m_link(0) {}
 
+	R_DOT* m_dot;  // 0x00
+	int m_pos;     // 0x04
+	int m_unk0x08; // 0x08
+	int m_link;    // 0x0c
+
+	R_DOT* LinkedDot() const;
+	int LinkDist() const;
+	int LinkBackLink() const;
+	ANGLE LinkedDotAngle() const;
 	ANGLE GetAngle() const;
 	R_DOT* GetLinkedDot();
 	int Write(STREAM* p_stream) const;

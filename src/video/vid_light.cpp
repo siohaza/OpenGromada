@@ -6,6 +6,8 @@
 #include "sprite/sprite.h"
 #include "util/resource.h"
 
+#include <bit>
+
 // FUNCTION: ALIEN 0x412800
 VID* VID_LIGHT::CreateMirror()
 {
@@ -17,8 +19,9 @@ void* VID_LIGHT::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	VID_LIGHT* result = this;
 	this->~VID_LIGHT();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -28,11 +31,11 @@ VID_LIGHT::VID_LIGHT(VID_LIGHT& p_other)
 	m_weaponPtr = p_other.m_weaponPtr;
 	p_other.m_weaponPtr = this;
 	m_layer = p_other.m_layer;
-	*(unsigned short*) &m_pixelFlag = *(unsigned short*) &p_other.m_pixelFlag;
-	*(unsigned short*) &m_unk0x2f2[2] = *(unsigned short*) &p_other.m_unk0x2f2[2];
-	*(unsigned short*) &m_unk0x2f2[0] = *(unsigned short*) &p_other.m_unk0x2f2[0];
-	*(unsigned short*) &m_unk0x2f2[4] = *(unsigned short*) &p_other.m_unk0x2f2[4];
-	*(unsigned short*) &m_unk0x2f2[6] = *(unsigned short*) &p_other.m_unk0x2f2[6];
+	m_pixelFlag16 = p_other.m_pixelFlag16;
+	m_defaultAniPeriod = p_other.m_defaultAniPeriod;
+	m_dotFrameCount = p_other.m_dotFrameCount;
+	m_unk0x2f6 = p_other.m_unk0x2f6;
+	m_messageLineHeight = p_other.m_messageLineHeight;
 	m_unk0x488 = p_other.m_unk0x488;
 	m_unk0x484 = p_other.m_unk0x484;
 }
@@ -41,8 +44,9 @@ VID_LIGHT::VID_LIGHT(VID_LIGHT& p_other)
 VID_LIGHT::~VID_LIGHT()
 {
 	if (m_weaponPtr == this) {
-		if (m_unk0x488)
-			operator delete((void*) m_unk0x488);
+		if (m_unk0x488) {
+			operator delete(m_unk0x488);
+		}
 		m_unk0x488 = 0;
 		VID::MemoryInUse -= m_unk0x484;
 		m_unk0x484 = 0;
@@ -52,10 +56,11 @@ VID_LIGHT::~VID_LIGHT()
 // FUNCTION: ALIEN 0x414c60
 void VID_LIGHT::Load(RESOURCE* p_res)
 {
-	if (p_res->GoNext(0x41544144))
+	if (p_res->GoNext(0x41544144)) {
 		Error(5, "DATA", 0);
-	*(short*) &m_unk0x2f2[4] = (int) m_footprintWidth;
-	*(short*) &m_unk0x2f2[6] = (int) m_footprintHeight;
+	}
+	m_unk0x2f6 = (short) m_footprintWidth;
+	m_messageLineHeight = (short) m_footprintHeight;
 	m_unk0x484 = p_res->SubLoad((void**) &m_unk0x488, 0);
 	if (!m_unk0x484) {
 		Error(5, "cadr", 0);
@@ -69,18 +74,13 @@ void VID_LIGHT::SetLayer()
 	m_layer = 0xb;
 }
 
-#pragma inline_depth(0)
-
-static inline unsigned int BlendLightColor(unsigned int color, const GAMMA& sum)
+inline static unsigned int BlendLightColor(unsigned int color, const GAMMA& sum)
 {
 	if (sum.m_a || sum.m_b) {
 		unsigned int inv = ~sum.m_a;
-		int red = ((color >> 16 & 0xff) * (((inv >> 16) & 0xff) + 1) >> 8)
-			+ ((sum.m_b >> 16) & 0xff);
-		int green = ((color >> 8 & 0xff) * (((inv >> 8) & 0xff) + 1) >> 8)
-			+ ((sum.m_b >> 8) & 0xff);
-		int blue = ((color & 0xff) * ((inv & 0xff) + 1) >> 8)
-			+ (sum.m_b & 0xff);
+		int red = ((color >> 16 & 0xff) * (((inv >> 16) & 0xff) + 1) >> 8) + ((sum.m_b >> 16) & 0xff);
+		int green = ((color >> 8 & 0xff) * (((inv >> 8) & 0xff) + 1) >> 8) + ((sum.m_b >> 8) & 0xff);
+		int blue = ((color & 0xff) * ((inv & 0xff) + 1) >> 8) + (sum.m_b & 0xff);
 		color = COLOR(red, green, blue).m_value;
 	}
 	return color;
@@ -89,35 +89,34 @@ static inline unsigned int BlendLightColor(unsigned int color, const GAMMA& sum)
 // STUB: ALIEN 0x414d10
 int VID_LIGHT::Draw(SPRITE* p_sprite)
 {
-	unsigned int color = ((unsigned int*) m_unk0x488)[p_sprite->m_noCadr];
+	unsigned int color = m_unk0x488[p_sprite->m_noCadr];
 	if (!(m_unk0x47c & 0x40) && color && color != 0xff000000) {
-		if (m_flag & 0x800000)
-			Graph->m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE2X);
-		#pragma inline_depth(1)
+		if (m_flag & 0x800000) {
+			Graph->SetTextureStageState(D3DTSS_COLOROP, D3DTOP_MODULATE2X);
+		}
 		GAMMA sum;
-		#pragma inline_depth(0)
 		if (m_flag & 0x800) {
-			sum.Add(*(GAMMA*) &m_colorSub, GAMMA(p_sprite->GetGamma()));
-			#pragma inline_depth(1)
+			sum.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), GAMMA(p_sprite->GetGamma()));
 			color = BlendLightColor(color, sum);
-			#pragma inline_depth(0)
 		}
 		else {
 			GAMMA graphGamma = Graph->m_gammaSet;
-			#pragma inline_depth(1)
 			GAMMA gamma;
-			#pragma inline_depth(0)
-			gamma.Add(*(GAMMA*) &m_colorSub, GAMMA(p_sprite->GetGamma()));
+			gamma.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), GAMMA(p_sprite->GetGamma()));
 			sum.Add(gamma, graphGamma);
-			#pragma inline_depth(1)
 			color = BlendLightColor(color, sum);
-			#pragma inline_depth(0)
 		}
-		Graph->DrawLight((float) p_sprite->ScreenX(), (float) p_sprite->ScreenY(), (float) p_sprite->GetZ(),
-						 *(int*) &m_unk0x1c[0], *(int*) &m_unk0x1c[4], color);
-		if (m_flag & 0x800000)
-			Graph->m_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+		Graph->DrawLight(
+			(float) p_sprite->ScreenX(),
+			(float) p_sprite->ScreenY(),
+			(float) p_sprite->GetZ(),
+			std::bit_cast<int>(m_footprintWidth),
+			std::bit_cast<int>(m_footprintHeight),
+			color
+		);
+		if (m_flag & 0x800000) {
+			Graph->SetTextureStageState(D3DTSS_COLOROP, D3DTOP_MODULATE);
+		}
 	}
-	if (0)
-		return 0;
+	return 0;
 }

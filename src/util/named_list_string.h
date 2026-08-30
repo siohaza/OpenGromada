@@ -16,8 +16,6 @@ public:
 	void Insert(STRING p_name, STRING p_value);
 };
 
-DECOMP_SIZE_ASSERT(NAMED_LIST_STRING, 0x10)
-
 // SYNTHETIC: ALIEN 0x424d30
 // NAMED_LIST_STRUCT_STRING::`vector deleting destructor'
 

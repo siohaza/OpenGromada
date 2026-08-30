@@ -11,9 +11,7 @@ public:
 	~FRAME();
 	virtual void* ScalarDeletingDestructor(unsigned int p_flags);
 
-	decomp_intptr Action(int p_action, int p_a, int p_b, int p_c);
+	decomp_intptr Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c);
 };
-
-DECOMP_SIZE_ASSERT(FRAME, 0x70)
 
 #endif

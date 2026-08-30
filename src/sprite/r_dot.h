@@ -21,14 +21,12 @@ public:
 		return *this;
 	}
 
-	R_DOT* m_dot; // 0x00
-	int m_dist; // 0x04
-	int m_backLink; // 0x08
+	R_DOT* m_dot;            // 0x00
+	int m_dist;              // 0x04
+	int m_backLink;          // 0x08
 	R_DOT_LINK* m_crossLink; // 0x0c
-	ANGLE m_dir; // 0x10
+	ANGLE m_dir;             // 0x10
 };
-
-DECOMP_SIZE_ASSERT(R_DOT_LINK, 0x14)
 
 class R_DOT {
 public:
@@ -53,21 +51,21 @@ public:
 	static char* FindedPath;
 	static ENGINE* eng;
 
-	int m_refCount; // 0x00
-	undefined4 m_unk0x04; // 0x04
-	undefined4 m_unk0x08; // 0x08
-	int m_unk0x0c; // 0x0c
-	undefined4 m_unk0x10; // 0x10
-	undefined4 m_unk0x14; // 0x14
-	int m_noLinks; // 0x18
+	int m_refCount;        // 0x00
+	undefined4 m_unk0x04;  // 0x04
+	undefined4 m_unk0x08;  // 0x08
+	int m_unk0x0c;         // 0x0c
+	undefined4 m_unk0x10;  // 0x10
+	undefined4 m_unk0x14;  // 0x14
+	int m_noLinks;         // 0x18
 	R_DOT_LINK m_links[6]; // 0x1c
-	int m_unk0x94[6]; // 0x94
-	int m_unk0xac[6]; // 0xac
-	int m_unk0xc4[6]; // 0xc4
-	ENGINE* m_busyEngine; // 0xdc
-	int m_x; // 0xe0
-	int m_y; // 0xe4
-	int m_z; // 0xe8
+	int m_unk0x94[6];      // 0x94
+	int m_unk0xac[6];      // 0xac
+	int m_unk0xc4[6];      // 0xc4
+	ENGINE* m_busyEngine;  // 0xdc
+	int m_x;               // 0xe0
+	int m_y;               // 0xe4
+	int m_z;               // 0xe8
 
 	void SetIfIsBetter(int p_len, int p_noStep, int p_unused, int* p_out);
 
@@ -83,16 +81,13 @@ public:
 
 	int GetPos(int p_x, int p_y, int p_unused, int p_link) const;
 	int SetNearestPos(int p_x, int p_y, int p_z, R_POS* p_out) const;
-	int TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid, ENGINE* p_engine,
-		ANGLE p_dir);
+	int TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid, ENGINE* p_engine, ANGLE p_dir);
 	void UnLink(const R_DOT* p_dot);
 	void Link(R_DOT* p_dot);
 	void Link(float p_x, float p_y, float p_z);
 	float GetScreenX();
 	float GetScreenY();
 };
-
-DECOMP_SIZE_ASSERT(R_DOT, 0xec)
 
 inline void R_DOT::Link(float p_x, float p_y, float p_z)
 {

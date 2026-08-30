@@ -5,17 +5,13 @@
 #include "video/vid.h"
 
 // GLOBAL: ALIEN 0x484840
-static const float x1[12] = {0.0f, 1.0f, 1.0f, -1.0f, 1.0f, -1.0f,
-	1.0f, -1.0f, 1.0f, 1.0f, -1.0f, -1.0f};
+static const float x1[12] = {0.0f, 1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f, -1.0f, 1.0f, 1.0f, -1.0f, -1.0f};
 // GLOBAL: ALIEN 0x484870
-static const float y1[12] = {-1.0f, 0.0f, -1.0f, -1.0f, -1.0f, -1.0f,
-	1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f};
+static const float y1[12] = {-1.0f, 0.0f, -1.0f, -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 1.0f};
 // GLOBAL: ALIEN 0x4848d0
-static const float x2[12] = {0.0f, -1.0f, -1.0f, 1.0f, 0.0f, 0.0f,
-	0.0f, 0.0f, -1.0f, -1.0f, 1.0f, 1.0f};
+static const float x2[12] = {0.0f, -1.0f, -1.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, -1.0f, -1.0f, 1.0f, 1.0f};
 // GLOBAL: ALIEN 0x484900
-static const float y2[12] = {1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f,
-	-1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+static const float y2[12] = {1.0f, 0.0f, 1.0f, 1.0f, 1.0f, 1.0f, -1.0f, -1.0f, 0.0f, 0.0f, 0.0f, 0.0f};
 
 // FUNCTION: ALIEN 0x44a140
 RAIL::RAIL(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent)
@@ -31,18 +27,21 @@ void* RAIL::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	RAIL* result = this;
 	this->~RAIL();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
 // FUNCTION: ALIEN 0x44a1c0
 RAIL::~RAIL()
 {
-	if (m_dot1)
+	if (m_dot1) {
 		m_dot1->Release();
-	if (m_dot2)
+	}
+	if (m_dot2) {
 		m_dot2->Release();
+	}
 }
 
 // FUNCTION: ALIEN 0x44a1f0
@@ -59,7 +58,7 @@ void RAIL::UnBreak(R_DOT* p_dot)
 }
 
 // STUB: ALIEN 0x44a240
-int RAIL::Action(int p_action, int p_dir, int p_a, int p_b)
+decomp_intptr RAIL::Action(int p_action, decomp_intptr p_dir, decomp_intptr p_a, decomp_intptr p_b)
 {
 
 	// GLOBAL: ALIEN 0x5da558
@@ -69,13 +68,14 @@ int RAIL::Action(int p_action, int p_dir, int p_a, int p_b)
 	float altitude = m_vid->m_unk0x60;
 
 	if (p_action != 60) {
-		if (p_action != 85)
+		if (p_action != 85) {
 			return TERRAIN::Action(p_action, p_dir, p_a, p_b);
+		}
 
 		SPRITE::Action(85, p_dir, p_a, p_b);
 		if (m_ani >= 15) {
 			VID* vid = m_vid;
-			VID* childVid = (VID*) vid->m_aniChildVid[15];
+			VID* childVid = vid->m_aniChildVid[15];
 			if (childVid && childVid->m_sprClass == 22) {
 				if (vid->m_unk0x20c[15] > vid->m_idx) {
 					m_dot1->m_unk0x04 = 1;
@@ -89,22 +89,36 @@ int RAIL::Action(int p_action, int p_dir, int p_a, int p_b)
 	}
 
 	ChangeDirection(ANGLE((char) p_dir));
-	if (m_dot1)
+	if (m_dot1) {
 		m_dot1->Release();
-	if (m_dot2)
+	}
+	if (m_dot2) {
 		m_dot2->Release();
+	}
 
 	unsigned int direction = m_vid->RealDirection(ANGLE(m_dir));
 
-	m_dot1 = RailMap.CreateDot(m_x + m_vid->m_footprintWidth * x1[direction % 12] * 0.25f,
-		m_y + m_vid->m_footprintHeight * y1[direction % 12] * 0.25f, m_z + altitude + z1[direction / 12]);
-	m_dot2 = RailMap.CreateDot(m_x + m_vid->m_footprintWidth * x2[direction % 12] * 0.25f,
-		m_y + m_vid->m_footprintHeight * y2[direction % 12] * 0.25f, m_z + altitude + z2[direction / 12]);
+	m_dot1 = RailMap.CreateDot(
+		m_x + m_vid->m_footprintWidth * x1[direction % 12] * 0.25f,
+		m_y + m_vid->m_footprintHeight * y1[direction % 12] * 0.25f,
+		m_z + altitude + z1[direction / 12]
+	);
+	m_dot2 = RailMap.CreateDot(
+		m_x + m_vid->m_footprintWidth * x2[direction % 12] * 0.25f,
+		m_y + m_vid->m_footprintHeight * y2[direction % 12] * 0.25f,
+		m_z + altitude + z2[direction / 12]
+	);
 
-	m_dot1->Link(m_x + m_vid->m_footprintWidth * x1[direction % 12] * 0.75f,
-		m_y + m_vid->m_footprintHeight * y1[direction % 12] * 0.75f, m_z + altitude + z1[direction / 12]);
-	m_dot2->Link(m_x + m_vid->m_footprintWidth * x2[direction % 12] * 0.75f,
-		m_y + m_vid->m_footprintHeight * y2[direction % 12] * 0.75f, m_z + altitude + z2[direction / 12]);
+	m_dot1->Link(
+		m_x + m_vid->m_footprintWidth * x1[direction % 12] * 0.75f,
+		m_y + m_vid->m_footprintHeight * y1[direction % 12] * 0.75f,
+		m_z + altitude + z1[direction / 12]
+	);
+	m_dot2->Link(
+		m_x + m_vid->m_footprintWidth * x2[direction % 12] * 0.75f,
+		m_y + m_vid->m_footprintHeight * y2[direction % 12] * 0.75f,
+		m_z + altitude + z2[direction / 12]
+	);
 	m_dot2->Link(m_dot1);
 
 	if (m_vid->m_unk0x20c[15] < m_vid->m_idx) {

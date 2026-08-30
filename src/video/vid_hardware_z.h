@@ -15,6 +15,11 @@ public:
 	void SetLayer();
 
 	int SetGamma(const GAMMA& p_gamma, unsigned int p_flags);
+
+private:
+	int DrawFrame(int p_frame, float p_x, float p_y, float p_z, float p_shiftX, float p_shiftY, const GAMMA& p_gamma);
+
+	friend struct VID_HARDWARE_Z_TEST_ACCESS;
 };
 
 #endif

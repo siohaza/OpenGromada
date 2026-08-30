@@ -1,40 +1,31 @@
 
-#define DECOMP_INLINE_STRING_DTOR
-#define DECOMP_INLINE_NAMED_LIST_STRUCT_LOGICVAR_DTOR
-#define DECOMP_INLINE_NAMED_LIST_LOGICVAR_EXPAND
-
-#define DECOMP_INLINE_STRING_INT
-#define DECOMP_INLINE_INT2STR_CALL_COPY
-
-#define DECOMP_INLINE_STRING_CHARP_CONVERSION
-
-#define DECOMP_INLINE_STRING_CHARP_NONNULL
-
-#define DECOMP_INLINE_LOGICSTACK_INT_CTOR
 #include "logic/logic.h"
 
-#include "logic/logicvar.h"
 #include "logic/logicstack.h"
+#include "logic/logicvar.h"
+#include "platform/paths.h"
 #include "util/fstream.h"
+#include "util/myerror.h"
 #include "util/named_list_struct_logicvar.h"
 #include "util/named_list_struct_string.h"
-#include "util/myerror.h"
 #include "util/stream.h"
 #include "util/string.h"
 
 #include <ctype.h>
-#include <io.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-STRING Printf(const char* p_format, ...);
 class VID;
 VID** ScriptExecFunc(int p_cmd);
 
-static inline void InsertLocalLogicVar(
-	NAMED_LIST_LOGICVAR* p_list, const STRING& p_name, LOGICVAR* p_value,
-	int p_type, int p_extra)
+inline static void InsertLocalLogicVar(
+	NAMED_LIST_LOGICVAR* p_list,
+	const STRING& p_name,
+	LOGICVAR* p_value,
+	int p_type,
+	int p_extra
+)
 {
 	p_value->m_type = p_type;
 	p_value->m_extra = p_extra;
@@ -44,11 +35,9 @@ static inline void InsertLocalLogicVar(
 // FUNCTION: ALIEN 0x41f330
 void LOGIC::Release()
 {
-	if (m_stackData)
-		operator delete(m_stackData);
+	delete[] m_stackData;
 	m_stackData = 0;
-	if (m_unk0x44)
-		operator delete(m_unk0x44);
+	delete[] (char*) m_unk0x44;
 	m_unk0x44 = 0;
 
 	m_stack.Release();
@@ -58,6 +47,8 @@ void LOGIC::Release()
 	m_stackPos = 0;
 	m_unk0x4c = 0;
 	m_pos = 0;
+	m_end = 0;
+	m_line = -1;
 	m_unk0x54 = 0;
 	m_main = -1;
 }
@@ -65,14 +56,14 @@ void LOGIC::Release()
 // STUB: ALIEN 0x41f450
 int LOGIC::LoadLGC(const STRING& p_name)
 {
-	FILE* file = *p_name.m_str ? fopen(p_name.m_str, "rb") : 0;
+	FILE* file = *p_name.m_str ? Platform_FOpen(p_name.m_str, "rb") : 0;
 	Release();
 	m_name = p_name;
 	if (!file) {
 		Error(7, empty_str, 0);
 		return 1;
 	}
-	int size = _filelength(_fileno(file));
+	int size = compat_filelength(file);
 	m_stackData = new char[256000];
 	if (!m_stackData) {
 		// STRING: ALIEN 0x483128
@@ -92,19 +83,15 @@ int LOGIC::LoadLGC(const STRING& p_name)
 		LOGICSTACK* oldData = (LOGICSTACK*) m_stack.m_data;
 		LOGICSTACK* newData = new LOGICSTACK[128];
 		m_stack.m_data = (int*) newData;
-		if (!newData)
-			MYERROR::LogExit(::Error,
-				"!!!ERROR!!!::LIST: Not enough memory %i", 128);
+		if (!newData) {
+			MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", 128);
+		}
 		if (oldData) {
 			for (int i = 0; i < m_stack.m_max; ++i) {
 				LOGICSTACK& item = ((LOGICSTACK*) m_stack.m_data)[i];
-				item.m_type = oldData[i].m_type;
-				item.m_num = oldData[i].m_num;
-				*(STRING*) &item.m_str = *(STRING*) &oldData[i].m_str;
+				item = oldData[i];
 			}
-		#pragma inline_depth(0)
 			delete[] oldData;
-		#pragma inline_depth(8)
 		}
 		m_stack.m_max = 128;
 	}
@@ -112,15 +99,21 @@ int LOGIC::LoadLGC(const STRING& p_name)
 	m_line = 0;
 	while (!func()) {
 	}
-	MYERROR::Log(::Error,
+	MYERROR::Log(
+		::Error,
 		// STRING: ALIEN 0x4830ec
 		"LoadScript::ByteCode=%i varNo=%i DefineNo=%i stackNo=%i",
-		m_stackPos, m_variables.m_n, m_strings.m_n, m_stack.m_n);
+		m_stackPos,
+		m_variables.m_n,
+		m_strings.m_n,
+		m_stack.m_n
+	);
 	m_strings.Release();
 	if (m_stackPos) {
-		if (m_stackPos > 256000)
+		if (m_stackPos > 256000) {
 			// STRING: ALIEN 0x4830dc
 			Error(2, "byte code size", m_stackPos);
+		}
 		char* data = new char[m_stackPos];
 		if (!data) {
 			// STRING: ALIEN 0x4830d8
@@ -128,13 +121,13 @@ int LOGIC::LoadLGC(const STRING& p_name)
 			exit(1);
 		}
 		memcpy(data, m_stackData, m_stackPos);
-		operator delete(m_stackData);
+		delete[] m_stackData;
 		m_stackData = data;
-	} else {
+	}
+	else {
 		Release();
 	}
-	if (m_unk0x44)
-		operator delete(m_unk0x44);
+	delete[] (char*) m_unk0x44;
 	m_unk0x44 = 0;
 	fclose(file);
 	return 0;
@@ -145,7 +138,7 @@ int LOGIC::Load(const STRING& p_name)
 {
 	int stackCount = m_stack.m_n;
 	FSTREAM stream;
-	FILE* file = *p_name.m_str ? fopen(p_name.m_str, "rb") : 0;
+	FILE* file = *p_name.m_str ? Platform_FOpen(p_name.m_str, "rb") : 0;
 	stream.m_file = file;
 	Release();
 	m_name = p_name;
@@ -154,27 +147,28 @@ int LOGIC::Load(const STRING& p_name)
 		return 1;
 	}
 	fread(&stackCount, 1, sizeof(stackCount), stream.m_file);
-	if (stackCount & 0xff000000)
+	if (stackCount & 0xff000000) {
 		return LoadLGC(m_name);
+	}
 	if (m_stack.m_max < 128) {
 		LOGICSTACK* oldData = (LOGICSTACK*) m_stack.m_data;
 		LOGICSTACK* newData = new LOGICSTACK[128];
 		m_stack.m_data = (int*) newData;
-		if (!newData)
-			MYERROR::LogExit(::Error,
-				"!!!ERROR!!!::LIST: Not enough memory %i", 128);
+		if (!newData) {
+			MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", 128);
+		}
 		if (oldData) {
-			for (int i = 0; i < m_stack.m_max; ++i)
+			for (int i = 0; i < m_stack.m_max; ++i) {
 				((LOGICSTACK*) m_stack.m_data)[i] = oldData[i];
-		#pragma inline_depth(0)
+			}
 			delete[] oldData;
-		#pragma inline_depth(8)
 		}
 		m_stack.m_max = 128;
 	}
 	m_stack.m_n = stackCount;
-	if (stackCount > m_stack.m_max)
+	if (stackCount > m_stack.m_max) {
 		m_stack.Expand(stackCount);
+	}
 	LoadVar(&stream);
 	fread(&m_stackPos, 1, sizeof(m_stackPos), stream.m_file);
 	m_stackData = new char[m_stackPos];
@@ -186,8 +180,9 @@ int LOGIC::Load(const STRING& p_name)
 	fread(m_stackData, 1, m_stackPos, stream.m_file);
 	for (int i = 0; i < m_variables.m_n; ++i) {
 		// STRING: ALIEN 0x4822e0
-		if (!strcmp(m_variables.GetName(i), "main"))
+		if (!strcmp(m_variables.GetName(i), "main")) {
 			m_main = i;
+		}
 	}
 	return 0;
 }
@@ -195,8 +190,9 @@ int LOGIC::Load(const STRING& p_name)
 // FUNCTION: ALIEN 0x41fa30
 int LOGIC::SaveVar(STREAM* p_stream)
 {
-	for (int i = 0; i < m_stack.m_n; ++i)
+	for (int i = 0; i < m_stack.m_n; ++i) {
 		((LOGICSTACK*) m_stack.m_data)[i].Write(p_stream);
+	}
 	m_variables.Write(p_stream);
 	int result = 0;
 	while (result < m_variables.m_n) {
@@ -222,7 +218,6 @@ int LOGIC::LoadVar(STREAM* p_stream)
 	i = 0;
 	if (result > 0) {
 		do {
-			m_variables.m_data[i].m_var.m_value.m_str = STRING::EMPTY;
 			m_variables.m_data[i].m_var.m_value.Read_res(p_stream);
 			result = m_variables.m_n;
 			++i;
@@ -232,24 +227,26 @@ int LOGIC::LoadVar(STREAM* p_stream)
 }
 
 // FUNCTION: ALIEN 0x41fbe0
-char* LOGIC::Error(int p_type, const char* p_word, int p_line)
+int LOGIC::Error(int p_type, const char* p_word, int p_line)
 {
 	// STRING: ALIEN 0x483140
-	char* result = MYERROR::Error(::Error, "LOGIC '%s' line %i", p_type, p_word, p_line, m_name.m_str, m_line + 1);
+	int result = MYERROR::Error(::Error, "LOGIC '%s' line %i", p_type, p_word, p_line, m_name.m_str, m_line + 1);
 	if (m_pos) {
 		char buf[61];
 		int i;
 		for (i = 0; i < 60; ++i) {
 			char c = m_pos[i - 30];
 			buf[i] = c;
-			if (c == 10 || c == 13 || c == 9)
+			if (c == 10 || c == 13 || c == 9) {
 				buf[i] = '?';
+			}
 		}
 		buf[60] = 0;
 		// STRING: ALIEN 0x483138
 		MYERROR::Error(::Error, "LOGIC", 10, buf, 0);
-		for (i = 0; i < 60; ++i)
+		for (i = 0; i < 60; ++i) {
 			buf[i] = i == 30 ? '^' : ' ';
+		}
 		buf[60] = 0;
 		result = MYERROR::Error(::Error, "LOGIC", 10, buf, 0);
 	}
@@ -269,9 +266,12 @@ int LOGIC::skipempty2()
 				int length = 0;
 				while (isalnum(m_pos[length]) || m_pos[length] == '_') {
 					if (length >= 4095) {
-						Error(10,
+						Error(
+							10,
 							// STRING: ALIEN 0x483178
-							"Very long name", 0);
+							"Very long name",
+							0
+						);
 						exit(1);
 					}
 					tokenBuffer[length] = m_pos[length];
@@ -279,18 +279,15 @@ int LOGIC::skipempty2()
 				}
 				tokenBuffer[length] = 0;
 				int define;
-				if ((define = m_strings.Location(STRING(
-						 tokenBuffer, STRING::INLINE_CHARP))) >= 0) {
-					int replacementLength =
-						strlen(m_strings.GetValue(define));
+				if ((define = m_strings.Location(STRING(tokenBuffer))) >= 0) {
+					int replacementLength = strlen(m_strings.GetValue(define));
 					m_pos += length - replacementLength;
-					memcpy(m_pos, m_strings.GetValue(define),
-						replacementLength);
+					memcpy(m_pos, m_strings.GetValue(define), replacementLength);
 				}
 			}
 
-			if (*m_pos == '#' && m_pos[1] == 'i' && m_pos[2] == 'f' &&
-				m_pos[3] == 'd' && m_pos[4] == 'e' && m_pos[5] == 'f') {
+			if (*m_pos == '#' && m_pos[1] == 'i' && m_pos[2] == 'f' && m_pos[3] == 'd' && m_pos[4] == 'e' &&
+				m_pos[5] == 'f') {
 				m_pos += 6;
 				++m_unk0x4c;
 				if (!skipDepth) {
@@ -298,14 +295,15 @@ int LOGIC::skipempty2()
 					m_unk0x54 = 1;
 					GetName(&name);
 					m_unk0x54 = 0;
-					if (m_variables.Location(name) < 0 &&
-						m_strings.Location(name) < 0)
+					if (m_variables.Location(name) < 0 && m_strings.Location(name) < 0) {
 						skipDepth = m_unk0x4c;
+					}
 				}
 			}
-			else if (*m_pos == '#' && m_pos[1] == 'i' && m_pos[2] == 'f' &&
-				m_pos[3] == 'n' && m_pos[4] == 'd' && m_pos[5] == 'e' &&
-				m_pos[6] == 'f') {
+			else if (
+				*m_pos == '#' && m_pos[1] == 'i' && m_pos[2] == 'f' && m_pos[3] == 'n' && m_pos[4] == 'd' &&
+				m_pos[5] == 'e' && m_pos[6] == 'f'
+			) {
 				m_pos += 7;
 				++m_unk0x4c;
 				if (!skipDepth) {
@@ -313,68 +311,90 @@ int LOGIC::skipempty2()
 					m_unk0x54 = 1;
 					GetName(&name);
 					m_unk0x54 = 0;
-					if (m_variables.Location(name) >= 0 ||
-						m_strings.Location(name) >= 0)
+					if (m_variables.Location(name) >= 0 || m_strings.Location(name) >= 0) {
 						skipDepth = m_unk0x4c;
+					}
 				}
 			}
-			else if (*m_pos == '#' && m_pos[1] == 'e' && m_pos[2] == 'n' &&
-				m_pos[3] == 'd' && m_pos[4] == 'i' && m_pos[5] == 'f') {
+			else if (
+				*m_pos == '#' && m_pos[1] == 'e' && m_pos[2] == 'n' && m_pos[3] == 'd' && m_pos[4] == 'i' &&
+				m_pos[5] == 'f'
+			) {
 				m_pos += 6;
-				if (skipDepth == m_unk0x4c)
+				if (skipDepth == m_unk0x4c) {
 					skipDepth = 0;
+				}
 				--m_unk0x4c;
-				if (m_unk0x4c < 0)
-					Error(10,
+				if (m_unk0x4c < 0) {
+					Error(
+						10,
 						// STRING: ALIEN 0x4831b8
-						"#endif without #ifdef", 0);
+						"#endif without #ifdef",
+						0
+					);
+				}
 			}
-			else if (*m_pos == '#' && m_pos[1] == 'e' && m_pos[2] == 'l' &&
-				m_pos[3] == 's' && m_pos[4] == 'e') {
+			else if (*m_pos == '#' && m_pos[1] == 'e' && m_pos[2] == 'l' && m_pos[3] == 's' && m_pos[4] == 'e') {
 				m_pos += 5;
-				if (!skipDepth && m_unk0x4c > 0)
+				if (!skipDepth && m_unk0x4c > 0) {
 					skipDepth = m_unk0x4c;
-				else if (skipDepth == m_unk0x4c)
+				}
+				else if (skipDepth == m_unk0x4c) {
 					skipDepth = 0;
-				if (m_unk0x4c <= 0)
-					Error(10,
+				}
+				if (m_unk0x4c <= 0) {
+					Error(
+						10,
 						// STRING: ALIEN 0x4831a0
-						"#else without #ifdef", 0);
+						"#else without #ifdef",
+						0
+					);
+				}
 			}
 
-			if (*m_pos == '/' && m_pos[1] == '/')
+			if (*m_pos == '/' && m_pos[1] == '/') {
 				comment = 1;
-			else if (*m_pos == '/' && m_pos[1] == '*')
+			}
+			else if (*m_pos == '/' && m_pos[1] == '*') {
 				comment = 2;
+			}
 			else {
 				if (*m_pos == '?') {
-					Error(10,
+					Error(
+						10,
 						// STRING: ALIEN 0x483154
-						"?: not supported in this version", 0);
+						"?: not supported in this version",
+						0
+					);
 					exit(1);
 				}
-				if (!skipDepth && !isspace(*m_pos) && *m_pos)
+				if (!skipDepth && !isspace(*m_pos) && *m_pos) {
 					return 0;
+				}
 			}
 		}
-		else if ((comment == 1 && *m_pos == '\n') ||
-			(comment == 2 && *m_pos == '/' && m_pos[-1] == '*'))
+		else if ((comment == 1 && *m_pos == '\n') || (comment == 2 && *m_pos == '/' && m_pos[-1] == '*')) {
 			comment = 0;
+		}
 
 		char c = *m_pos++;
-		if (c == '\n')
+		if (c == '\n') {
 			++m_line;
+		}
 	}
 
-	if (m_unk0x4c > 0)
-		Error(10,
+	if (m_unk0x4c > 0) {
+		Error(
+			10,
 			// STRING: ALIEN 0x483188
-			"#ifdef without #endif", m_unk0x4c);
+			"#ifdef without #endif",
+			m_unk0x4c
+		);
+	}
 	return 1;
 }
 
 // FUNCTION: ALIEN 0x4202a0
-#pragma warning(disable : 4716)
 int LOGIC::skipempty()
 {
 	int result = skipempty2();
@@ -383,8 +403,10 @@ int LOGIC::skipempty()
 		Error(10, "End of file", 0);
 		exit(1);
 	}
+	// The original fell off the end here; the non-zero path always exits, so
+	// reaching this point means result == 0.
+	return 0;
 }
-#pragma warning(default : 4716)
 
 // FUNCTION: ALIEN 0x4202d0
 int LOGIC::GetLine(STRING* p_out)
@@ -395,8 +417,9 @@ int LOGIC::GetLine(STRING* p_out)
 	while (*m_pos != '\n') {
 		char* p = m_pos;
 		char c = *p;
-		if (c == '\r')
+		if (c == '\r') {
 			break;
+		}
 		if (n >= 4095) {
 			// STRING: ALIEN 0x4831e0
 			Error(10, "Very long line", 0);
@@ -414,14 +437,19 @@ int LOGIC::GetLine(STRING* p_out)
 		exit(1);
 	}
 	char* line;
-	*p_out = *(STRING*) p_out->Before(&line,
+	p_out->Before(
+		&line,
 		// STRING: ALIEN 0x4831dc
-		"//");
-	if (line != STRING::EMPTY)
+		"//"
+	);
+	*p_out = line;
+	if (line != STRING::EMPTY) {
 		operator delete(line);
+	}
 	p_out->RemoveEndChars(
 		// STRING: ALIEN 0x481a08
-		" \n\r\t");
+		" \n\r\t"
+	);
 	return skipempty();
 }
 
@@ -459,8 +487,9 @@ int LOGIC::Word(const char* p_word)
 	int len = strlen(p_word);
 	skipempty();
 	if (strncmp(m_pos, p_word, len) ||
-		(isalpha(*p_word) || *p_word == '#') && (isalnum(m_pos[len]) || m_pos[len] == '_'))
+		((isalpha(*p_word) || *p_word == '#') && (isalnum(m_pos[len]) || m_pos[len] == '_'))) {
 		return 0;
+	}
 	m_pos += len;
 	skipempty2();
 	return 1;
@@ -469,8 +498,9 @@ int LOGIC::Word(const char* p_word)
 // FUNCTION: ALIEN 0x4204f0
 int LOGIC::WordEnd(const char* p_word)
 {
-	if (Word(p_word))
+	if (Word(p_word)) {
 		return 1;
+	}
 	Error(13, p_word, 0);
 	exit(1);
 }
@@ -488,7 +518,7 @@ int LOGIC::GetInt()
 		exit(1);
 	}
 	m_stackPos -= 5;
-	return *(int*) (data + m_stackPos + 1);
+	return LOGIC_BYTECODE::ReadInt32(data + m_stackPos + 1);
 }
 
 // FUNCTION: ALIEN 0x420570
@@ -562,7 +592,9 @@ int LOGIC::GetString(char* p_out)
 int LOGIC::SetNoElement(int p_value)
 {
 	int result = 3 * m_variables.m_n;
-	*(int*) ((char*) m_variables.m_data + result * 8 - 4) = p_value;
+	if (m_variables.m_n > 0) {
+		m_variables.m_data[m_variables.m_n - 1].m_var.m_extra = p_value;
+	}
 	return result;
 }
 
@@ -581,24 +613,28 @@ void LOGIC::IntVar()
 	GetName(&name);
 
 	if (m_variables.Location(name) >= 0) {
-		Error(10,
+		Error(
+			10,
 			Printf(
 				// STRING: ALIEN 0x48324c
-				"int redefinition '%s'", name.m_str),
-			0);
+				"int redefinition '%s'",
+				name.m_str
+			),
+			0
+		);
 		exit(1);
 	}
 
 	m_variables.Insert(name, LOGICVAR(1, m_stack.GetNo()));
 
-	if (Word(
-			"[")) {
+	if (Word("[")) {
 		flags |= 4;
 		if (*m_pos == ']') {
 			++m_pos;
 			if (Word(
 					// STRING: ALIEN 0x481a00
-					"=")) {
+					"="
+				)) {
 				// STRING: ALIEN 0x48326c
 				WordEnd("{");
 				do {
@@ -640,10 +676,8 @@ void LOGIC::IntVar()
 					Error(10, "too many initializers", 0);
 					exit(1);
 				}
-				((LOGICSTACK*) m_stack.m_data)
-					[m_stack.m_n + initializer - count].m_type &= ~0x40;
-				LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)
-					[m_stack.m_n + initializer - count];
+				((LOGICSTACK*) m_stack.m_data)[m_stack.m_n + initializer - count].m_type &= ~0x40;
+				LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n + initializer - count];
 				++initializer;
 				value->m_num = GetInt();
 				value->m_type |= 8;
@@ -668,11 +702,15 @@ void LOGIC::StringVar()
 	GetName(&name);
 
 	if (m_variables.Location(name) >= 0) {
-		Error(10,
+		Error(
+			10,
 			Printf(
 				// STRING: ALIEN 0x483270
-				"string redifinition '%s'", name.m_str),
-			0);
+				"string redifinition '%s'",
+				name.m_str
+			),
+			0
+		);
 		exit(1);
 	}
 
@@ -688,7 +726,7 @@ void LOGIC::StringVar()
 
 	m_variables.Insert(name, LOGICVAR(1, m_stack.GetNo()));
 	for (int element = 0; element < count; ++element) {
-		m_stack.Push(LOGICSTACK(STRING(empty_str, STRING::CALL_COPY)));
+		m_stack.Push(LOGICSTACK(STRING(empty_str)));
 		((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1].m_type |= flags;
 	}
 
@@ -696,7 +734,7 @@ void LOGIC::StringVar()
 		char buffer[4096];
 		GetString(buffer);
 		LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1];
-		*(STRING*) &value->m_str = STRING(buffer, STRING::INLINE_CHARP);
+		value->m_str = buffer;
 		value->m_type |= 8;
 		((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1].m_type &= ~0x40;
 	}
@@ -716,27 +754,43 @@ void LOGIC::mnog()
 	while (!done) {
 		unary = 0;
 		operation = 36;
-		if (m_pos[1] != '-' && Word("-"))
+		if (m_pos[1] != '-' && Word("-")) {
 			unary = 3;
-		else if (Word(
-					 // STRING: ALIEN 0x483420
-					 "~"))
+		}
+		else if (
+			Word(
+				// STRING: ALIEN 0x483420
+				"~"
+			)
+		) {
 			unary = 4;
-		else if (Word(
-					 // STRING: ALIEN 0x48341c
-					 "!"))
+		}
+		else if (
+			Word(
+				// STRING: ALIEN 0x48341c
+				"!"
+			)
+		) {
 			unary = 5;
+		}
 
 		if (Word(
 				// STRING: ALIEN 0x483418
-				"--"))
+				"--"
+			)) {
 			operation = 35;
-		else if (Word(
-					 // STRING: ALIEN 0x483414
-					 "++"))
+		}
+		else if (
+			Word(
+				// STRING: ALIEN 0x483414
+				"++"
+			)
+		) {
 			operation = 34;
-		else if (Word("&"))
+		}
+		else if (Word("&")) {
 			operation = 37;
+		}
 
 		if (isdigit(*m_pos)) {
 			GetName(&name);
@@ -756,7 +810,7 @@ void LOGIC::mnog()
 				break;
 			}
 			m_stackData[m_stackPos++] = 1;
-			*(int*) (m_stackData + m_stackPos) = operation;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, operation);
 			m_stackPos += 4;
 			done = true;
 		}
@@ -768,40 +822,53 @@ void LOGIC::mnog()
 		else if (*m_pos == '\'') {
 			m_stackData[m_stackPos++] = 1;
 			++m_pos;
-			*(int*) (m_stackData + m_stackPos) = *m_pos;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, *m_pos);
 			m_stackPos += 4;
 			++m_pos;
 			if (*m_pos != '\'') {
-				Error(13,
+				Error(
+					13,
 					// STRING: ALIEN 0x4833e0
-					"second '", 0);
+					"second '",
+					0
+				);
 				exit(1);
 			}
 			++m_pos;
 			done = true;
 		}
-		else if (Word(
-					 // STRING: ALIEN 0x48340c
-					 "sizeof")) {
+		else if (
+			Word(
+				// STRING: ALIEN 0x48340c
+				"sizeof"
+			)
+		) {
 			if (!Word("(")) {
-				Error(13,
+				Error(
+					13,
 					// STRING: ALIEN 0x4833d0
-					"'(' for sizeof", 0);
+					"'(' for sizeof",
+					0
+				);
 				exit(1);
 			}
 			m_stackData[m_stackPos++] = 1;
-			if (Word("int") || Word("string"))
-				*(int*) (m_stackData + m_stackPos) = 4;
+			if (Word("int") || Word("string")) {
+				LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, 4);
+			}
 			else {
 				GetName(&name);
 				variable = m_variables.Location(name);
 				if (variable < 0 || m_variables.m_data[variable].m_var.m_flag != 1) {
-					Error(4,
+					Error(
+						4,
 						// STRING: ALIEN 0x4833bc
-						"sizeof parameter", 0);
+						"sizeof parameter",
+						0
+					);
 					exit(1);
 				}
-				*(int*) (m_stackData + m_stackPos) = 4 * m_variables.m_data[variable].m_var.m_extra;
+				LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, 4 * m_variables.m_data[variable].m_var.m_extra);
 			}
 			m_stackPos += 4;
 			WordEnd(")");
@@ -809,36 +876,39 @@ void LOGIC::mnog()
 		}
 		else if (Word("static")) {
 			if (Word("int")) {
-				do
+				do {
 					IntVar();
-				while (Word(","));
+				} while (Word(","));
 			}
 			else {
 				if (!Word("string")) {
 					Error(4, "static variable", 0);
 					exit(1);
 				}
-				do
+				do {
 					StringVar();
-				while (Word(","));
+				} while (Word(","));
 			}
 			done = true;
 		}
 		else if (Word("int")) {
-			do
+			do {
 				IntVar();
-			while (Word(","));
+			} while (Word(","));
 			done = true;
 		}
 		else if (Word("string")) {
-			do
+			do {
 				StringVar();
-			while (Word(","));
+			} while (Word(","));
 			done = true;
 		}
-		else if (Word(
-					 // STRING: ALIEN 0x4833f0
-					 "return")) {
+		else if (
+			Word(
+				// STRING: ALIEN 0x4833f0
+				"return"
+			)
+		) {
 			vyrag();
 			m_stackData[m_stackPos++] = 31;
 			done = true;
@@ -862,9 +932,12 @@ void LOGIC::mnog()
 						int indexStart = m_stackPos;
 						LOGICSTACK* item = &((LOGICSTACK*) m_stack.m_data)[entry.m_var.m_a];
 						if (!(item->m_type & 0x25)) {
-							Error(10,
+							Error(
+								10,
 								// STRING: ALIEN 0x483320
-								"[] for not array", 0);
+								"[] for not array",
+								0
+							);
 							exit(1);
 						}
 						vyrag();
@@ -884,60 +957,111 @@ void LOGIC::mnog()
 					if (m_pos[1] == '=' || !Word("=")) {
 						if (Word(
 								// STRING: ALIEN 0x48331c
-								"+=")) {
-							vyrag(); command = 39; operation = 8;
+								"+="
+							)) {
+							vyrag();
+							command = 39;
+							operation = 8;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483318
-									 "-=")) {
-							vyrag(); command = 39; operation = 9;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483318
+								"-="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 9;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483314
-									 "/=")) {
-							vyrag(); command = 39; operation = 6;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483314
+								"/="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 6;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483310
-									 "*=")) {
-							vyrag(); command = 39; operation = 19;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483310
+								"*="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 19;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x48330c
-									 "%=")) {
-							vyrag(); command = 39; operation = 7;
+						else if (
+							Word(
+								// STRING: ALIEN 0x48330c
+								"%="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 7;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483308
-									 "&=")) {
-							vyrag(); command = 39; operation = 12;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483308
+								"&="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 12;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483304
-									 "|=")) {
-							vyrag(); command = 39; operation = 11;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483304
+								"|="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 11;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x483300
-									 "^=")) {
-							vyrag(); command = 39; operation = 10;
+						else if (
+							Word(
+								// STRING: ALIEN 0x483300
+								"^="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 10;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x4832fc
-									 "<<=")) {
-							vyrag(); command = 39; operation = 23;
+						else if (
+							Word(
+								// STRING: ALIEN 0x4832fc
+								"<<="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 23;
 						}
-						else if (Word(
-									 // STRING: ALIEN 0x4832f8
-									 ">>=")) {
-							vyrag(); command = 39; operation = 22;
+						else if (
+							Word(
+								// STRING: ALIEN 0x4832f8
+								">>="
+							)
+						) {
+							vyrag();
+							command = 39;
+							operation = 22;
 						}
-						else if (Word("++"))
+						else if (Word("++")) {
 							command = 32;
-						else if (Word("--"))
+						}
+						else if (Word("--")) {
 							command = 33;
-						else
+						}
+						else {
 							command = operation;
+						}
 					}
 					else {
 						vyrag();
@@ -953,25 +1077,32 @@ void LOGIC::mnog()
 						LOGICSTACK* item = &((LOGICSTACK*) m_stack.m_data)[entry.m_var.m_a];
 						if (item->m_type & 0x24) {
 							if (command == 32 || command == 33 || command == 34 || command == 35) {
-								Error(10,
+								Error(
+									10,
 									// STRING: ALIEN 0x4832c0
-									"Increment or decrement for array", 0);
+									"Increment or decrement for array",
+									0
+								);
 								exit(1);
 							}
 							if (command != 36) {
-								Error(4,
+								Error(
+									4,
 									// STRING: ALIEN 0x4832e4
-									"operation for array", command);
+									"operation for array",
+									command
+								);
 								exit(1);
 							}
 						}
 					}
 
 					m_stackData[m_stackPos++] = command;
-					*(int*) (m_stackData + m_stackPos) = entry.m_var.m_a;
+					LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, entry.m_var.m_a);
 					m_stackPos += 4;
-					if (command == 39)
+					if (command == 39) {
 						m_stackData[m_stackPos++] = operation;
+					}
 					done = true;
 					break;
 				}
@@ -986,17 +1117,21 @@ void LOGIC::mnog()
 					while (count < entry.m_var.m_extra) {
 						int argument = count + entry.m_var.m_type;
 						LOGICSTACK* item = &((LOGICSTACK*) m_stack.m_data)[argument];
-						if (!(item->m_type & 8))
+						if (!(item->m_type & 8)) {
 							break;
+						}
 						m_stackData[m_stackPos++] = 36;
-						*(int*) (m_stackData + m_stackPos) = argument;
+						LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, argument);
 						m_stackPos += 4;
 						++count;
 					}
 					if (count != entry.m_var.m_extra) {
-						Error(4,
+						Error(
+							4,
 							// STRING: ALIEN 0x483350
-							"extern function parameters number", 0);
+							"extern function parameters number",
+							0
+						);
 						exit(1);
 					}
 					m_stackData[m_stackPos++] = entry.m_var.m_a;
@@ -1010,7 +1145,7 @@ void LOGIC::mnog()
 						vyrag();
 						Word(",");
 						m_stackData[m_stackPos++] = 38;
-						*(int*) (m_stackData + m_stackPos) = count + entry.m_var.m_type;
+						LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, count + entry.m_var.m_type);
 						m_stackPos += 4;
 						m_stackData[m_stackPos++] = 26;
 						++count;
@@ -1018,33 +1153,37 @@ void LOGIC::mnog()
 					while (count < entry.m_var.m_extra) {
 						int argument = count + entry.m_var.m_type;
 						LOGICSTACK* item = &((LOGICSTACK*) m_stack.m_data)[argument];
-						if (!(item->m_type & 8))
+						if (!(item->m_type & 8)) {
 							break;
+						}
 						if (item->m_type & 1) {
 							m_stackData[m_stackPos++] = 2;
-							unsigned int len = strlen(item->m_str) + 1;
-							memcpy(m_stackData + m_stackPos, item->m_str, len);
+							unsigned int len = strlen(item->m_str.m_str) + 1;
+							memcpy(m_stackData + m_stackPos, item->m_str.m_str, len);
 							m_stackPos += len;
 						}
 						else {
 							m_stackData[m_stackPos++] = 1;
-							*(int*) (m_stackData + m_stackPos) = item->m_num;
+							LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, (int) item->m_num);
 							m_stackPos += 4;
 						}
 						m_stackData[m_stackPos++] = 38;
-						*(int*) (m_stackData + m_stackPos) = argument;
+						LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, argument);
 						m_stackPos += 4;
 						m_stackData[m_stackPos++] = 26;
 						++count;
 					}
 					if (count != entry.m_var.m_extra) {
-						Error(4,
+						Error(
+							4,
 							// STRING: ALIEN 0x483334
-							"function parameters number", 0);
+							"function parameters number",
+							0
+						);
 						exit(1);
 					}
 					m_stackData[m_stackPos++] = 30;
-					*(int*) (m_stackData + m_stackPos) = entry.m_var.m_a;
+					LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, entry.m_var.m_a);
 					m_stackPos += 4;
 					done = true;
 					break;
@@ -1059,32 +1198,42 @@ void LOGIC::mnog()
 				}
 				case 5:
 					m_stackData[m_stackPos++] = 1;
-					*(int*) (m_stackData + m_stackPos) = entry.m_var.m_a;
+					LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, entry.m_var.m_a);
 					m_stackPos += 4;
 					done = true;
 					break;
 				case 7: {
 					STRING message;
-					if (*m_pos == ':')
-						Error(10,
+					if (*m_pos == ':') {
+						Error(
+							10,
 							Printf(
 								// STRING: ALIEN 0x483374
-								"Label redefinition '%s'", name.m_str)
+								"Label redefinition '%s'",
+								name.m_str
+							)
 								.m_str,
-							0);
-					else
+							0
+						);
+					}
+					else {
 						Error(10, Printf("Incorrect use label '%s'", name.m_str).m_str, 0);
+					}
 					exit(1);
 					break;
 				}
 				case 8:
 					if (*m_pos != ':') {
-						Error(10,
+						Error(
+							10,
 							Printf(
 								// STRING: ALIEN 0x48338c
-								"Incorrect use label '%s'", name.m_str)
+								"Incorrect use label '%s'",
+								name.m_str
+							)
 								.m_str,
-							0);
+							0
+						);
 						exit(1);
 					}
 					++m_pos;
@@ -1099,12 +1248,16 @@ void LOGIC::mnog()
 			}
 			else {
 				if (*m_pos != ':') {
-					Error(10,
+					Error(
+						10,
 						Printf(
 							// STRING: ALIEN 0x4832a4
-							"Undeclared identifier '%s'", name.m_str)
+							"Undeclared identifier '%s'",
+							name.m_str
+						)
 							.m_str,
-						0);
+						0
+					);
 					exit(1);
 				}
 				++m_pos;
@@ -1113,22 +1266,28 @@ void LOGIC::mnog()
 		}
 		else {
 			if (unary) {
-				Error(10,
+				Error(
+					10,
 					// STRING: ALIEN 0x483294
-					"error symbol", 0);
+					"error symbol",
+					0
+				);
 				exit(1);
 			}
 			if (strchr(
 					// STRING: ALIEN 0x48328c
-					".$#@`", *m_pos)) {
+					".$#@`",
+					*m_pos
+				)) {
 				Error(10, "error symbol", 0);
 				exit(1);
 			}
 			done = true;
 		}
 
-		if (done && unary)
+		if (done && unary) {
 			m_stackData[m_stackPos++] = unary;
+		}
 	}
 }
 
@@ -1136,40 +1295,43 @@ void LOGIC::mnog()
 void LOGIC::SetOperation(int p_pos, int p_op)
 {
 	if (m_stackData[p_pos] == 1 && m_stackData[p_pos + 5] == 1 && m_stackPos - p_pos == 10) {
+		int left = LOGIC_BYTECODE::ReadInt32(m_stackData + p_pos + 1);
+		const int right = LOGIC_BYTECODE::ReadInt32(m_stackData + p_pos + 6);
 		switch (p_op) {
 		case 19:
-			*(int*) (m_stackData + p_pos + 1) *= *(int*) (m_stackData + p_pos + 6);
+			left *= right;
 			break;
 		case 6:
-			*(int*) (m_stackData + p_pos + 1) /= *(int*) (m_stackData + p_pos + 6);
+			left /= right;
 			break;
 		case 7:
-			*(int*) (m_stackData + p_pos + 1) %= *(int*) (m_stackData + p_pos + 6);
+			left %= right;
 			break;
 		case 8:
-			*(int*) (m_stackData + p_pos + 1) += *(int*) (m_stackData + p_pos + 6);
+			left += right;
 			break;
 		case 9:
-			*(int*) (m_stackData + p_pos + 1) -= *(int*) (m_stackData + p_pos + 6);
+			left -= right;
 			break;
 		case 22:
-			*(int*) (m_stackData + p_pos + 1) >>= *(int*) (m_stackData + p_pos + 6);
+			left >>= (unsigned int) right & 31;
 			break;
 		case 23:
-			*(int*) (m_stackData + p_pos + 1) <<= *(int*) (m_stackData + p_pos + 6);
+			left = (int) ((unsigned int) left << ((unsigned int) right & 31));
 			break;
 		case 10:
-			*(int*) (m_stackData + p_pos + 1) ^= *(int*) (m_stackData + p_pos + 6);
+			left ^= right;
 			break;
 		case 12:
-			*(int*) (m_stackData + p_pos + 1) &= *(int*) (m_stackData + p_pos + 6);
+			left &= right;
 			break;
 		case 11:
-			*(int*) (m_stackData + p_pos + 1) |= *(int*) (m_stackData + p_pos + 6);
+			left |= right;
 			break;
 		default:
 			break;
 		}
+		LOGIC_BYTECODE::WriteInt32(m_stackData + p_pos + 1, left);
 		m_stackPos -= 5;
 	}
 	else {
@@ -1339,7 +1501,7 @@ int LOGIC::vyrag_oper()
 	do {
 		vyrag();
 		m_stackData[m_stackPos] = 25;
-		*(int*) (m_stackData + (m_stackPos = m_stackPos + 1)) = m_line;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + (m_stackPos = m_stackPos + 1), m_line);
 		m_stackPos += 4;
 		// STRING: ALIEN 0x483268
 		result = Word(",");
@@ -1354,36 +1516,44 @@ void LOGIC::oper(int* p_breakFixups)
 {
 	int inverted = Word(
 		// STRING: ALIEN 0x4834e8
-		"iff");
+		"iff"
+	);
 	if (inverted || Word(
-			// STRING: ALIEN 0x4834e4
-			"if")) {
+						// STRING: ALIEN 0x4834e4
+						"if"
+					)) {
 		WordEnd(
 			// STRING: ALIEN 0x4833ec
-			"(");
+			"("
+		);
 		vyrag();
 		WordEnd(
 			// STRING: ALIEN 0x4833b8
-			")");
+			")"
+		);
 		m_stackData[m_stackPos] = inverted ? 29 : 24;
 		int branch = m_stackPos + 1;
 		m_stackPos = branch + 4;
 		oper(p_breakFixups);
-		*(int*) (m_stackData + branch) = m_stackPos - branch;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + branch, m_stackPos - branch);
 		if (Word(
 				// STRING: ALIEN 0x48345c
-				"else")) {
-			*(int*) (m_stackData + branch) += 5;
+				"else"
+			)) {
+			LOGIC_BYTECODE::WriteInt32(m_stackData + branch, LOGIC_BYTECODE::ReadInt32(m_stackData + branch) + 5);
 			m_stackData[m_stackPos] = 28;
 			int endBranch = m_stackPos + 1;
 			m_stackPos = endBranch + 4;
 			oper(p_breakFixups);
-			*(int*) (m_stackData + endBranch) = m_stackPos - endBranch;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + endBranch, m_stackPos - endBranch);
 		}
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x4834dc
-				 "while")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x4834dc
+			"while"
+		)
+	) {
 		int breakFixups[128] = {0};
 		WordEnd("(");
 		int loopStart = m_stackPos;
@@ -1395,15 +1565,19 @@ void LOGIC::oper(int* p_breakFixups)
 		oper(breakFixups);
 		m_stackData[m_stackPos] = 28;
 		int loopBack = ++m_stackPos;
-		*(int*) (m_stackData + loopBack) = loopStart - loopBack;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + loopBack, loopStart - loopBack);
 		m_stackPos += 4;
-		*(int*) (m_stackData + loopEnd) = m_stackPos - loopEnd;
-		for (int* fixup = breakFixups; *fixup; ++fixup)
-			*(int*) (m_stackData + *fixup) = m_stackPos - *fixup;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + loopEnd, m_stackPos - loopEnd);
+		for (int* fixup = breakFixups; *fixup; ++fixup) {
+			LOGIC_BYTECODE::WriteInt32(m_stackData + *fixup, m_stackPos - *fixup);
+		}
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x4834d8
-				 "do")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x4834d8
+			"do"
+		)
+	) {
 		int breakFixups[128] = {0};
 		int loopStart = m_stackPos;
 		oper(breakFixups);
@@ -1414,14 +1588,18 @@ void LOGIC::oper(int* p_breakFixups)
 		m_stackData[m_stackPos++] = 5;
 		m_stackData[m_stackPos++] = 24;
 		int loopBack = m_stackPos;
-		*(int*) (m_stackData + m_stackPos) = loopStart - loopBack;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, loopStart - loopBack);
 		m_stackPos += 4;
-		for (int* fixup = breakFixups; *fixup; ++fixup)
-			*(int*) (m_stackData + *fixup) = m_stackPos - *fixup;
+		for (int* fixup = breakFixups; *fixup; ++fixup) {
+			LOGIC_BYTECODE::WriteInt32(m_stackData + *fixup, m_stackPos - *fixup);
+		}
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x4834d4
-				 "for")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x4834d4
+			"for"
+		)
+	) {
 		int breakFixups[128] = {0};
 		WordEnd("(");
 		vyrag_oper();
@@ -1440,34 +1618,44 @@ void LOGIC::oper(int* p_breakFixups)
 		WordEnd(")");
 		m_stackData[m_stackPos++] = 28;
 		int conditionBack = m_stackPos;
-		*(int*) (m_stackData + conditionBack) = condition - conditionBack;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + conditionBack, condition - conditionBack);
 		m_stackPos += 4;
-		*(int*) (m_stackData + bodyBranch) = m_stackPos - bodyBranch;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + bodyBranch, m_stackPos - bodyBranch);
 		oper(breakFixups);
 		m_stackData[m_stackPos++] = 28;
 		int incrementBack = m_stackPos;
-		*(int*) (m_stackData + m_stackPos) = increment - incrementBack;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, increment - incrementBack);
 		m_stackPos += 4;
-		*(int*) (m_stackData + loopEnd) = m_stackPos - loopEnd;
-		for (int* fixup = breakFixups; *fixup; ++fixup)
-			*(int*) (m_stackData + *fixup) = m_stackPos - *fixup;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + loopEnd, m_stackPos - loopEnd);
+		for (int* fixup = breakFixups; *fixup; ++fixup) {
+			LOGIC_BYTECODE::WriteInt32(m_stackData + *fixup, m_stackPos - *fixup);
+		}
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x4834cc
-				 "break")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x4834cc
+			"break"
+		)
+	) {
 		WordEnd(";");
 		if (!p_breakFixups) {
-			Error(10,
+			Error(
+				10,
 				// STRING: ALIEN 0x4834b4
-				"'break' without loop", 0);
+				"'break' without loop",
+				0
+			);
 			exit(1);
 		}
 		int count = 0;
 		while (p_breakFixups[count]) {
 			if (count >= 128) {
-				Error(10,
+				Error(
+					10,
 					// STRING: ALIEN 0x4834a0
-					"Too many 'break'", 0);
+					"Too many 'break'",
+					0
+				);
 				exit(1);
 			}
 			++count;
@@ -1477,9 +1665,12 @@ void LOGIC::oper(int* p_breakFixups)
 		m_stackPos += 4;
 		p_breakFixups[count + 1] = 0;
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x483498
-				 "goto")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x483498
+			"goto"
+		)
+	) {
 		STRING name;
 		GetName(&name);
 		int label = m_variables.Location(name);
@@ -1489,38 +1680,48 @@ void LOGIC::oper(int* p_breakFixups)
 		}
 		else {
 			if (m_variables.m_data[label].m_var.m_flag == 8) {
-				Error(10,
+				Error(
+					10,
 					Printf(
 						// STRING: ALIEN 0x483478
-						"second use undefined label '%s'", name.m_str),
-					0);
+						"second use undefined label '%s'",
+						name.m_str
+					),
+					0
+				);
 				exit(1);
 			}
 			if (m_variables.m_data[label].m_var.m_flag != 7) {
-				Error(10,
+				Error(
+					10,
 					Printf(
 						// STRING: ALIEN 0x483464
-						"'%s' is not label", name.m_str),
-					0);
+						"'%s' is not label",
+						name.m_str
+					),
+					0
+				);
 				exit(1);
 			}
 		}
 		m_stackData[m_stackPos++] = 28;
-		*(int*) (m_stackData + m_stackPos) = m_variables.m_data[label].m_var.m_a - m_stackPos;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, m_variables.m_data[label].m_var.m_a - m_stackPos);
 		m_stackPos += 4;
 	}
 	else if (Word("{")) {
 		int variableCount = m_variables.m_n;
-		while (!Word("}"))
+		while (!Word("}")) {
 			oper(p_breakFixups);
+		}
 		if (variableCount <= 0) {
 			m_variables.m_max = 0;
 			m_variables.m_n = 0;
 			delete[] m_variables.m_data;
 			m_variables.m_data = 0;
 		}
-		else if (variableCount < m_variables.m_n)
+		else if (variableCount < m_variables.m_n) {
 			m_variables.m_n = variableCount;
+		}
 	}
 	else {
 		vyrag_oper();
@@ -1534,11 +1735,11 @@ int LOGIC::func()
 	STRING name;
 	char fileName[1024];
 
-	if (skipempty2())
+	if (skipempty2()) {
 		return 1;
+	}
 
-	if (*m_pos == '#' && m_pos[1] == 'd' && m_pos[2] == 'e' &&
-		m_pos[3] == 'f' && m_pos[4] == 'i' && m_pos[5] == 'n' &&
+	if (*m_pos == '#' && m_pos[1] == 'd' && m_pos[2] == 'e' && m_pos[3] == 'f' && m_pos[4] == 'i' && m_pos[5] == 'n' &&
 		m_pos[6] == 'e') {
 		m_pos += 7;
 		m_unk0x54 = 1;
@@ -1547,23 +1748,28 @@ int LOGIC::func()
 		STRING value;
 		GetLine(&value);
 		int define;
-		if ((define = m_strings.Location(name)) < 0)
-			m_strings.Insert(name,
-				STRING(value.m_str, STRING::INLINE_CHARP_NONNULL));
-		else
+		if ((define = m_strings.Location(name)) < 0) {
+			m_strings.Insert(name, STRING(value.m_str));
+		}
+		else {
 			m_strings.m_data[define].m_value = value;
+		}
 	}
-	else if (*m_pos == '#' && m_pos[1] == 'u' && m_pos[2] == 'n' &&
-		m_pos[3] == 'd' && m_pos[4] == 'e' && m_pos[5] == 'f') {
+	else if (
+		*m_pos == '#' && m_pos[1] == 'u' && m_pos[2] == 'n' && m_pos[3] == 'd' && m_pos[4] == 'e' && m_pos[5] == 'f'
+	) {
 		m_pos += 6;
 		m_unk0x54 = 1;
 		GetName(&name);
 		m_unk0x54 = 0;
 		int define;
 		if ((define = m_strings.Location(name)) < 0) {
-			Error(4,
+			Error(
+				4,
 				// STRING: ALIEN 0x48354c
-				"#undef parameters", 0);
+				"#undef parameters",
+				0
+			);
 			exit(1);
 		}
 		if (define >= 0 && define < m_strings.m_n) {
@@ -1578,21 +1784,26 @@ int LOGIC::func()
 		if (!m_strings.m_n) {
 			m_strings.m_max = 0;
 			m_strings.m_n = 0;
-			if (m_strings.m_data)
-			#pragma inline_depth(0)
+			if (m_strings.m_data) {
 				delete[] m_strings.m_data;
-			#pragma inline_depth(8)
+			}
 			m_strings.m_data = 0;
 		}
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x483540
-				 "#include")) {
-		STRING oldName(m_name.m_str, STRING::INLINE_CHARP_NONNULL);
+	else if (
+		Word(
+			// STRING: ALIEN 0x483540
+			"#include"
+		)
+	) {
+		STRING oldName(m_name.m_str);
 		if (*m_pos != '"' && *m_pos != '<') {
-			Error(13,
+			Error(
+				13,
 				// STRING: ALIEN 0x48352c
-				"include file name", 0);
+				"include file name",
+				0
+			);
 			exit(1);
 		}
 		++m_pos;
@@ -1607,12 +1818,12 @@ int LOGIC::func()
 		fileName[length] = 0;
 		++m_pos;
 
-		FILE* file = fopen(fileName, "rb");
+		FILE* file = Platform_FOpen(fileName, "rb");
 		if (!file) {
 			Error(7, fileName, 0);
 			exit(1);
 		}
-		int size = _filelength(_fileno(file));
+		int size = compat_filelength(file);
 		char* oldPos = m_pos;
 		char* oldEnd = m_end;
 		void* oldBuffer = m_unk0x44;
@@ -1621,9 +1832,12 @@ int LOGIC::func()
 
 		m_unk0x44 = new char[size + 4096];
 		if (!m_unk0x44) {
-			Error(2,
+			Error(
+				2,
 				// STRING: ALIEN 0x483524
-				"include", 0);
+				"include",
+				0
+			);
 			exit(1);
 		}
 		m_pos = (char*) m_unk0x44 + 4066;
@@ -1636,7 +1850,7 @@ int LOGIC::func()
 		}
 
 		fclose(file);
-		operator delete(m_unk0x44);
+		delete[] (char*) m_unk0x44;
 		m_pos = oldPos;
 		m_end = oldEnd;
 		m_unk0x44 = oldBuffer;
@@ -1644,15 +1858,21 @@ int LOGIC::func()
 		m_unk0x4c = oldConditionalDepth;
 		m_name = oldName;
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x48351c
-				 "extern")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x48351c
+			"extern"
+		)
+	) {
 		int variableCount = m_variables.m_n;
 		GetName(&name);
 		if (m_variables.Location(name) >= 0) {
-			Error(10,
+			Error(
+				10,
 				// STRING: ALIEN 0x483504
-				"function redefinition", 0);
+				"function redefinition",
+				0
+			);
 			exit(1);
 		}
 
@@ -1661,20 +1881,29 @@ int LOGIC::func()
 		do {
 			if (Word(
 					// STRING: ALIEN 0x483400
-					"int"))
+					"int"
+				)) {
 				IntVar();
-			else if (Word(
-						 // STRING: ALIEN 0x4833f8
-						 "string"))
+			}
+			else if (
+				Word(
+					// STRING: ALIEN 0x4833f8
+					"string"
+				)
+			) {
 				StringVar();
+			}
 		} while (Word(","));
 		WordEnd(")");
 		int parameterCount = m_stack.m_n - stackStart;
 		int code = GetInt();
 		if (!isdigit(m_pos[-1])) {
-			Error(13,
+			Error(
+				13,
 				// STRING: ALIEN 0x4834ec
-				"extern function code", 0);
+				"extern function code",
+				0
+			);
 			exit(1);
 		}
 
@@ -1684,45 +1913,51 @@ int LOGIC::func()
 			delete[] m_variables.m_data;
 			m_variables.m_data = 0;
 		}
-		else if (variableCount < m_variables.m_n)
+		else if (variableCount < m_variables.m_n) {
 			m_variables.m_n = variableCount;
+		}
 		LOGICVAR function(2, code);
-		InsertLocalLogicVar(
-			&m_variables, name, &function, stackStart, parameterCount);
+		InsertLocalLogicVar(&m_variables, name, &function, stackStart, parameterCount);
 		WordEnd(";");
 	}
-	else if (Word(
-				 // STRING: ALIEN 0x483404
-				 "static")) {
+	else if (
+		Word(
+			// STRING: ALIEN 0x483404
+			"static"
+		)
+	) {
 		if (Word("int")) {
-			do
+			do {
 				IntVar();
-			while (Word(","));
+			} while (Word(","));
 			WordEnd(";");
 		}
 		else if (Word("string")) {
-			do
+			do {
 				StringVar();
-			while (Word(","));
+			} while (Word(","));
 			WordEnd(";");
 		}
 		else {
-			Error(4,
+			Error(
+				4,
 				// STRING: ALIEN 0x4833a8
-				"static variable", 0);
+				"static variable",
+				0
+			);
 			exit(1);
 		}
 	}
 	else if (Word("int")) {
-		do
+		do {
 			IntVar();
-		while (Word(","));
+		} while (Word(","));
 		WordEnd(";");
 	}
 	else if (Word("string")) {
-		do
+		do {
 			StringVar();
-		while (Word(","));
+		} while (Word(","));
 		WordEnd(";");
 	}
 	else {
@@ -1737,16 +1972,19 @@ int LOGIC::func()
 		int code = m_stackPos;
 		WordEnd("(");
 		do {
-			if (Word("int"))
+			if (Word("int")) {
 				IntVar();
-			else if (Word("string"))
+			}
+			else if (Word("string")) {
 				StringVar();
+			}
 		} while (Word(","));
 		WordEnd(")");
 		int parameterCount = m_stack.m_n - stackStart;
 		WordEnd("{");
-		while (!Word("}"))
+		while (!Word("}")) {
 			oper(0);
+		}
 		m_stackData[m_stackPos++] = 31;
 
 		if (variableCount <= 0) {
@@ -1755,14 +1993,16 @@ int LOGIC::func()
 			delete[] m_variables.m_data;
 			m_variables.m_data = 0;
 		}
-		else if (variableCount < m_variables.m_n)
+		else if (variableCount < m_variables.m_n) {
 			m_variables.m_n = variableCount;
+		}
 		LOGICVAR function(3, code);
 		function.m_type = stackStart;
 		function.m_extra = parameterCount;
 		m_variables.Insert(name, function);
-		if (!strcmp(name.m_str, "main"))
+		if (!strcmp(name.m_str, "main")) {
 			m_main = m_variables.m_n - 1;
+		}
 	}
 
 	return skipempty2();
@@ -1772,15 +2012,19 @@ int LOGIC::func()
 char** LOGIC::GetVariableStr(char** p_out, const STRING& p_name)
 {
 	char* variableName;
-	int variable =
-		m_variables.Location(*(STRING*) p_name.Before(&variableName, "["));
-	if (variableName != STRING::EMPTY)
+	p_name.Before(&variableName, "[");
+	STRING variableText(variableName);
+	int variable = m_variables.Location(variableText);
+	if (variableName != STRING::EMPTY) {
 		operator delete(variableName);
+	}
 	if (variable < 0) {
-		MYERROR::Log(::Error,
+		MYERROR::Log(
+			::Error,
 			// STRING: ALIEN 0x483560
 			"!!!ERROR!!! SCRIPT Can't find variable '%s' in GetVariableString",
-			p_name.m_str);
+			p_name.m_str
+		);
 		const char* str = empty_str;
 		if (str && *str) {
 			unsigned int len = strlen(str);
@@ -1794,15 +2038,14 @@ char** LOGIC::GetVariableStr(char** p_out, const STRING& p_name)
 	}
 	else {
 		char* indexText;
-		int index = ((STRING*) p_name.After(&indexText, "["))->Int();
-		if (indexText != STRING::EMPTY)
+		p_name.After(&indexText, "[");
+		int index = STRING(indexText).Int();
+		if (indexText != STRING::EMPTY) {
 			operator delete(indexText);
+		}
 
-		LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)
-			[m_variables.m_data[variable].m_var.m_a + index];
-		STRING* valueString = (value->m_type & 2)
-			? &(*(STRING*) &value->m_str = Int2Str(value->m_num))
-			: (STRING*) &value->m_str;
+		LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_variables.m_data[variable].m_var.m_a + index];
+		STRING* valueString = value->String();
 		const char* str = valueString->m_str;
 		if (*str) {
 			unsigned int len = strlen(str);

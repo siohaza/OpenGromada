@@ -13,7 +13,7 @@ public:
 
 	GROUPS() : m_head(0, 0) {}
 
-	SPRITE* Load(RESOURCE* p_res);
+	void Load(RESOURCE* p_res);
 	int Save(RESOURCE* p_res);
 	void DeletePointerToSprite(SPRITE* p_sprite);
 
@@ -22,7 +22,5 @@ public:
 	GROUP* Next(GROUP* p_group);
 	void DrawNumber() const;
 };
-
-DECOMP_SIZE_ASSERT(GROUPS, 0x24)
 
 #endif

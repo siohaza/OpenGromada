@@ -14,7 +14,6 @@ public:
 // VTABLE: ALIEN 0x47a32c
 class MOUSETIPS {
 public:
-
 	MOUSETIPS() { m_sprite = 0; }
 	virtual ~MOUSETIPS() { Clear(); }
 

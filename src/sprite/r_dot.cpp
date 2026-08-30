@@ -1,18 +1,17 @@
 #include "sprite/r_dot.h"
 
-#include <math.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include "misc.h"
-
 #include "game/engine.h"
 #include "game/map.h"
+#include "misc.h"
 #include "sprite/r_map.h"
 #include "sprite/r_pos.h"
 #include "util/angle.h"
 #include "util/myerror.h"
 #include "util/polar.h"
+
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
 
 // GLOBAL: ALIEN 0x484188
 int R_DOT::NoStep = 0xffff;
@@ -111,10 +110,9 @@ void R_DOT::Release()
 					}
 				}
 			}
-			if (this) {
-				ReleaseThunk();
-				operator delete(this);
-			}
+			// The original tested `this` for null here; that is always true.
+			ReleaseThunk();
+			operator delete(this);
 		}
 	}
 }
@@ -127,23 +125,25 @@ void R_DOT::SetIfIsBetter(int p_len, int p_noStep, int p_unused, int* p_out)
 	*p_out = -1;
 	if (FindedPath) {
 		if (p_len < 0x9c4) {
-			if (eng)
+			if (eng) {
 				eng->m_noPathLinks = p_len;
+			}
 			memcpy(FindedPath, CurrentPath, p_len);
 		}
 	}
 }
 
-static inline int NearDistance(int p_dx, int p_dy)
+inline static int NearDistance(int p_dx, int p_dy)
 {
 	int a = abs(p_dx);
 	int b = abs(p_dy);
-	if (a > b)
+	if (a > b) {
 		return a + b / 2;
+	}
 	return b + a / 2;
 }
 
-inline float R_DOT::SizeTo(float p_x, float p_y) const
+float R_DOT::SizeTo(float p_x, float p_y) const
 {
 	float dx = (float) fabs(p_x - m_x);
 	float dy = (float) fabs(p_y - m_y);
@@ -188,20 +188,21 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 			m_unk0xc4[p_backLink] = cur_raillength;
 		}
 		if (this != Goal) {
-			if (!Target || !m_busyEngine || !m_busyEngine->InTrain(Target))
+			if (!Target || !m_busyEngine || !m_busyEngine->InTrain(Target)) {
 				goto nearTarget;
+			}
 			if (command == 26) {
-				if (p_backLink < 0)
+				if (p_backLink < 0) {
 					goto notFound;
+				}
 				ENGINE* busy = m_busyEngine;
-				if (busy->m_prevEngine
-					|| (busy->m_curDotRef.LinkedDot() != m_links[p_backLink].m_dot
-						&& busy->m_curDotRef.LinkedDot() != this)) {
+				if (busy->m_prevEngine || (busy->m_curDotRef.LinkedDot() != m_links[p_backLink].m_dot &&
+										   busy->m_curDotRef.LinkedDot() != this)) {
 					if (busy->m_nextEngine) {
 						return -2;
 					}
-					if (busy->m_lastDotRef.LinkedDot() != m_links[p_backLink].m_dot
-						&& busy->m_lastDotRef.LinkedDot() != this) {
+					if (busy->m_lastDotRef.LinkedDot() != m_links[p_backLink].m_dot &&
+						busy->m_lastDotRef.LinkedDot() != this) {
 						return -2;
 					}
 				}
@@ -210,18 +211,21 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 		SetIfIsBetter(cur_step, cur_realstep, weaponrange, &result);
 
 	nearTarget:
-		if ((command == 28 || command == 29) && Target
-			&& (!m_busyEngine || (eng && eng->InTrain((SPRITE*) m_busyEngine)))) {
+		if ((command == 28 || command == 29) && Target &&
+			(!m_busyEngine || (eng && eng->InTrain((SPRITE*) m_busyEngine)))) {
 			int dist = (int) SizeTo(Target->m_x, Target->m_y);
 			if (dist <= weaponrange) {
 				if (FindedDot) {
 					if (FindedDot->SizeTo(Target->m_x, Target->m_y) > dist) {
-						if (NoStep > cur_realstep)
+						if (NoStep > cur_realstep) {
 							SetIfIsBetter(cur_step, cur_realstep, weaponrange, &result);
-					} else if (NoStep > cur_realstep) {
+						}
+					}
+					else if (NoStep > cur_realstep) {
 						SetIfIsBetter(cur_step, cur_realstep, weaponrange, &result);
 					}
-				} else if (NoStep > cur_realstep) {
+				}
+				else if (NoStep > cur_realstep) {
 					SetIfIsBetter(cur_step, cur_realstep, weaponrange, &result);
 				}
 			}
@@ -232,18 +236,19 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 			if (Goal) {
 				int keep = 0;
 				if (FindedDot) {
-					if (NearDistance(Goal->m_x - FindedDot->m_x,
-							Goal->m_y - FindedDot->m_y)
-							<= NearDistance(Goal->m_x - m_x, Goal->m_y - m_y)
-						&& (FindedDot != this || NoStepForNotFound <= cur_realstep))
+					if (NearDistance(Goal->m_x - FindedDot->m_x, Goal->m_y - FindedDot->m_y) <=
+							NearDistance(Goal->m_x - m_x, Goal->m_y - m_y) &&
+						(FindedDot != this || NoStepForNotFound <= cur_realstep)) {
 						keep = 1;
+					}
 				}
 				if (!keep) {
 					NoStepForNotFound = cur_realstep;
 					FindedDot = this;
 					if (FindedPath && cur_step < 2500) {
-						if (eng)
+						if (eng) {
 							eng->m_noPathLinks = cur_step;
+						}
 						memcpy(FindedPath, CurrentPath, cur_step);
 					}
 					result = -1;
@@ -252,16 +257,16 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 			if (Target) {
 				int better = 1;
 				if (FindedDot) {
-					better = FindedDot->SizeTo(Target->m_x, Target->m_y)
-							> SizeTo(Target->m_x, Target->m_y)
-						|| (FindedDot == this && NoStepForNotFound > cur_realstep);
+					better = FindedDot->SizeTo(Target->m_x, Target->m_y) > SizeTo(Target->m_x, Target->m_y) ||
+							 (FindedDot == this && NoStepForNotFound > cur_realstep);
 				}
 				if (better) {
 					FindedDot = this;
 					NoStepForNotFound = cur_realstep;
 					if (FindedPath && cur_step < 2500) {
-						if (eng)
+						if (eng) {
 							eng->m_noPathLinks = cur_step;
+						}
 						memcpy(FindedPath, CurrentPath, cur_step);
 					}
 					result = -1;
@@ -271,23 +276,25 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 
 		{
 			int canPassBack = 1;
-			if (p_backLink >= 0 && eng)
-				canPassBack = m_links[p_backLink].m_dot->CanEnginePassTo(
-					m_links[p_backLink].m_backLink, eng);
+			if (p_backLink >= 0 && eng) {
+				canPassBack = m_links[p_backLink].m_dot->CanEnginePassTo(m_links[p_backLink].m_backLink, eng);
+			}
 			if (cur_realstep < NoStep) {
 				++cur_step;
 				++cur_realstep;
 				for (int i = 0; i < m_noLinks; ++i) {
 					if (!canPassBack) {
-						if (cur_step != 1 || i != p_backLink)
+						if (cur_step != 1 || i != p_backLink) {
 							continue;
-					} else if (i == p_backLink && cur_step >= 3) {
+						}
+					}
+					else if (i == p_backLink && cur_step >= 3) {
 						continue;
 					}
 					R_DOT_LINK* link = &m_links[i];
-					if (p_backLink >= 0
-						&& link->m_dot->m_unk0xac[link->m_backLink] <= cur_realstep)
+					if (p_backLink >= 0 && link->m_dot->m_unk0xac[link->m_backLink] <= cur_realstep) {
 						continue;
+					}
 					head_is_head = savedHead;
 					int reversed = 0;
 					int railsForReturn = 1;
@@ -296,13 +303,16 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 						unsigned char d2 = (unsigned char) (link->m_dir.m_dir - p_dir.m_dir);
 						unsigned char delta = d1 < d2 ? d1 : d2;
 						if (delta > 0x1f) {
-							if ((cur_step > 1 || !eng || eng->m_speed != 0.0f)
-								&& i != p_backLink) {
+							if ((cur_step > 1 || !eng || eng->m_speed != 0.0f) && i != p_backLink) {
 								if (train_length_in_rails) {
 									dots_num = 0;
 									railsForReturn = TryToFindRailsForReturn(
-										train_length_in_rails, m_links[p_backLink].m_dot,
-										link->m_dot, eng, p_dir);
+										train_length_in_rails,
+										m_links[p_backLink].m_dot,
+										link->m_dot,
+										eng,
+										p_dir
+									);
 								}
 								reversed = 1;
 							}
@@ -311,29 +321,32 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 					}
 					int dist = link->m_dist;
 					cur_raillength += dist;
-					if (reversed)
+					if (reversed) {
 						cur_realstep += train_length_in_rails;
+					}
 					int passable = 1;
 					R_DOT_LINK* cross = link->m_crossLink;
 					if (cross) {
 						R_DOT* other = cross->m_dot->m_links[cross->m_backLink].m_dot;
 						ENGINE* busy = cross->m_dot->m_busyEngine;
-						if ((busy && fabs(busy->m_speed) < g_dbl47A7E8
-								&& !busy->InTrain((SPRITE*) eng))
-							|| ((busy = other->m_busyEngine) != 0
-								&& fabs(busy->m_speed) < g_dbl47A7E8
-								&& !busy->InTrain((SPRITE*) eng)))
+						if ((busy && fabs(busy->m_speed) < g_dbl47A7E8 && !busy->InTrain((SPRITE*) eng)) ||
+							((busy = other->m_busyEngine) != 0 && fabs(busy->m_speed) < g_dbl47A7E8 &&
+							 !busy->InTrain((SPRITE*) eng))) {
 							passable = 0;
+						}
 					}
 					if (railsForReturn && passable) {
-						if (cur_step - 1 < 2500)
+						if (cur_step - 1 < 2500) {
 							CurrentPath[cur_step - 1] = (char) i;
-						if (link->m_dot->FindNewDot(link->m_backLink, link->m_dir) >= -1)
+						}
+						if (link->m_dot->FindNewDot(link->m_backLink, link->m_dir) >= -1) {
 							result = i;
+						}
 					}
 					cur_raillength -= dist;
-					if (reversed)
+					if (reversed) {
 						cur_realstep -= train_length_in_rails;
+					}
 				}
 				--cur_step;
 				--cur_realstep;
@@ -345,17 +358,16 @@ int R_DOT::FindNewDot(int p_backLink, ANGLE p_dir)
 }
 
 // FUNCTION: ALIEN 0x43b7d0
-int R_DOT::TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid,
-	ENGINE* p_engine, ANGLE p_dir)
+int R_DOT::TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid, ENGINE* p_engine, ANGLE p_dir)
 {
-	if (!p_depth)
+	if (!p_depth) {
 		return 1;
+	}
 	for (int i = 0; i < m_noLinks; ++i) {
 		R_DOT_LINK* link = &m_links[i];
 		R_DOT* dot = link->m_dot;
-		if (link->m_dot != p_prev && link->m_dot != p_avoid && p_engine
-			&& CanEnginePassTo(i, p_engine)
-			&& link->m_dot->CanEnginePassTo(link->m_backLink, p_engine)) {
+		if (link->m_dot != p_prev && link->m_dot != p_avoid && p_engine && CanEnginePassTo(i, p_engine) &&
+			link->m_dot->CanEnginePassTo(link->m_backLink, p_engine)) {
 			unsigned char linkDir = link->m_dir.m_dir;
 			unsigned char d1 = (unsigned char) (p_dir.m_dir - linkDir);
 			unsigned char d2 = (unsigned char) (linkDir - p_dir.m_dir);
@@ -366,15 +378,21 @@ int R_DOT::TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid,
 					++dots_num;
 				}
 				else {
-					MYERROR::Error(::Error,
+					MYERROR::Error(
+						::Error,
 						// STRING: ALIEN 0x484190
-						"R_DOT %i,%i", 10,
+						"R_DOT %i,%i",
+						10,
 						// STRING: ALIEN 0x48419c
-						"dots_num is large", dots_num, m_x, m_y);
+						"dots_num is large",
+						dots_num,
+						m_x,
+						m_y
+					);
 				}
-				if (link->m_dot->TryToFindRailsForReturn(
-						p_depth - 1, this, p_avoid, p_engine, link->m_dir))
+				if (link->m_dot->TryToFindRailsForReturn(p_depth - 1, this, p_avoid, p_engine, link->m_dir)) {
 					return 1;
+				}
 				--dots_num;
 			}
 		}
@@ -385,19 +403,19 @@ int R_DOT::TryToFindRailsForReturn(int p_depth, R_DOT* p_prev, R_DOT* p_avoid,
 // FUNCTION: ALIEN 0x43bb90
 int R_DOT::CanEnginePassTo(int p_link, ENGINE* p_engine)
 {
-	if (p_link < 0 || p_link >= m_noLinks)
+	if (p_link < 0 || p_link >= m_noLinks) {
 		return 0;
+	}
 	ENGINE* busy;
-	if (p_engine
-		&& ((m_unk0x14 == ((p_engine->m_flag >> 11) & 3) + 4 && m_links[p_link].m_dot->m_unk0x14 == m_unk0x14)
-			|| ((busy = m_links[p_link].m_dot->m_busyEngine) != 0
-				&& !p_engine->InTrain((SPRITE*) busy)
-				&& ((R_DOT::command == 26 && busy->InTrain(R_DOT::Target))
-					|| ((fabs(busy->m_speed) < g_dbl47A7E8
-						 || busy->m_curDotRef.LinkedDot() == this)
-						&& (!busy->m_goal || busy->m_goal != p_engine->m_goal)
-						&& (!busy->m_commandDot || busy->m_commandDot != p_engine->m_commandDot))))))
+	if (p_engine &&
+		((m_unk0x14 == ((p_engine->m_flag >> 11) & 3) + 4 && m_links[p_link].m_dot->m_unk0x14 == m_unk0x14) ||
+		 ((busy = m_links[p_link].m_dot->m_busyEngine) != 0 && !p_engine->InTrain((SPRITE*) busy) &&
+		  ((R_DOT::command == 26 && busy->InTrain(R_DOT::Target)) ||
+		   ((fabs(busy->m_speed) < g_dbl47A7E8 || busy->m_curDotRef.LinkedDot() == this) &&
+			(!busy->m_goal || busy->m_goal != p_engine->m_goal) &&
+			(!busy->m_commandDot || busy->m_commandDot != p_engine->m_commandDot)))))) {
 		return 0;
+	}
 	return m_links[p_link].m_dot->m_unk0x0c != m_links[p_link].m_backLink;
 }
 
@@ -407,14 +425,16 @@ void R_DOT::UnLink(const R_DOT* p_dot)
 	int n = m_noLinks;
 	for (int i = 0; i < n; i++) {
 		if (m_links[i].m_dot == p_dot) {
-			if (m_unk0x0c == i)
+			if (m_unk0x0c == i) {
 				m_unk0x0c = -1;
+			}
 			--n;
 			m_noLinks = n;
 			m_links[i] = m_links[n];
 			m_links[i].m_dot->m_links[m_links[i].m_backLink].m_backLink = i;
-			if (m_unk0x0c == m_noLinks)
+			if (m_unk0x0c == m_noLinks) {
 				m_unk0x0c = i;
+			}
 			return;
 		}
 	}
@@ -423,10 +443,12 @@ void R_DOT::UnLink(const R_DOT* p_dot)
 // FUNCTION: ALIEN 0x43bd20
 void R_DOT::Link(R_DOT* p_dot)
 {
-	if (!p_dot)
+	if (!p_dot) {
 		return;
-	if (GetLink_idx(p_dot) >= 0)
+	}
+	if (GetLink_idx(p_dot) >= 0) {
 		return;
+	}
 	R_DOT_LINK link[1];
 	AngleAssign(&link[0].m_dir, Decart2Polar(p_dot->m_x - m_x, p_dot->m_y - m_y, 0));
 	int dy = m_x - p_dot->m_x;
@@ -442,10 +464,16 @@ void R_DOT::Link(R_DOT* p_dot)
 		l->m_crossLink = 0;
 		AngleAssign(&l->m_dir, link[0].m_dir);
 	}
-	else
-		MYERROR::Log(::Error,
+	else {
+		MYERROR::Log(
+			::Error,
 			// STRING: ALIEN 0x4841e0
-			"!!!ERROR!!!R_DOT: Too many links in %i,%i,%i", m_x, m_y, m_z);
+			"!!!ERROR!!!R_DOT: Too many links in %i,%i,%i",
+			m_x,
+			m_y,
+			m_z
+		);
+	}
 	link[0].m_dir.m_dir += 0x80;
 	int myIdx = m_noLinks - 1;
 	if (p_dot->m_noLinks < 6) {
@@ -457,10 +485,16 @@ void R_DOT::Link(R_DOT* p_dot)
 		l->m_crossLink = 0;
 		AngleAssign(&l->m_dir, link[0].m_dir);
 	}
-	else
-		MYERROR::Log(::Error,
+	else {
+		MYERROR::Log(
+			::Error,
 			// STRING: ALIEN 0x4841b0
-			"!!!ERROR!!!R_DOT: Too many links2 in %i,%i,%i", p_dot->m_x, p_dot->m_y, p_dot->m_z);
+			"!!!ERROR!!!R_DOT: Too many links2 in %i,%i,%i",
+			p_dot->m_x,
+			p_dot->m_y,
+			p_dot->m_z
+		);
+	}
 }
 
 // FUNCTION: ALIEN 0x43be90
@@ -475,7 +509,7 @@ int R_DOT::SetNearestPos(int p_x, int p_y, int p_z, R_POS* p_out) const
 				int d = m_links[i].m_dot->GetDistance(p_x, p_y, p_z, sub);
 				if (d < best) {
 					best = d;
-					*(R_DOT**) &p_out->m_dot = m_links[i].m_dot;
+					p_out->m_dot = m_links[i].m_dot;
 					p_out->m_link = sub;
 				}
 			}
@@ -483,12 +517,15 @@ int R_DOT::SetNearestPos(int p_x, int p_y, int p_z, R_POS* p_out) const
 
 		R_DOT* winner = p_out->m_dot;
 		int pos = p_out->m_dot->GetPos(p_x, p_y, p_z, p_out->m_link);
-		*(int*) &p_out->m_unk0x04 = pos;
-		if (pos < 0)
-			*(int*) &p_out->m_unk0x04 = 0;
-		result = (int) p_out->m_dot;
+		p_out->m_pos = pos;
+		if (pos < 0) {
+			p_out->m_pos = 0;
+		}
+		// The original returned the dot pointer here as a truthy int; both
+		// callers ignore the result.
+		result = p_out->m_dot ? 1 : 0;
 		int cap = p_out->m_dot ? p_out->m_dot->m_links[p_out->m_link].m_dist : 0;
-		if (*(int*) &p_out->m_unk0x04 >= cap) {
+		if (p_out->m_pos >= cap) {
 			if (p_out->m_dot) {
 				result = p_out->m_dot->m_links[p_out->m_link].m_dist;
 			}
@@ -496,7 +533,7 @@ int R_DOT::SetNearestPos(int p_x, int p_y, int p_z, R_POS* p_out) const
 				result = 0;
 			}
 			--result;
-			*(int*) &p_out->m_unk0x04 = result;
+			p_out->m_pos = result;
 		}
 	}
 	return result;
@@ -524,8 +561,8 @@ int R_DOT::GetDistance(int p_x, int p_y, int p_z, int p_link) const
 		int cz = dy2 * (p_x - x) - dx2 * dpy;
 		int cx = dz2 * dpy - dy2 * (p_z - z);
 		int cy = dx2 * (p_z - z) - dz2 * (p_x - x);
-		int len = Sqrt((x - dot->m_x) * (x - dot->m_x) + (y - dot->m_y) * (y - dot->m_y)
-			+ (z - dot->m_z) * (z - dot->m_z));
+		int len =
+			Sqrt((x - dot->m_x) * (x - dot->m_x) + (y - dot->m_y) * (y - dot->m_y) + (z - dot->m_z) * (z - dot->m_z));
 		return Sqrt(cy * cy + cx * cx + cz * cz) / len;
 	}
 }
@@ -609,9 +646,11 @@ int R_DOT::FindNewDotWithoutBusyDots()
 			}
 			if (s_findNewDotWithoutBusyDotsStep < NoStep) {
 				s_findNewDotWithoutBusyDotsStep = s_findNewDotWithoutBusyDotsStep + 1;
-				for (int i = 0; i < m_noLinks; i++)
-					if (m_links[i].m_dot->FindNewDotWithoutBusyDots() >= -1)
+				for (int i = 0; i < m_noLinks; i++) {
+					if (m_links[i].m_dot->FindNewDotWithoutBusyDots() >= -1) {
 						result = i;
+					}
+				}
 				s_findNewDotWithoutBusyDotsStep--;
 			}
 		}
@@ -622,9 +661,11 @@ int R_DOT::FindNewDotWithoutBusyDots()
 // FUNCTION: ALIEN 0x43c360
 int R_DOT::GetLink_idx(const R_DOT* p_dot)
 {
-	for (int i = 0; i < m_noLinks; i++)
-		if (m_links[i].m_dot == p_dot)
+	for (int i = 0; i < m_noLinks; i++) {
+		if (m_links[i].m_dot == p_dot) {
 			return i;
+		}
+	}
 	return -1;
 }
 
@@ -636,14 +677,17 @@ int R_DOT::GetLink_dir(ANGLE p_dir)
 	for (int i = 1; i < m_noLinks; i++) {
 		unsigned char a = dir - m_links[best].m_dir.m_dir;
 		unsigned char b = m_links[best].m_dir.m_dir - dir;
-		if (a >= b)
+		if (a >= b) {
 			a = b;
+		}
 		unsigned char c = dir - m_links[i].m_dir.m_dir;
 		unsigned char d = m_links[i].m_dir.m_dir - dir;
-		if (c >= d)
+		if (c >= d) {
 			c = d;
-		if (c < a)
+		}
+		if (c < a) {
 			best = i;
+		}
 	}
 	return best;
 }

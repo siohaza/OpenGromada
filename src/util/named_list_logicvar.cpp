@@ -1,10 +1,8 @@
-#define DECOMP_INLINE_NAMED_LIST_STRUCT_LOGICVAR_DTOR
-#define DECOMP_INLINE_STRING_DTOR
 #include "util/named_list_logicvar.h"
 
 #include "logic/logicvar.h"
-#include "util/named_list_struct_logicvar.h"
 #include "util/myerror.h"
+#include "util/named_list_struct_logicvar.h"
 
 // FUNCTION: ALIEN 0x40b0a0
 NAMED_LIST_LOGICVAR::NAMED_LIST_LOGICVAR()
@@ -23,19 +21,16 @@ void NAMED_LIST_LOGICVAR::Insert(STRING p_name, LOGICVAR p_value)
 		int newMax = 2 * m_max + 4;
 		if (newMax > m_max) {
 			NAMED_LIST_STRUCT_LOGICVAR* oldData = m_data;
-		#pragma inline_depth(0)
 			NAMED_LIST_STRUCT_LOGICVAR* newData = new NAMED_LIST_STRUCT_LOGICVAR[newMax];
-		#pragma inline_depth(8)
 			m_data = newData;
-			if (!newData)
-				MYERROR::LogExit(::Error,
-					"!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			if (!newData) {
+				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", newMax);
+			}
 			if (oldData) {
-				for (int i = 0; i < m_max; ++i)
+				for (int i = 0; i < m_max; ++i) {
 					m_data[i] = oldData[i];
-			#pragma inline_depth(0)
+				}
 				delete[] oldData;
-			#pragma inline_depth(8)
 			}
 			m_max = newMax;
 		}

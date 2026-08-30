@@ -10,7 +10,6 @@ class RESOURCE;
 
 class VID_LIGHT : public VID {
 public:
-
 	VID_LIGHT()
 	{
 		m_unk0x484 = 0;
@@ -24,10 +23,8 @@ public:
 	int Draw(SPRITE* p_sprite);
 	void Load(RESOURCE* p_res); // vtable+0x18
 
-	undefined4 m_unk0x484; // 0x484
-	undefined4 m_unk0x488; // 0x488
+	int m_unk0x484;           // 0x484
+	unsigned int* m_unk0x488; // 0x488
 };
-
-DECOMP_SIZE_ASSERT(VID_LIGHT, 0x48c)
 
 #endif

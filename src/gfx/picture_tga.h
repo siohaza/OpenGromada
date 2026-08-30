@@ -20,7 +20,7 @@ struct TGA_HEADER {
 };
 #pragma pack(pop)
 
-DECOMP_SIZE_ASSERT(TGA_HEADER, 0x12)
+static_assert(sizeof(TGA_HEADER) == 0x12, "TGA_HEADER matches the ondisk TGA header");
 
 // VTABLE: ALIEN 0x47a72c
 class PICTURE_TGA : public PICTURE_BASE {
@@ -32,7 +32,5 @@ public:
 	int LoadHeader(TGA_HEADER* p_header);
 	unsigned char m_imageType; // 0x42c
 };
-
-DECOMP_SIZE_ASSERT(PICTURE_TGA, 0x430)
 
 #endif

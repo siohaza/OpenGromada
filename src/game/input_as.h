@@ -1,19 +1,21 @@
 #ifndef INPUT_AS_H
 #define INPUT_AS_H
 
+union SDL_Event;
+
 #include "util/decomp.h"
 #include "util/stream.h"
 #include "util/string.h"
 
 class INPUT_AS {
 public:
-	undefined4 m_button; // 0x00
-	undefined4 m_wheel; // 0x04
-	float m_worldX; // 0x08
-	float m_worldY; // 0x0c
-	float m_x; // 0x10
-	float m_y; // 0x14
-	undefined4 m_key; // 0x18
+	undefined4 m_button;  // 0x00
+	undefined4 m_wheel;   // 0x04
+	float m_worldX;       // 0x08
+	float m_worldY;       // 0x0c
+	float m_x;            // 0x10
+	float m_y;            // 0x14
+	undefined4 m_key;     // 0x18
 	undefined4 m_unk0x1c; // 0x1c
 
 	static int firstKey1;
@@ -26,7 +28,7 @@ public:
 	static int secondClearForButtonUp;
 
 	INPUT_AS();
-	int ProcessMessage(void* p_wnd, unsigned int p_msg, unsigned int p_wparam, unsigned int p_lparam);
+	int ProcessEvent(const union SDL_Event& p_event);
 	int Save(STREAM* p_stream) const;
 	int Load(STREAM* p_stream);
 	static int GetKeyByName(STRING p_name);
@@ -48,6 +50,6 @@ extern int g_relativeControl;
 extern int g_windowPosX;
 extern int g_windowPosY;
 
-DECOMP_SIZE_ASSERT(INPUT_AS, 0x20)
+static_assert(sizeof(INPUT_AS) == 0x20, "INPUT_AS demo records are serialized as 32 raw bytes");
 
 #endif

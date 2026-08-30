@@ -1,7 +1,5 @@
 #include "video/vid_hardware_z.h"
 
-#include <string.h>
-
 #include "game/gametime.h"
 #include "game/map.h"
 #include "gfx/asmdraw.h"
@@ -9,19 +7,26 @@
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
 #include "sprite/sprite.h"
+#include "util/packed.h"
+
+#include <string.h>
 
 extern float FSin[256];
 
-static inline int DrawBoxInViewPort(int p_x0, int p_y0, int p_x1, int p_y1)
+inline static int DrawBoxInViewPort(int p_x0, int p_y0, int p_x1, int p_y1)
 {
-	if (p_x1 < VID::viewXMin)
+	if (p_x1 < VID::ViewXMin()) {
 		return 0;
-	if (p_x0 >= VID::viewXMax)
+	}
+	if (p_x0 >= VID::ViewXMax()) {
 		return 0;
-	if (p_y1 < VID::viewYMin)
+	}
+	if (p_y1 < VID::ViewYMin()) {
 		return 0;
-	if (p_y0 >= VID::viewYMax)
+	}
+	if (p_y0 >= VID::ViewYMax()) {
 		return 0;
+	}
 	return 1;
 }
 
@@ -40,41 +45,76 @@ int VID_HARDWARE_Z::SetGamma(const GAMMA& p_gamma, unsigned int p_flags)
 // STUB: ALIEN 0x41b0e0
 int VID_HARDWARE_Z::Draw(SPRITE* p_sprite)
 {
+	if (!p_sprite || !Map) {
+		return 0;
+	}
+	return DrawFrame(
+		p_sprite->m_noCadr,
+		p_sprite->m_x,
+		p_sprite->m_y,
+		p_sprite->m_z,
+		Map->m_shiftX,
+		Map->m_shiftY,
+		p_sprite->GetGamma()
+	);
+}
+
+int VID_HARDWARE_Z::DrawFrame(
+	int p_frame,
+	float p_x,
+	float p_y,
+	float p_z,
+	float p_shiftX,
+	float p_shiftY,
+	const GAMMA& p_gamma
+)
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	if (!graph || !m_unk0x48c || !m_unk0x484 || p_frame < 0 || p_frame >= m_dotFrameCount || m_unk0x2f6 <= 0 ||
+		m_messageLineHeight <= 0) {
+		return 0;
+	}
 	if (!(m_unk0x47c & 0x40)) {
 		int width = m_unk0x2f6;
-		int x0 = (int) (p_sprite->m_x - Map->m_shiftX - width / 2);
-		int y0 = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - m_messageLineHeight / 2);
+		int x0 = (int) (p_x - p_shiftX - width / 2);
+		int y0 = (int) (p_y - p_z - p_shiftY - m_messageLineHeight / 2);
 		if (DrawBoxInViewPort(x0, y0, x0 + width, y0 + m_messageLineHeight)) {
 
-			int z = (int) (p_sprite->m_z * 8.0f);
+			int z = (int) (p_z * 8.0f);
 			if ((m_flag & 0x8000) && z < 0x3fff) {
 				z += 0x3fff;
-			} else if (m_flag & 0x10000) {
+			}
+			else if (m_flag & 0x10000) {
 				int bob = (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
 				z += bob;
 				y0 += bob / -8;
 			}
 
-			short* frame = (short*) ((char*) m_unk0x48c
-				+ ((int*) m_unk0x484)[p_sprite->m_noCadr]);
-			frame += 3 * frame[0] + 1;
-			int yTop = y0 + *frame++;
-			int yEnd = yTop + *frame++;
+			int frameOffset = m_unk0x484[p_frame];
+			if (frameOffset < 0 || frameOffset > m_unk0x488 - 6) {
+				return 0;
+			}
+			unsigned char* frame = (unsigned char*) m_unk0x48c + frameOffset;
+			short contourCount = PackedRead<short>(frame);
+			unsigned char* header = frame + 6 * contourCount + 2;
+			int yTop = y0 + PackedRead<short>(header);
+			int yEnd = yTop + PackedRead<short>(header + 2);
 
-			unsigned char* rle = (unsigned char*) frame;
-			if (!(yTop >= viewYMax || yEnd < viewYMin)) {
-				if (yEnd > viewYMax)
-					yEnd = viewYMax;
-				if (yTop < viewYMin) {
-					int skip = viewYMin - yTop;
+			unsigned char* rle = header + 4;
+			if (!(yTop >= ViewYMax() || yEnd <= ViewYMin())) {
+				if (yEnd > ViewYMax()) {
+					yEnd = ViewYMax();
+				}
+				if (yTop < ViewYMin()) {
+					int skip = ViewYMin() - yTop;
 					yTop += skip;
 					do {
-						if (*(short*) rle) {
+						if (PackedRleRun(rle)) {
 							int count;
 							do {
 								count = rle[1];
 								rle += 4 * count + 2;
-							} while (*(short*) rle);
+							} while (PackedRleRun(rle));
 						}
 						rle += 2;
 					} while (--skip);
@@ -92,64 +132,97 @@ int VID_HARDWARE_Z::Draw(SPRITE* p_sprite)
 				yEnd -= yTop;
 				source.bottom = yEnd;
 
-				int zpitch = ((GRAPH_CORE*) Graph)->m_unk0x250;
-				frame = (short*) ((GRAPH_CORE*) Graph)->m_zbuffer;
-				char* pix = (char*) ((GRAPH_CORE*) Graph)->m_texE14->Lock(&width, &source);
+				if (!graph->m_zbuffer || graph->m_zpitch < (int) graph->m_width || !graph->m_texE14 ||
+					source.right > graph->m_texE14->m_width || source.bottom > graph->m_texE14->m_height) {
+					return 0;
+				}
+				int zpitch = graph->m_zpitch;
+				short* zbuffer = (short*) graph->m_zbuffer;
+				char* pix = (char*) graph->m_texE14->Lock(&width, &source);
+				if (!pix || width < 2 * source.right) {
+					return 0;
+				}
 				width /= 2;
-				*(short*) &AsmDrawData[0] = (short) z;
-				char* pixEnd = pix + 2 * width * (yEnd + 1);
-				short* zrow = frame + yTop * zpitch;
+				char* pixEnd = pix + 2 * width * yEnd;
+				short* zrow = zbuffer + yTop * zpitch;
 
 				unsigned short flag2 = m_pixelFlag16;
 				if ((flag2 & 2) && (flag2 & 1)) {
-					if (x0 >= viewXMin && x0 + m_unk0x2f6 <= viewXMax) {
+					if (x0 >= ViewXMin() && x0 + m_unk0x2f6 <= ViewXMax()) {
 						while (pix < pixEnd) {
 							memset(pix, 0, 2 * width);
 							int x = x0;
-							while (*(short*) rle) {
+							while (PackedRleRun(rle)) {
 								x += *rle++;
 								int count = *rle++;
-								short* run = (short*) rle;
-								AsmDrawAlphaWithZ(run, run + count, zrow + x,
-									(short*) pix + (x - x0), count);
-								rle = (unsigned char*) (run + 2 * count);
+								unsigned char* run = rle;
+								AsmDrawAlphaWithZ(run, run + 2 * count, zrow + x, (short*) pix + (x - x0), count, z);
+								rle = run + 4 * count;
 								x += count;
 							}
 							rle += 2;
 							pix += 2 * width;
 							zrow += zpitch;
 						}
-					} else {
+					}
+					else {
 						while (pix < pixEnd) {
 							memset(pix, 0, 2 * width);
 							int x = x0;
-							while (*(short*) rle) {
+							while (PackedRleRun(rle)) {
 								x += *rle++;
 								int count = *rle++;
-								short* run = (short*) rle;
+								unsigned char* run = rle;
 								int xEnd;
-								if (x < viewXMin) {
+								if (x < ViewXMin()) {
 									xEnd = x + count;
-									if (xEnd > viewXMax)
-										AsmDrawAlphaWithZ(run + (viewXMin - x),
-											run + (viewXMin - x) + count, zrow + viewXMin,
-											(short*) pix + (viewXMin - x0), viewXMax - viewXMin);
-									else if (xEnd > viewXMin)
-										AsmDrawAlphaWithZ(run + (viewXMin - x),
-											run + (viewXMin - x) + count, zrow + viewXMin,
-											(short*) pix + (viewXMin - x0), xEnd - viewXMin);
-								} else {
-									xEnd = x + count;
-									if (xEnd > viewXMax) {
-										if (x < viewXMax)
-											AsmDrawAlphaWithZ(run, run + count, zrow + x,
-												(short*) pix + (x - x0), viewXMax - x);
-									} else {
-										AsmDrawAlphaWithZ(run, run + count, zrow + x,
-											(short*) pix + (x - x0), count);
+									if (xEnd > ViewXMax()) {
+										AsmDrawAlphaWithZ(
+											run + 2 * (ViewXMin() - x),
+											run + 2 * (ViewXMin() - x + count),
+											zrow + ViewXMin(),
+											(short*) pix + (ViewXMin() - x0),
+											ViewXMax() - ViewXMin(),
+											z
+										);
+									}
+									else if (xEnd > ViewXMin()) {
+										AsmDrawAlphaWithZ(
+											run + 2 * (ViewXMin() - x),
+											run + 2 * (ViewXMin() - x + count),
+											zrow + ViewXMin(),
+											(short*) pix + (ViewXMin() - x0),
+											xEnd - ViewXMin(),
+											z
+										);
 									}
 								}
-								rle = (unsigned char*) (run + 2 * count);
+								else {
+									xEnd = x + count;
+									if (xEnd > ViewXMax()) {
+										if (x < ViewXMax()) {
+											AsmDrawAlphaWithZ(
+												run,
+												run + 2 * count,
+												zrow + x,
+												(short*) pix + (x - x0),
+												ViewXMax() - x,
+												z
+											);
+										}
+									}
+									else {
+										AsmDrawAlphaWithZ(
+											run,
+											run + 2 * count,
+											zrow + x,
+											(short*) pix + (x - x0),
+											count,
+											z
+										);
+									}
+								}
+								rle = run + 4 * count;
 								x = xEnd;
 							}
 							rle += 2;
@@ -157,56 +230,84 @@ int VID_HARDWARE_Z::Draw(SPRITE* p_sprite)
 							zrow += zpitch;
 						}
 					}
-					((GRAPH_CORE*) Graph)->SetAlphaBlend(5, 6);
-				} else {
-					if (x0 >= viewXMin && x0 + m_unk0x2f6 <= viewXMax) {
+					graph->SetAlphaBlend(5, 6);
+				}
+				else {
+					if (x0 >= ViewXMin() && x0 + m_unk0x2f6 <= ViewXMax()) {
 						while (pix < pixEnd) {
 							memset(pix, 0, 2 * width);
 							int x = x0;
-							while (*(short*) rle) {
+							while (PackedRleRun(rle)) {
 								x += *rle++;
 								int count = *rle++;
-								short* run = (short*) rle;
-								AsmDrawLightWithZ(run, run + count, zrow + x,
-									(short*) pix + (x - x0), count);
-								rle = (unsigned char*) (run + 2 * count);
+								unsigned char* run = rle;
+								AsmDrawLightWithZ(run, run + 2 * count, zrow + x, (short*) pix + (x - x0), count, z);
+								rle = run + 4 * count;
 								x += count;
 							}
 							rle += 2;
 							pix += 2 * width;
 							zrow += zpitch;
 						}
-					} else {
+					}
+					else {
 						while (pix < pixEnd) {
 							memset(pix, 0, 2 * width);
 							int x = x0;
-							while (*(short*) rle) {
+							while (PackedRleRun(rle)) {
 								x += *rle++;
 								int count = *rle++;
-								short* run = (short*) rle;
+								unsigned char* run = rle;
 								int xEnd;
-								if (x < viewXMin) {
+								if (x < ViewXMin()) {
 									xEnd = x + count;
-									if (xEnd > viewXMax)
-										AsmDrawLightWithZ(run + (viewXMin - x),
-											run + (viewXMin - x) + count, zrow + viewXMin,
-											(short*) pix + (viewXMin - x0), viewXMax - viewXMin);
-									else if (xEnd > viewXMin)
-										AsmDrawLightWithZ(run + (viewXMin - x),
-											run + (viewXMin - x) + count, zrow + viewXMin,
-											(short*) pix + (viewXMin - x0), xEnd - viewXMin);
-								} else {
-									xEnd = x + count;
-									if (xEnd > viewXMax) {
-										if (x < viewXMax)
-											AsmDrawLightWithZ(run, run + count, zrow + x,
-												(short*) pix + (x - x0), viewXMax - x);
-									} else {
-										AsmDrawLightWithZ(run, run + count, zrow + x,
-											(short*) pix + (x - x0), count);
+									if (xEnd > ViewXMax()) {
+										AsmDrawLightWithZ(
+											run + 2 * (ViewXMin() - x),
+											run + 2 * (ViewXMin() - x + count),
+											zrow + ViewXMin(),
+											(short*) pix + (ViewXMin() - x0),
+											ViewXMax() - ViewXMin(),
+											z
+										);
+									}
+									else if (xEnd > ViewXMin()) {
+										AsmDrawLightWithZ(
+											run + 2 * (ViewXMin() - x),
+											run + 2 * (ViewXMin() - x + count),
+											zrow + ViewXMin(),
+											(short*) pix + (ViewXMin() - x0),
+											xEnd - ViewXMin(),
+											z
+										);
 									}
 								}
-								rle = (unsigned char*) (run + 2 * count);
+								else {
+									xEnd = x + count;
+									if (xEnd > ViewXMax()) {
+										if (x < ViewXMax()) {
+											AsmDrawLightWithZ(
+												run,
+												run + 2 * count,
+												zrow + x,
+												(short*) pix + (x - x0),
+												ViewXMax() - x,
+												z
+											);
+										}
+									}
+									else {
+										AsmDrawLightWithZ(
+											run,
+											run + 2 * count,
+											zrow + x,
+											(short*) pix + (x - x0),
+											count,
+											z
+										);
+									}
+								}
+								rle = run + 4 * count;
 								x = xEnd;
 							}
 							rle += 2;
@@ -214,32 +315,29 @@ int VID_HARDWARE_Z::Draw(SPRITE* p_sprite)
 							zrow += zpitch;
 						}
 					}
-					((GRAPH_CORE*) Graph)->SetAlphaBlend(5, 2);
+					graph->SetAlphaBlend(5, 2);
 				}
 
-				IDirect3DTexture8* texture = ((GRAPH_CORE*) Graph)->m_texE14->m_texture;
-				if (texture)
-					texture->UnlockRect(0);
-				((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_ZFUNC, 8);
+				graph->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
 
 				if (m_flag & 0x800) {
 					GAMMA total;
-					total.Add(*(GAMMA*) &m_colorSub, GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
-					((GRAPH_CORE*) Graph)->m_texE14->Draw(&screen, &source, &total);
-				} else {
-					int graphNeg = ((GRAPH_CORE*) Graph)->m_gammaSet.m_a;
-					int graphPos = ((GRAPH_CORE*) Graph)->m_gammaSet.m_b;
+					total.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), GAMMA(GAMMA::RAW_COPY, p_gamma));
+					graph->m_texE14->Draw(&screen, &source, &total);
+				}
+				else {
+					int graphNeg = graph->m_gammaSet.m_a;
+					int graphPos = graph->m_gammaSet.m_b;
 					GAMMA total;
-					total.Add(*(GAMMA*) &m_colorSub, GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
+					total.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), GAMMA(GAMMA::RAW_COPY, p_gamma));
 					GAMMA final;
 					final.Add(total, GAMMA(GAMMA::RAW_COPY, graphNeg, graphPos));
-					((GRAPH_CORE*) Graph)->m_texE14->Draw(&screen, &source, &final);
+					graph->m_texE14->Draw(&screen, &source, &final);
 				}
 			}
 		}
 	}
-	if (0)
-		return 0;
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x41b880
@@ -253,19 +351,24 @@ void VID_HARDWARE_Z::SetLayer()
 		m_layer = 0xa;
 		return;
 	}
-	unsigned short pf = *(unsigned short*) &m_pixelFlag;
+	unsigned short pf = m_pixelFlag16;
 	if (pf & 4) {
-		if (pf & 2)
+		if (pf & 2) {
 			m_layer = 0xc;
-		else
+		}
+		else {
 			m_layer = 8;
+		}
 	}
 	else if (pf & 2) {
-		if (m_flag & 0x10000)
+		if (m_flag & 0x10000) {
 			m_layer = 9;
-		else
+		}
+		else {
 			m_layer = 0xc;
+		}
 	}
-	else
+	else {
 		m_layer = 8;
+	}
 }

@@ -688,7 +688,13 @@ typedef struct {
  * ov_open() to avoid problems with incompatible crt.o version linking
  * issues. */
 
-static int _ov_header_fseek_wrap(FILE *f,ogg_int64_t off,int whence){
+static size_t _ov_header_fread_wrap(void *ptr,size_t size,size_t nmemb,
+                                    void *datasource){
+  return fread(ptr,size,nmemb,(FILE *)datasource);
+}
+
+static int _ov_header_fseek_wrap(void *datasource,ogg_int64_t off,int whence){
+  FILE *f=(FILE *)datasource;
   if(f==NULL)return(-1);
 
 #ifdef __MINGW32__
@@ -698,6 +704,14 @@ static int _ov_header_fseek_wrap(FILE *f,ogg_int64_t off,int whence){
 #else
   return fseek(f,off,whence);
 #endif
+}
+
+static int _ov_header_fclose_wrap(void *datasource){
+  return fclose((FILE *)datasource);
+}
+
+static long _ov_header_ftell_wrap(void *datasource){
+  return ftell((FILE *)datasource);
 }
 
 /* These structs below (OV_CALLBACKS_DEFAULT etc) are defined here as
@@ -711,31 +725,31 @@ static int _ov_header_fseek_wrap(FILE *f,ogg_int64_t off,int whence){
  */
 
 static ov_callbacks OV_CALLBACKS_DEFAULT = {
-  (size_t (*)(void *, size_t, size_t, void *))  fread,
-  (int (*)(void *, ogg_int64_t, int))           _ov_header_fseek_wrap,
-  (int (*)(void *))                             fclose,
-  (long (*)(void *))                            ftell
+  _ov_header_fread_wrap,
+  _ov_header_fseek_wrap,
+  _ov_header_fclose_wrap,
+  _ov_header_ftell_wrap
 };
 
 static ov_callbacks OV_CALLBACKS_NOCLOSE = {
-  (size_t (*)(void *, size_t, size_t, void *))  fread,
-  (int (*)(void *, ogg_int64_t, int))           _ov_header_fseek_wrap,
-  (int (*)(void *))                             NULL,
-  (long (*)(void *))                            ftell
+  _ov_header_fread_wrap,
+  _ov_header_fseek_wrap,
+  NULL,
+  _ov_header_ftell_wrap
 };
 
 static ov_callbacks OV_CALLBACKS_STREAMONLY = {
-  (size_t (*)(void *, size_t, size_t, void *))  fread,
-  (int (*)(void *, ogg_int64_t, int))           NULL,
-  (int (*)(void *))                             fclose,
-  (long (*)(void *))                            NULL
+  _ov_header_fread_wrap,
+  NULL,
+  _ov_header_fclose_wrap,
+  NULL
 };
 
 static ov_callbacks OV_CALLBACKS_STREAMONLY_NOCLOSE = {
-  (size_t (*)(void *, size_t, size_t, void *))  fread,
-  (int (*)(void *, ogg_int64_t, int))           NULL,
-  (int (*)(void *))                             NULL,
-  (long (*)(void *))                            NULL
+  _ov_header_fread_wrap,
+  NULL,
+  NULL,
+  NULL
 };
 
 #endif
@@ -18797,7 +18811,7 @@ int vorbis_book_init_decode(codebook *c,const static_codebook *s){
         long lo=0,hi=0;
 
         for(i=0;i<tabn;i++){
-          ogg_uint32_t word=i<<(32-c->dec_firsttablen);
+	          ogg_uint32_t word=(ogg_uint32_t)i<<(32-c->dec_firsttablen);
           if(c->dec_firsttable[bitreverse(word)]==0){
             while((lo+1)<n && c->codelist[lo+1]<=word)lo++;
             while(    hi<n && word>=(c->codelist[hi]&mask))hi++;
@@ -20194,11 +20208,31 @@ static int _fetch_and_process_packet(OggVorbis_File *vf,
   }
 }
 
+static size_t _fread_wrap(void *ptr,size_t size,size_t nmemb,
+                          void *datasource){
+  return fread(ptr,size,nmemb,(FILE *)datasource);
+}
+
 /* if, eg, 64 bit stdio is configured by default, this will build with
    fseek64 */
-static int _fseek64_wrap(FILE *f,ogg_int64_t off,int whence){
+static int _fseek64_wrap(void *datasource,ogg_int64_t off,int whence){
+  FILE *f=(FILE *)datasource;
   if(f==NULL)return(-1);
+#ifdef __MINGW32__
+  return fseeko64(f,off,whence);
+#elif defined (_WIN32)
+  return _fseeki64(f,off,whence);
+#else
   return fseek(f,off,whence);
+#endif
+}
+
+static int _fclose_wrap(void *datasource){
+  return fclose((FILE *)datasource);
+}
+
+static long _ftell_wrap(void *datasource){
+  return ftell((FILE *)datasource);
 }
 
 static int _ov_open1(void *f,OggVorbis_File *vf,const char *initial,
@@ -20325,10 +20359,10 @@ int ov_open_callbacks(void *f,OggVorbis_File *vf,
 
 int ov_open(FILE *f,OggVorbis_File *vf,const char *initial,long ibytes){
   ov_callbacks callbacks = {
-    (size_t (*)(void *, size_t, size_t, void *))  fread,
-    (int (*)(void *, ogg_int64_t, int))              _fseek64_wrap,
-    (int (*)(void *))                             fclose,
-    (long (*)(void *))                            ftell
+    _fread_wrap,
+    _fseek64_wrap,
+    _fclose_wrap,
+    _ftell_wrap
   };
 
   return ov_open_callbacks((void *)f, vf, initial, ibytes, callbacks);
@@ -20395,10 +20429,10 @@ int ov_test_callbacks(void *f,OggVorbis_File *vf,
 
 int ov_test(FILE *f,OggVorbis_File *vf,const char *initial,long ibytes){
   ov_callbacks callbacks = {
-    (size_t (*)(void *, size_t, size_t, void *))  fread,
-    (int (*)(void *, ogg_int64_t, int))              _fseek64_wrap,
-    (int (*)(void *))                             fclose,
-    (long (*)(void *))                            ftell
+    _fread_wrap,
+    _fseek64_wrap,
+    _fclose_wrap,
+    _ftell_wrap
   };
 
   return ov_test_callbacks((void *)f, vf, initial, ibytes, callbacks);

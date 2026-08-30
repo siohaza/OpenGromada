@@ -1,158 +1,149 @@
-#define DECOMP_UNINITIALIZED_STRING_DEFAULT_CTOR
-#define DECOMP_INLINE_STRING_CHARP_CTOR
-#define DECOMP_INLINE_STRING_COPY_CTOR
-#define DECOMP_INLINE_STRING_DTOR
 #include "util/registry.h"
 
+#include "platform/portable_config.h"
+
+#include <ctype.h>
 #include <stdlib.h>
-#include <windows.h>
-
-// GLOBAL: ALIEN 0x492768
-char g_registryBuf[512];
-
-// GLOBAL: ALIEN 0x492968
-char g_registryValueBuf[512];
+#include <string.h>
+#include <string>
 
 // GLOBAL: ALIEN 0x492b68
 REGISTRY* Registry;
 
-// FUNCTION: ALIEN 0x4074c0
+namespace
+{
+
+std::string SectionOf(const STRING& p_path)
+{
+	static const char* const prefixes[] = {
+		"HKEY_USERS\\",
+		"HKEY_CURRENT_USER\\",
+		"HKEY_CLASSES_ROOT\\",
+		"HKEY_CURRENT_CONFIG\\",
+		"HKEY_LOCAL_MACHINE\\",
+	};
+
+	const char* path = p_path.m_str;
+	for (const char* prefix : prefixes) {
+		size_t len = strlen(prefix);
+		if (strncmp(path, prefix, len) == 0) {
+			path += len;
+			break;
+		}
+	}
+
+	std::string section(path);
+	for (char& c : section) {
+		if (c == '\\') {
+			c = '/';
+		}
+	}
+	return section;
+}
+
+bool StartsWithI(const std::string& p_text, const char* p_prefix)
+{
+	size_t length = strlen(p_prefix);
+	if (p_text.size() < length) {
+		return false;
+	}
+	for (size_t i = 0; i < length; ++i) {
+		if (tolower((unsigned char) p_text[i]) != tolower((unsigned char) p_prefix[i])) {
+			return false;
+		}
+	}
+	return true;
+}
+
+std::string LegacySection(const std::string& p_section, int p_kind)
+{
+	static const char* const canonical = "SOFTWARE/Gromada/AlienShooter";
+	size_t length = strlen(canonical);
+	if (!StartsWithI(p_section, canonical) || (p_section.size() != length && p_section[length] != '/')) {
+		return std::string();
+	}
+
+	const std::string suffix = p_section.substr(length);
+	if (p_kind == 0) {
+		return std::string("SOFTWARE/Gromada/AlienShooter-portable") + suffix;
+	}
+	return std::string("SOFTWARE/Gromada/") + suffix;
+}
+
+const char* GetWithLegacyFallback(const std::string& p_section, const char* p_name)
+{
+	if (const char* value = PortableConfig_GetString(p_section.c_str(), p_name)) {
+		return value;
+	}
+	for (int kind = 0; kind < 2; ++kind) {
+		const std::string legacy = LegacySection(p_section, kind);
+		if (!legacy.empty()) {
+			if (const char* value = PortableConfig_GetString(legacy.c_str(), p_name)) {
+				return value;
+			}
+		}
+	}
+	return nullptr;
+}
+
+} // namespace
+
+int Registry_GetIntExact(const STRING& p_path, const STRING& p_name, int p_default)
+{
+	return PortableConfig_GetInt(SectionOf(p_path).c_str(), p_name.m_str, p_default);
+}
+
 char** REGISTRY::Path(char** p_subkey, void** p_hkey) const
 {
-	const char* path;
-	int length;
-	if (!strncmp(m_path.m_str,
-		// STRING: ALIEN 0x481900
-		"HKEY_USERS\\", strlen("HKEY_USERS\\"))) {
-		*p_hkey = HKEY_USERS;
-		goto suffix;
+	if (p_hkey) {
+		*p_hkey = 0;
 	}
-	if (!strncmp(m_path.m_str,
-		// STRING: ALIEN 0x4818ec
-		"HKEY_CURRENT_USER\\", strlen("HKEY_CURRENT_USER\\"))) {
-		*p_hkey = HKEY_CURRENT_USER;
-		goto suffix;
+	if (p_subkey) {
+		std::string section = SectionOf(m_path);
+		*p_subkey = (char*) operator new(section.size() + 1);
+		memcpy(*p_subkey, section.c_str(), section.size() + 1);
 	}
-	if (!strncmp(m_path.m_str,
-		// STRING: ALIEN 0x4818d8
-		"HKEY_CLASSES_ROOT\\", strlen("HKEY_CLASSES_ROOT\\"))) {
-		*p_hkey = HKEY_CLASSES_ROOT;
-		goto suffix;
-	}
-	if (!strncmp(m_path.m_str,
-		// STRING: ALIEN 0x4818c0
-		"HKEY_CURRENT_CONFIG\\", strlen("HKEY_CURRENT_CONFIG\\"))) {
-		*p_hkey = HKEY_CURRENT_CONFIG;
-		goto suffix;
-	}
-	if (!strncmp(m_path.m_str,
-		// STRING: ALIEN 0x4818ac
-		"HKEY_LOCAL_MACHINE\\", strlen("HKEY_LOCAL_MACHINE\\"))) {
-		*p_hkey = HKEY_LOCAL_MACHINE;
-		goto suffix;
-	}
-	*p_hkey = HKEY_LOCAL_MACHINE;
-	path = m_path.m_str;
-	if (*path) {
-		length = strlen(path);
-		*p_subkey = (char*) operator new((length & 0xfffffff0) + 16);
-		memcpy(*p_subkey, path, length);
-		(*p_subkey)[length] = 0;
-	}
-	else {
-		*p_subkey = STRING::EMPTY;
-	}
-	return p_subkey;
-
-suffix:
-	m_path.After(p_subkey, "\\");
 	return p_subkey;
 }
 
 // FUNCTION: ALIEN 0x42cf70
 STRING REGISTRY::GetString(const STRING& p_name, const STRING& p_default)
 {
-	STRING subKey;
-	HKEY hKey;
-	Path((char**) &subKey, (void**) &hKey);
-	if (!RegOpenKeyExA(hKey, subKey.m_str, 0, KEY_QUERY_VALUE, &hKey)) {
-		DWORD type = 0;
-		DWORD cbData = 511;
-		RegQueryValueExA(hKey, p_name.m_str, 0, &type, (BYTE*) g_registryValueBuf, &cbData);
-		RegCloseKey(hKey);
-		if (type == REG_DWORD || type == REG_BINARY)
-			_itoa(*(int*) g_registryValueBuf, g_registryValueBuf, 10);
-		else if (type != REG_SZ)
-			return p_default;
-		return STRING(g_registryValueBuf);
-	}
-	return p_default;
+	const char* value = GetWithLegacyFallback(SectionOf(m_path), p_name.m_str);
+	return value ? STRING(value) : p_default;
 }
 
 // FUNCTION: ALIEN 0x42d130
 int REGISTRY::GetInt(const STRING& p_name, int p_default)
 {
-	HKEY hKey;
-	DWORD type;
-	char* lpSubKey;
-	DWORD cbData;
-	Path(&lpSubKey, (void**) &hKey);
-	int result = p_default;
-	if (!RegOpenKeyExA(hKey, lpSubKey, 0, KEY_QUERY_VALUE, &hKey)) {
-		type = 0;
-		cbData = 511;
-		RegQueryValueExA(hKey, p_name.m_str, 0, &type, (BYTE*) g_registryBuf, &cbData);
-		if (type == REG_SZ)
-			result = atoi(g_registryBuf);
-		else if (type == REG_DWORD || type == REG_BINARY)
-			result = *(int*) g_registryBuf;
-		RegCloseKey(hKey);
-	}
-	if (lpSubKey != STRING::EMPTY)
-		operator delete(lpSubKey);
-	return result;
+	const char* value = GetWithLegacyFallback(SectionOf(m_path), p_name.m_str);
+	return value ? atoi(value) : p_default;
 }
 
 // FUNCTION: ALIEN 0x42d1f0
 void REGISTRY::SetString(const STRING& p_name, const STRING& p_value)
 {
-	HKEY hKey;
-	char* lpSubKey;
-	DWORD dwDisposition;
-	Path(&lpSubKey, (void**) &hKey);
-	if (!RegCreateKeyExA(hKey, lpSubKey, 0, empty_str, 0, 0xf003f, 0, &hKey, &dwDisposition)) {
-		RegSetValueExA(hKey, p_name.m_str, 0, REG_SZ, (const BYTE*) p_value.m_str, strlen(p_value.m_str) + 1);
-		RegCloseKey(hKey);
-	}
-	if (lpSubKey != STRING::EMPTY)
-		operator delete(lpSubKey);
+	PortableConfig_SetString(SectionOf(m_path).c_str(), p_name.m_str, p_value.m_str);
+	PortableConfig_Flush();
 }
 
 // FUNCTION: ALIEN 0x42d280
 void REGISTRY::SetInt(const STRING& p_name, int p_data)
 {
-	HKEY hKey;
-	char* lpSubKey;
-	DWORD dwDisposition;
-	Path(&lpSubKey, (void**) &hKey);
-	if (!RegCreateKeyExA(hKey, lpSubKey, 0, empty_str, 0, 0xf003f, 0, &hKey, &dwDisposition)) {
-		RegSetValueExA(hKey, p_name.m_str, 0, REG_DWORD, (const BYTE*) &p_data, 4);
-		RegCloseKey(hKey);
-	}
-	if (lpSubKey != STRING::EMPTY)
-		operator delete(lpSubKey);
+	PortableConfig_SetInt(SectionOf(m_path).c_str(), p_name.m_str, p_data);
+	PortableConfig_Flush();
 }
 
 // FUNCTION: ALIEN 0x42d310
 void REGISTRY::Delete(const STRING& p_name)
 {
-	HKEY hKey;
-	char* lpSubKey;
-	Path(&lpSubKey, (void**) &hKey);
-	if (!RegOpenKeyExA(hKey, lpSubKey, 0, 0xf003f, &hKey)) {
-		RegDeleteValueA(hKey, p_name.m_str);
-		RegCloseKey(hKey);
+	const std::string section = SectionOf(m_path);
+	PortableConfig_Erase(section.c_str(), p_name.m_str);
+	for (int kind = 0; kind < 2; ++kind) {
+		const std::string legacy = LegacySection(section, kind);
+		if (!legacy.empty()) {
+			PortableConfig_Erase(legacy.c_str(), p_name.m_str);
+		}
 	}
-	if (lpSubKey != STRING::EMPTY)
-		operator delete(lpSubKey);
+	PortableConfig_Flush();
 }

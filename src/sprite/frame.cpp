@@ -1,12 +1,20 @@
 #include "sprite/frame.h"
 
 #include "game/map.h"
+#include "gfx/graph.h"
+#include "gfx/graph_core.h"
 #include "sprite/list_sprite.h"
 
 // FUNCTION: ALIEN 0x448a60
 FRAME::FRAME(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent)
 	: SPRITE(p_vid, (float) Map->AbsX(p_x), (float) Map->AbsY(p_y), p_z, p_dir, p_parent)
 {
+	if (p_parent && p_parent->m_uiScale) {
+		CopyUIScalingFrom(p_parent);
+	}
+	else {
+		SetUIScale(Graph ? ((GRAPH_CORE*) Graph)->m_uiScale : 1);
+	}
 	Map->m_menu.Insert(this);
 }
 
@@ -15,8 +23,9 @@ void* FRAME::ScalarDeletingDestructor(unsigned int p_flags)
 {
 	FRAME* result = this;
 	this->~FRAME();
-	if (p_flags & 1)
+	if (p_flags & 1) {
 		operator delete(result);
+	}
 	return result;
 }
 
@@ -24,14 +33,15 @@ void* FRAME::ScalarDeletingDestructor(unsigned int p_flags)
 FRAME::~FRAME()
 {
 	MENU* menu = &Map->m_menu;
-	if (menu->m_underCursor == this)
+	if (menu->m_underCursor == this) {
 		menu->m_underCursor = 0;
+	}
 	menu->Delete(this);
 	Map->DeletePointerToSprite(this);
 }
 
 // FUNCTION: ALIEN 0x448b30
-decomp_intptr FRAME::Action(int p_action, int p_a, int p_b, int p_c)
+decomp_intptr FRAME::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	if (p_action >= 0 && (p_action <= 5 || p_action == 0x82)) {
 		if (p_action > 5) {
@@ -45,8 +55,9 @@ decomp_intptr FRAME::Action(int p_action, int p_a, int p_b, int p_c)
 					ChangeAnimation(3);
 					m_flag |= 0x200;
 				}
-				if (m_ani == 0xe)
+				if (m_ani == 0xe) {
 					ChangeAnimation(0);
+				}
 			}
 		}
 		return 0;

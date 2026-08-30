@@ -12,6 +12,4 @@ public:
 	unsigned short m_type; // 0x42c
 };
 
-DECOMP_SIZE_ASSERT(PICTURE_FLIC, 0x430)
-
 #endif

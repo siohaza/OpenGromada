@@ -1,4 +1,3 @@
-#define DECOMP_INLINE_STRING_DTOR
 #include "util/named_list_struct_logicvar.h"
 
 // FUNCTION: ALIEN 0x424e00

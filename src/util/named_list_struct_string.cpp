@@ -1,4 +1,3 @@
-#define DECOMP_INLINE_STRING_COPY_LIFETIME
 #include "util/named_list_struct_string.h"
 
 // FUNCTION: ALIEN 0x424dd0

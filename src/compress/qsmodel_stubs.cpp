@@ -18,8 +18,9 @@ void QSMODEL::dorescale()
 	}
 	if (m_rescaleInterval < m_targetRescale) {
 		m_rescaleInterval *= 2;
-		if (m_rescaleInterval > m_targetRescale)
+		if (m_rescaleInterval > m_targetRescale) {
 			m_rescaleInterval = m_targetRescale;
+		}
 	}
 	cf = missing = m_cumFreq[m_n];
 	for (i = m_n - 1; i; --i) {
@@ -32,9 +33,12 @@ void QSMODEL::dorescale()
 	}
 	if (cf != m_freq[0]) {
 
-		fprintf(stderr,
+		fprintf(
+			stderr,
 			// STRING: ALIEN 0x48366c
-			"BUG: rescaling left %d total frequency\n", m_cumFreq);
+			"BUG: rescaling left %d total frequency\n",
+			cf
+		);
 		exit(1);
 	}
 	m_freq[0] = (m_freq[0] | 2) >> 1;
@@ -64,21 +68,26 @@ void QSMODEL::Init(int p_symbols, int p_shift, int p_rescale, int* p_initial)
 	m_targetRescale = p_rescale;
 	m_n = p_symbols;
 	m_shift = p_shift - 7;
-	if (m_shift < 0)
+	if (m_shift < 0) {
 		m_shift = 0;
-	if (m_cumFreq)
+	}
+	if (m_cumFreq) {
 		operator delete(m_cumFreq);
+	}
 	m_cumFreq = (unsigned short*) operator new(2 * p_symbols + 2);
-	if (m_freq)
+	if (m_freq) {
 		operator delete(m_freq);
+	}
 	m_freq = (unsigned short*) operator new(2 * p_symbols + 2);
-	if (m_lookup)
+	if (m_lookup) {
 		operator delete(m_lookup);
+	}
 	m_lookup = (unsigned short*) operator new(0x102);
 	m_cumFreq[p_symbols] = 1 << p_shift;
 	m_cumFreq[0] = 0;
-	if (m_lookup)
+	if (m_lookup) {
 		m_lookup[128] = p_symbols - 1;
+	}
 	Reset(p_initial);
 }
 
@@ -94,14 +103,17 @@ void QSMODEL::Reset(int* p_initial)
 	if (!p_initial) {
 		initval = m_cumFreq[m_n] / m_n;
 		end = m_cumFreq[m_n] % m_n;
-		for (i = 0; i < end; ++i)
+		for (i = 0; i < end; ++i) {
 			m_freq[i] = initval + 1;
-		for (; i < m_n; ++i)
+		}
+		for (; i < m_n; ++i) {
 			m_freq[i] = initval;
+		}
 	}
 	else {
-		for (i = 0; i < m_n; ++i)
+		for (i = 0; i < m_n; ++i) {
 			m_freq[i] = p_initial[i];
+		}
 	}
 	dorescale();
 }

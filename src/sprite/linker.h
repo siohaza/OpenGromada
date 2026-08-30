@@ -1,8 +1,8 @@
 #ifndef LINKER_H
 #define LINKER_H
 
-#include "util/decomp.h"
 #include "sprite/sprite.h"
+#include "util/decomp.h"
 
 class VID;
 
@@ -13,15 +13,13 @@ public:
 	~LINKER() { BreakLink(); }
 	virtual void* ScalarDeletingDestructor(unsigned int p_flags);
 
-	float m_dx; // 0x70
-	float m_dy; // 0x74
-	float m_dz; // 0x78
-	ANGLE m_ddir; // 0x7c
+	float m_dx;      // 0x70
+	float m_dy;      // 0x74
+	float m_dz;      // 0x78
+	ANGLE m_ddir;    // 0x7c
 	SPRITE* m_owner; // 0x80
 
 	void LinkRotate(ANGLE p_dir);
 };
-
-DECOMP_SIZE_ASSERT(LINKER, 0x84)
 
 #endif

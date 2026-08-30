@@ -11,15 +11,15 @@ public:
 	~MOUSE();
 	virtual void* ScalarDeletingDestructor(unsigned int p_flags);
 
-	int m_unk0x70; // 0x70
+	int m_unk0x70;       // 0x70
 	void* m_cursors[36]; // 0x74
-	int m_hardware; // 0x104
+	int m_hardware;      // 0x104
 
 	void Enable();
 	void Disable();
-	VID* Draw();
+	void Draw();
 	void ChangeAnimation(int p_ani);
-	decomp_intptr Action(int p_action, int p_a, int p_b, int p_c);
+	decomp_intptr Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c);
 	void HardwareOn();
 	void HardwareOff();
 };

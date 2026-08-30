@@ -1,18 +1,14 @@
-#define DECOMP_INLINE_STRING_COPY_LIFETIME
-#define DECOMP_INLINE_PICTURE_MAKEVID_CTOR_TAG
-
 #include "game/map.h"
-
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture_font.h"
 #include "gfx/picture_makevid.h"
+#include "platform/paths.h"
 #include "util/myerror.h"
 #include "video/vid_font.h"
 #include "video/vid_hardware.h"
 #include "video/vid_hardware_z.h"
 #include "video/vid_light.h"
-#include "video/vid_mesh.h"
 #include "video/vid_software.h"
 #include "video/vid_software16.h"
 
@@ -40,26 +36,32 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 
 	int i;
 	for (i = 0; i < m_noVid; ++i) {
-		if (!VidExists(i))
+		if (!VidExists(i)) {
 			continue;
-		VID* other = m_vids[i];
-		if (strcmp(other->m_fname, fname.m_str))
-			continue;
-		if (scratch.m_sprClass == 8) {
-			if (other->m_sprClass != 8)
-				continue;
 		}
-		else if (other->m_sprClass == 8)
+		VID* other = m_vids[i];
+		if (strcmp(other->m_fname, fname.m_str)) {
 			continue;
-		if (!(other->m_pixelFlag16 & 0x20)
-			&& (other->m_colorSub != scratch.m_colorSub || other->m_colorAdd != scratch.m_colorAdd))
+		}
+		if (scratch.m_sprClass == 8) {
+			if (other->m_sprClass != 8) {
+				continue;
+			}
+		}
+		else if (other->m_sprClass == 8) {
 			continue;
-		if (!(other->m_pixelFlag16 & 0x20) && ((scratch.m_flag ^ other->m_flag) & 0x800))
+		}
+		if (!(other->m_pixelFlag16 & 0x20) &&
+			(other->m_colorSub != scratch.m_colorSub || other->m_colorAdd != scratch.m_colorAdd)) {
 			continue;
+		}
+		if (!(other->m_pixelFlag16 & 0x20) && ((scratch.m_flag ^ other->m_flag) & 0x800)) {
+			continue;
+		}
 		vid = other->CreateMirror();
 		vid->m_idx = p_idx;
-		*(STRING*) &vid->m_name = name;
-		*(STRING*) &vid->m_fname = fname;
+		vid->SetName(name.m_str);
+		vid->SetFileName(fname.m_str);
 		vid->LoadParameters(p_res);
 		break;
 	}
@@ -68,21 +70,31 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 		return vid;
 	}
 
-	int isFont = strstr(fname.m_str,
-					// STRING: ALIEN 0x482a68
-					".fon")
-		|| strstr(fname.m_str,
-			   // STRING: ALIEN 0x482a60
-			   ".ttf");
-	int isPicture = strstr(fname,
+	int isFont = strstr(
+					 fname.m_str,
+					 // STRING: ALIEN 0x482a68
+					 ".fon"
+				 ) ||
+				 strstr(
+					 fname.m_str,
+					 // STRING: ALIEN 0x482a60
+					 ".ttf"
+				 );
+	int isPicture = strstr(
+						fname,
 						// STRING: ALIEN 0x47f738
-						".tga")
-		|| strstr(fname,
-			   // STRING: ALIEN 0x482a58
-			   ".bmp")
-		|| strstr(fname,
-			   // STRING: ALIEN 0x482a50
-			   ".flc");
+						".tga"
+					) ||
+					strstr(
+						fname,
+						// STRING: ALIEN 0x482a58
+						".bmp"
+					) ||
+					strstr(
+						fname,
+						// STRING: ALIEN 0x482a50
+						".flc"
+					);
 	int removeTemp = 0;
 
 	RESOURCE vidFile;
@@ -91,24 +103,27 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 	}
 	else {
 		if (isPicture) {
-			PICTURE_MAKEVID* converter =
-				scratch.m_sprClass == 19 ? new PICTURE_FONT
-					: new PICTURE_MAKEVID(PICTURE_MAKEVID::INLINE_CTOR);
+			PICTURE_MAKEVID* converter = scratch.m_sprClass == 19 ? new PICTURE_FONT : new PICTURE_MAKEVID;
 			if (converter->Load(STRING(fname.m_str), STRING(empty_str), STRING(empty_str))) {
-				((GRAPH_CORE*) Graph)->FlipToGDI();
-				MYERROR::Log(::Error,
+				MYERROR::Log(
+					::Error,
 					// STRING: ALIEN 0x482a28
-					"LOAD::Can't open file %s", fname.m_str);
+					"LOAD::Can't open file %s",
+					fname.m_str
+				);
 			}
 			else {
 				STRING temp;
-				fname = *(STRING*) FTempFile((char**) &temp,
+				FTempFile(
+					&temp.m_str,
 					// STRING: ALIEN 0x482a44
 					"c:\\tmp",
 					// STRING: ALIEN 0x482a4c
-					"vid");
+					"vid"
+				);
+				fname = temp;
 				removeTemp = 1;
-				converter->MakeVid(0, STRING(fname.m_str, STRING::INLINE_CHARP));
+				converter->MakeVid(0, STRING(fname.m_str));
 			}
 			delete converter;
 		}
@@ -116,12 +131,16 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 			STRING dir;
 			STRING resName(p_res->m_name);
 			_strlwr(resName.m_str);
-			if (strstr(resName,
+			if (strstr(
+					resName,
 					// STRING: ALIEN 0x482a20
-					".map")
-				&& strstr(resName,
-					   // STRING: ALIEN 0x482a1c
-					   ":\\")) {
+					".map"
+				) &&
+				strstr(
+					resName,
+					// STRING: ALIEN 0x482a1c
+					":\\"
+				)) {
 				STRING sub;
 				fname.BeforeLast((char**) &sub, "\\");
 				_strlwr(sub.m_str);
@@ -135,39 +154,51 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 				resName = empty_str;
 			}
 			STRING path = resName + fname;
-			if (vidFile.OpenForRead(path, 0x20444956 /* 'VID ' */ )) {
-				((GRAPH_CORE*) Graph)->FlipToGDI();
+			if (vidFile.OpenForRead(path, 0x20444956 /* 'VID ' */)) {
 				MYERROR::Log(::Error, "LOAD::Can't open file %s", fname.m_str);
+				// Remove the converted temporary before the early return.
+				if (removeTemp) {
+					Platform_Remove(fname.m_str);
+				}
 				return vid;
 			}
-			if (vidFile.GoBegin(0x44414548 /* 'HEAD' */ ))
-				MYERROR::Log(::Error,
+			if (vidFile.GoBegin(0x44414548 /* 'HEAD' */)) {
+				MYERROR::Log(
+					::Error,
 					// STRING: ALIEN 0x4829f4
-					"!!!ERROR!!!VID '%s': Load() not HEAD ", fname.m_str);
+					"!!!ERROR!!!VID '%s': Load() not HEAD ",
+					fname.m_str
+				);
+			}
 			vidFile.Read(&scratch.m_pixelFlag16, 2);
 		}
-		if (scratch.m_pixelFlag16 & 0x1000)
-			vid = new VID_MESH;
-		else if (scratch.m_pixelFlag16 & 0x80)
+		// Unused hardware-only VID_MESH assets fall back to ordinary sprites.
+		if (scratch.m_pixelFlag16 & 0x80) {
 			vid = new VID_LIGHT;
-		else if (scratch.m_pixelFlag16 & 0x20) {
-			if ((scratch.m_pixelFlag16 & 2) && (scratch.m_pixelFlag16 & 4))
-				vid = new VID_HARDWARE_Z;
-			else
-				vid = new VID_HARDWARE;
 		}
-		else if (scratch.m_sprClass == 8)
+		else if (scratch.m_pixelFlag16 & 0x20) {
+			if ((scratch.m_pixelFlag16 & 2) && (scratch.m_pixelFlag16 & 4)) {
+				vid = new VID_HARDWARE_Z;
+			}
+			else {
+				vid = new VID_HARDWARE;
+			}
+		}
+		else if (scratch.m_sprClass == 8) {
 			vid = new VID_SOFTWARE16;
-		else if (((GRAPH_CORE*) Graph)->m_flags & 2)
+		}
+		else if (((GRAPH_CORE*) Graph)->m_flags & 2) {
 			vid = new VID_SOFTWARE;
-		else
+		}
+		else {
 			vid = new VID_SOFTWARE16;
+		}
 		vid->m_pixelFlag16 = scratch.m_pixelFlag16;
 	}
 
 	vid->m_idx = p_idx;
-	*(STRING*) &vid->m_name = name;
-	*(STRING*) &vid->m_fname = fname;
+	vid->SetName(name.m_str);
+	vid->SetFileName(fname.m_str);
 	vidFile.Read(&vid->m_defaultAniPeriod, 2);
 	vidFile.Read(&vid->m_dotFrameCount, 2);
 	vidFile.Read(&vid->m_unk0x2f6, 2);
@@ -175,8 +206,9 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 	vid->LoadParameters(p_res);
 	vid->Load(&vidFile);
 	vidFile.Close();
-	if (removeTemp)
-		remove(fname.m_str);
+	if (removeTemp) {
+		Platform_Remove(fname.m_str);
+	}
 	vid->SetLayer();
 	return vid;
 }

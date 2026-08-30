@@ -15,7 +15,7 @@ public:
 	MENU();
 
 	int Control(INPUT_AS* p_input);
-	unsigned int m_state; // 0x10
+	unsigned int m_state;  // 0x10
 	SPRITE* m_underCursor; // 0x14
 
 	int NVidUnderCursor() const;
@@ -23,7 +23,5 @@ public:
 	int Load(const STRING& p_name);
 	int DeleteFromFile(const STRING& p_name);
 };
-
-DECOMP_SIZE_ASSERT(MENU, 0x18)
 
 #endif

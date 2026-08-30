@@ -16,13 +16,13 @@ public:
 
 	static int RobotBuildingVids[16];
 
-	int m_state; // 0x98
+	int m_state;         // 0x98
 	PTR_SPRITE m_target; // 0x9c
-	int m_unk0xa0; // 0xa0
-	int m_unk0xa4; // 0xa4
+	int m_unk0xa0;       // 0xa0
+	int m_unk0xa4;       // 0xa4
 
 	void MoveTact();
-	decomp_intptr Action(int p_action, int p_a, int p_b, int p_c);
+	decomp_intptr Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c);
 	int IsRobotBuilding(const SPRITE* p_sprite);
 	SPRITE* FindRobotBuilding();
 	void PathIsBlocked();

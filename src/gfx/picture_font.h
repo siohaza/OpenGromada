@@ -14,8 +14,6 @@ public:
 	PICTURE_MAKEVID m_source; // 0x430
 };
 
-DECOMP_SIZE_ASSERT(PICTURE_FONT, 0x860)
-
 // SYNTHETIC: ALIEN 0x4128f0
 // PICTURE_FONT::`scalar deleting destructor'
 

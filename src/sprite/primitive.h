@@ -15,6 +15,4 @@ public:
 	void DrawSecondaryInfo() {}
 };
 
-DECOMP_SIZE_ASSERT(PRIMITIVE, 0x70)
-
 #endif

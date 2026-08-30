@@ -14,29 +14,25 @@ class FILTER;
 class RESOURCE : public STREAM {
 public:
 	RESOURCE();
-#ifdef DECOMP_OUTOFLINE_RESOURCE_DTOR
-	virtual ~RESOURCE(); // vtable+0x00
-#else
-	virtual ~RESOURCE() { Close(); } // vtable+0x00
-#endif
-	virtual int Read(void* p_buf, int p_size); // vtable+0x04
+	virtual ~RESOURCE();                              // vtable+0x00
+	virtual int Read(void* p_buf, int p_size);        // vtable+0x04
 	virtual int Write(const void* p_buf, int p_size); // vtable+0x08
 
-	int m_flag; // 0x04
-	int m_state; // 0x08
-	STRING m_name; // 0x0c
+	int m_flag;      // 0x04
+	int m_state;     // 0x08
+	STRING m_name;   // 0x0c
 	int m_signature; // 0x10
-	int m_resSize; // 0x14
-	int m_resPos; // 0x18
-	int m_begin; // 0x1c
-	int m_end; // 0x20
-	int m_subFlags; // 0x24
-	int m_noSubRes; // 0x28
-	int m_subPos; // 0x2c
-	int m_subSize; // 0x30
+	int m_resSize;   // 0x14
+	int m_resPos;    // 0x18
+	int m_begin;     // 0x1c
+	int m_end;       // 0x20
+	int m_subFlags;  // 0x24
+	int m_noSubRes;  // 0x28
+	int m_subPos;    // 0x2c
+	int m_subSize;   // 0x30
 	int m_packedPos; // 0x34
-	FILE* m_file; // 0x38
-	int m_type; // 0x3c
+	FILE* m_file;    // 0x38
+	int m_type;      // 0x3c
 
 	STRING* Close();
 	int Open(FILE* p_file, unsigned int p_type);

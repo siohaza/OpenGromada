@@ -24,7 +24,7 @@ struct BMP_HEADER {
 };
 #pragma pack(pop)
 
-DECOMP_SIZE_ASSERT(BMP_HEADER, 0x36)
+static_assert(sizeof(BMP_HEADER) == 0x36, "BMP_HEADER matches the ondisk bitmap header");
 
 // VTABLE: ALIEN 0x47a768
 class PICTURE_BMP : public PICTURE_BASE {
@@ -35,7 +35,5 @@ public:
 
 	int LoadHeader(BMP_HEADER* p_header);
 };
-
-DECOMP_SIZE_ASSERT(PICTURE_BMP, 0x42c)
 
 #endif
