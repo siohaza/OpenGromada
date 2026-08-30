@@ -405,78 +405,19 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	Mouse = new MOUSE(EmptyVid, graph->GetWidth() * 0.5f, graph->GetHeight() * 0.5f, 0.0f, ANGLE((unsigned char) 0), 0);
 	Mouse->Enable();
 
-	{
-		STRING key = profile.GetString(
-			// STRING: ALIEN 0x482364
-			STRING("control"),
-			// STRING: ALIEN 0x48236c
-			STRING("Left"),
-			// STRING: ALIEN 0x482374
-			STRING("%")
-		);
-		g_keyScrollLeft = *(const char*) key;
-	}
-	{
-		STRING key = profile.GetString(
-			STRING("control"),
-			// STRING: ALIEN 0x48235c
-			STRING("Up"),
-			// STRING: ALIEN 0x482360
-			STRING("&")
-		);
-		g_keyScrollUp = *(const char*) key;
-	}
-	{
-		STRING key = profile.GetString(
-			STRING("control"),
-			// STRING: ALIEN 0x482350
-			STRING("Right"),
-			// STRING: ALIEN 0x482358
-			STRING("'")
-		);
-		g_keyScrollRight = *(const char*) key;
-	}
-	{
-		STRING key = profile.GetString(
-			STRING("control"),
-			// STRING: ALIEN 0x482344
-			STRING("Down"),
-			// STRING: ALIEN 0x48234c
-			STRING("\x04\x38")
-		);
-		g_keyScrollDown = *(const char*) key;
-	}
-	g_relativeControl = profile.GetInt(
-		STRING("control"),
-		// STRING: ALIEN 0x482338
-		STRING("Relative"),
-		0
-	);
-
-	INPUT_AS::firstKey1 = INPUT_AS::GetKeyByName(profile.GetString(
-		STRING("control"),
-		// STRING: ALIEN 0x482328
-		STRING("First"),
-		STRING("LBUTTON")
-	));
-	INPUT_AS::secondKey1 = INPUT_AS::GetKeyByName(profile.GetString(
-		STRING("control"),
-		// STRING: ALIEN 0x482318
-		STRING("Second"),
-		STRING("RBUTTON")
-	));
-	INPUT_AS::prevKey1 = INPUT_AS::GetKeyByName(profile.GetString(
-		STRING("control"),
-		// STRING: ALIEN 0x482310
-		STRING("Prev"),
-		STRING("[")
-	));
-	INPUT_AS::nextKey1 = INPUT_AS::GetKeyByName(profile.GetString(
-		STRING("control"),
-		// STRING: ALIEN 0x482304
-		STRING("Next"),
-		STRING("]")
-	));
+	auto controlKey = [](const char* p_name, const char* p_default) {
+		const char* value = PortableConfig_GetString("control", p_name);
+		return INPUT_AS::GetKeyByName(STRING(value && *value ? value : p_default));
+	};
+	g_keyScrollLeft = controlKey("Left", "A");
+	g_keyScrollRight = controlKey("Right", "D");
+	g_keyScrollUp = controlKey("Up", "W");
+	g_keyScrollDown = controlKey("Down", "S");
+	g_relativeControl = PortableConfig_GetInt("control", "Relative", 0);
+	INPUT_AS::firstKey1 = controlKey("First", "LBUTTON");
+	INPUT_AS::secondKey1 = controlKey("Second", "RBUTTON");
+	INPUT_AS::prevKey1 = controlKey("Prev", "Q");
+	INPUT_AS::nextKey1 = controlKey("Next", "E");
 
 	m_player[0] = new PLAYER_ARCADE(1, 0);
 	m_player[2] = new PLAYER_ARCADE(0, 2);

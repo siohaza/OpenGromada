@@ -128,6 +128,31 @@ static void SynchronizeGrantedWeaponHud(MAP* p_map, SPRITE* p_sprite, decomp_int
 	}
 }
 
+static SPRITE* FindStateBarAmmoRoot(MAP* p_map, int p_nvid, int p_x, int p_y, int p_z)
+{
+	if (!p_map || p_nvid != 4) {
+		return 0;
+	}
+
+	VID* ammoVid = p_map->Vid(745);
+	if (ammoVid == EmptyVid) {
+		return 0;
+	}
+	for (int i = 0; i < p_map->m_menu.m_n; ++i) {
+		SPRITE* root = p_map->m_menu.m_data[i];
+		if (!root || root->m_vid != ammoVid || !root->HasUIScriptLayout()) {
+			continue;
+		}
+		int expectedX = (int) ((float) (int) root->ScriptX() - p_map->m_shiftX) + 61;
+		int expectedY = (int) ((float) ((int) root->ScriptY() + 3) - p_map->m_shiftY);
+		int expectedZ = (int) root->m_z + 1;
+		if (p_x == expectedX && p_y == expectedY && p_z == expectedZ) {
+			return root;
+		}
+	}
+	return 0;
+}
+
 // GLOBAL: ALIEN 0x490600
 unsigned int PrevRealCurrentTime;
 
@@ -1398,21 +1423,39 @@ VID** MAP::ExecFunc(int p_cmd)
 		}
 		bool uiCoordinates = Graph && (vid->m_sprClass == 10 || vid->m_sprClass == 19);
 		UI_SCALING::MENU_POINT point = {};
+		int uiScale = 0;
 		if (uiCoordinates) {
 			GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-			point = UI_SCALING::TransformScriptPoint(
-				(float) x,
-				(float) y,
-				(float) z,
-				graph->m_width,
-				graph->m_height,
-				graph->m_uiScale * graph->m_uiPresentationScale
-			);
+			uiScale = graph->m_uiScale;
+			SPRITE* anchor = FindStateBarAmmoRoot(this, nvid, x, y, z);
+			if (anchor) {
+				uiScale = anchor->UIScale();
+				point = UI_SCALING::TransformAnchoredScriptPoint(
+					(float) x,
+					(float) y,
+					(float) z,
+					graph->m_width,
+					graph->m_height,
+					anchor->UIDrawScale(),
+					anchor->UIAnchorX(),
+					anchor->UIAnchorY()
+				);
+			}
+			else {
+				point = UI_SCALING::TransformScriptPoint(
+					(float) x,
+					(float) y,
+					(float) z,
+					graph->m_width,
+					graph->m_height,
+					graph->m_uiScale * graph->m_uiPresentationScale
+				);
+			}
 		}
 		sprite = uiCoordinates ? CreateSprite(vid, point.m_x, point.m_y, point.m_z, ANGLE((char) direction), parent)
 							   : CreateSprite(vid, (float) x, (float) y, (float) z, ANGLE((char) direction), parent);
 		if (sprite && uiCoordinates) {
-			sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, point.m_anchorX, point.m_anchorY);
+			sprite->SetUIScriptLayout(uiScale, point.m_anchorX, point.m_anchorY);
 		}
 		m_logic.PushObject(sprite);
 		return 0;
