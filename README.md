@@ -20,6 +20,10 @@ Game assets are not distributed here. Use the data from the
 [GOG release](https://www.gog.com/en/game/alien_shooter_expansions) or retail
 Alien Shooter 1.2.
 
+Place the executable beside `objects.res` and
+the game's data directories. Alternatively, point to that directory with
+`--data-path="/path/to/Alien Shooter"`.
+
 ## Runtime options
 
 - `--resolution=WIDTHxHEIGHT`, `--resolution=auto` (`desktop` is an alias),

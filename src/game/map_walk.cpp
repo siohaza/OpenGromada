@@ -33,25 +33,14 @@ void MAP::DeleteExtraVid()
 			}
 		}
 	}
-	int i = m_noVid - 1;
-	if (i >= 0) {
-		VID** vid = &m_vids[i];
-		int n = i + 1;
-		do {
-			VID* v = *vid;
-			if (v && (v->m_pixelFlag16 & 0x200)) {
-				if (*vid) {
-					v->ScalarDeletingDestructor(1);
-				}
-				*vid = 0;
-			}
-			--vid;
-			--n;
-		} while (n);
+	for (int i = m_noVid - 1; i >= 0; --i) {
+		VID* vid = m_vids[i];
+		if (vid && (vid->m_pixelFlag16 & 0x200)) {
+			vid->ScalarDeletingDestructor(1);
+			m_vids[i] = 0;
+		}
 	}
-	if (!m_vids[m_noVid - 1]) {
-		do {
-			m_noVid = m_noVid - 1;
-		} while (!m_vids[m_noVid - 1]);
+	while (m_noVid > 0 && !m_vids[m_noVid - 1]) {
+		--m_noVid;
 	}
 }
