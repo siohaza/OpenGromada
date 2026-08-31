@@ -4,6 +4,7 @@ reccmp-build.yml
 # Build output
 /build*/
 /CMakeFiles/
+/dependencies/
 *.obj
 *.pdb
 *.ilk
