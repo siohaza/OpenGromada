@@ -15,6 +15,7 @@
 #include "gfx/graph_core.h"
 #include "gfx/picture_font.h"
 #include "gfx/picture_makevid.h"
+#include "platform/gamepad.h"
 #include "platform/render.h"
 #include "platform/timing.h"
 #include "sprite/ex_sprite_data.h"
@@ -497,6 +498,7 @@ int MAP::StartTact()
 		SDL_ConvertEventToRenderCoordinates(Platform_RenderRenderer(), &event);
 		ProcessEvent(event);
 	}
+	m_input.ApplyGamepad(delta);
 	return m_quit;
 }
 
@@ -1285,6 +1287,7 @@ void MAP::ReloadVid()
 		return;
 	}
 	LoadWeapon(&res);
+	EmptyVid->m_exData = (VID_EXDATA*) m_weapon;
 	if (res.GoBegin(0x204a424f)) {
 		if (::Error) {
 			MYERROR::Error(::Error, "MAP", 11, "load 'VID'", 0);

@@ -3,6 +3,7 @@
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/texture.h"
+#include "platform/gamepad.h"
 #include "platform/portable_config.h"
 #include "platform/render.h"
 #include "ui/mouse.h"
@@ -80,6 +81,7 @@ MAP::~MAP()
 // STUB: ALIEN 0x40b930
 int MAP::ProcessEvent(const SDL_Event& p_event)
 {
+	Platform_GamepadProcessEvent(p_event);
 	if ((m_flag & 8) && m_input.ProcessEvent(p_event)) {
 		return 1;
 	}
@@ -108,8 +110,11 @@ int MAP::ProcessEvent(const SDL_Event& p_event)
 	// audio stops and the hardware cursor is released while the game is in the
 	// background.
 	case SDL_EVENT_WINDOW_FOCUS_GAINED:
-	case SDL_EVENT_WINDOW_FOCUS_LOST: {
-		int active = p_event.type == SDL_EVENT_WINDOW_FOCUS_GAINED;
+	case SDL_EVENT_DID_ENTER_FOREGROUND:
+	case SDL_EVENT_WINDOW_FOCUS_LOST:
+	case SDL_EVENT_WILL_ENTER_BACKGROUND:
+	case SDL_EVENT_DID_ENTER_BACKGROUND: {
+		int active = p_event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || p_event.type == SDL_EVENT_DID_ENTER_FOREGROUND;
 		m_flag = (m_flag & 0xfffffff7) | (8 * active);
 		if (Sound && Mouse) {
 			if (active) {

@@ -29,6 +29,7 @@ public:
 
 	INPUT_AS();
 	int ProcessEvent(const union SDL_Event& p_event);
+	void ApplyGamepad(unsigned int p_delta);
 	int Save(STREAM* p_stream) const;
 	int Load(STREAM* p_stream);
 	static int GetKeyByName(STRING p_name);

@@ -2,6 +2,7 @@
 #include "game/map.h"
 #include "game/map_steam.h"
 #include "game/settings.h"
+#include "platform/gamepad.h"
 #include "platform/paths.h"
 #include "util/string.h"
 
@@ -48,6 +49,7 @@ int main(int argc, char** argv)
 		SDL_Quit();
 		return 1;
 	}
+	Platform_GamepadInit();
 
 	int result = 0;
 	Map = new MAP_STEAM(commandLine, &Settings);
@@ -65,6 +67,7 @@ int main(int argc, char** argv)
 	else {
 		result = 1;
 	}
+	Platform_GamepadShutdown();
 	SDL_Quit();
 	return result;
 }
