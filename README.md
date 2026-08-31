@@ -1,5 +1,13 @@
 # Alien Shooter
 
+## Features
+
+- Cross-platform and cross-arch support
+- Widescreen resolution support
+- Gamepad support
+- Bumped engine limits. Use `GETSPRITE_VID + nvid` for the
+entire range
+
 ## Building
 
 Requirements:
@@ -32,15 +40,14 @@ the game's data directories. Alternatively, point to that directory with
   `--windowed` to opt out; automatic windowed mode fits a desktop-aspect
   client within 1280x800.
 - Automatic fullscreen profiles use the desktop's exact output resolution and
-  a same-aspect gameplay framebuffer capped to 2000 pixels wide and to the
-  authored map bounds. This keeps campaign scale consistent and limits exposure
-  of the large unbuilt areas inside maps whose outer headers are much bigger than
-  their visible terrain (for example, 2560x1600 output uses a 2000x1250 game
-  frame). Menus and other fixed presentations remain exact native resolution.
-  HUD art is counter-scaled inside a capped gameplay
-  frame so its final presented size remains the selected `--ui-scale` and its
-  authored rows do not overlap. `--no-native-resolution` returns to a
-  480-pixel-tall retail-scale Hor+ framebuffer.
+  fit gameplay inside a same aspect 1280x720 envelope. A 16:9 output renders a
+  1280x720 game frame and a 16:10 output renders 1152x720. Terrain constrained
+  maps can select a smaller safe frame so unbuilt areas outside the authored
+  terrain remain hidden. Menus and other fixed presentations remain at the
+  exact native resolution. HUD art is counter-scaled inside the gameplay frame;
+  automatic desktop HUD scaling is capped at 2x and explicit `--ui-scale`
+  choices remain exact. `--no-native-resolution` returns to a 480-pixel-tall
+  retail-scale Hor+ framebuffer.
 - `--render-width=WIDTH` selects a non-native logical framebuffer capped at
   that width. Supplying `--native-resolution` as well keeps the map-bounded
   native policy; the native choice wins regardless of argument order.

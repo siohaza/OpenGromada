@@ -751,7 +751,7 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		if (p_a < 0 || p_a >= Map->m_noVid || !Map->m_vids[p_a]) {
 			return 0;
 		}
-		SPRITE* found = Map->GetSpriteScr(p_a + 0x800, (float) p_b, (float) p_c);
+		SPRITE* found = Map->GetSpriteScr(MAP::MakeVidQuery((int) p_a), (float) p_b, (float) p_c);
 		if (found) {
 			found->ScalarDeletingDestructor(1);
 		}

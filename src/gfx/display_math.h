@@ -121,46 +121,34 @@ inline RESOLUTION ResolveInternal(int p_outputWidth, int p_outputHeight, int p_r
 	return {width, height};
 }
 
-inline int GreatestCommonDivisor(int p_a, int p_b)
+inline RESOLUTION ResolveGameplayInternal(RESOLUTION p_frame, RESOLUTION p_outputAspect)
 {
-	while (p_b) {
-		int next = p_a % p_b;
-		p_a = p_b;
-		p_b = next;
+	p_frame = SanitizeOutput(p_frame.m_width, p_frame.m_height);
+	if (p_frame.m_width <= 1280 && p_frame.m_height <= 720) {
+		return p_frame;
 	}
-	return p_a;
+	const int maxWidth = p_frame.m_width < 1280 ? p_frame.m_width : 1280;
+	const int maxHeight = p_frame.m_height < 720 ? p_frame.m_height : 720;
+	return FitAspectWithin(p_outputAspect, maxWidth, maxHeight);
 }
 
 inline RESOLUTION ResolveMapSafeInternal(RESOLUTION p_frame, RESOLUTION p_outputAspect, int p_mapWidth, int p_mapHeight)
 {
-	const int gameplayWidthCeiling = 2000;
 	if (p_frame.m_width <= 0 || p_frame.m_height <= 0 || p_mapWidth <= 0 || p_mapHeight <= 0) {
 		return p_frame;
 	}
-	if (p_frame.m_width <= p_mapWidth && p_frame.m_height <= p_mapHeight && p_frame.m_width <= gameplayWidthCeiling) {
-		return p_frame;
+
+	RESOLUTION gameplay = ResolveGameplayInternal(p_frame, p_outputAspect);
+	if (gameplay.m_width <= p_mapWidth && gameplay.m_height <= p_mapHeight) {
+		return gameplay;
 	}
 
-	p_outputAspect = SanitizeOutput(p_outputAspect.m_width, p_outputAspect.m_height);
-	const int divisor = GreatestCommonDivisor(p_outputAspect.m_width, p_outputAspect.m_height);
-	const int aspectWidth = p_outputAspect.m_width / divisor;
-	const int aspectHeight = p_outputAspect.m_height / divisor;
-	int maxWidth = p_frame.m_width < p_mapWidth ? p_frame.m_width : p_mapWidth;
-	if (maxWidth > gameplayWidthCeiling) {
-		maxWidth = gameplayWidthCeiling;
-	}
-	const int maxHeight = p_frame.m_height < p_mapHeight ? p_frame.m_height : p_mapHeight;
-	const int widthScale = maxWidth / aspectWidth;
-	const int heightScale = maxHeight / aspectHeight;
-	const int scale = widthScale < heightScale ? widthScale : heightScale;
-	if (scale <= 0) {
-		return p_frame;
-	}
-
-	RESOLUTION target = {aspectWidth * scale, aspectHeight * scale};
-	const RESOLUTION retail = ResolveInternal(p_outputAspect.m_width, p_outputAspect.m_height, 0, false);
+	const int maxWidth = gameplay.m_width < p_mapWidth ? gameplay.m_width : p_mapWidth;
+	const int maxHeight = gameplay.m_height < p_mapHeight ? gameplay.m_height : p_mapHeight;
+	RESOLUTION target = FitAspectWithin(gameplay, maxWidth, maxHeight);
+	const RESOLUTION retail = ResolveInternal(gameplay.m_width, gameplay.m_height, 0, false);
 	if (target.m_width < retail.m_width || target.m_height < retail.m_height) {
-		return p_frame;
+		return gameplay;
 	}
 	return target;
 }
@@ -183,6 +171,15 @@ inline int ResolveUIScale(int p_width, int p_height, int p_override)
 		scale = 3;
 	}
 	return scale;
+}
+
+inline int ResolveGameplayUIScale(int p_outputWidth, int p_outputHeight, int p_override)
+{
+	if (p_override >= 1 && p_override <= 3) {
+		return p_override;
+	}
+	const int scale = ResolveUIScale(p_outputWidth, p_outputHeight, 0);
+	return scale < 2 ? scale : 2;
 }
 
 } // namespace DISPLAY_MATH

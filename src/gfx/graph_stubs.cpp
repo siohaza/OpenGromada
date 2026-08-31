@@ -321,7 +321,7 @@ void GRAPH::SetGamma(const GAMMA& p_gamma)
 	if (m_gammaSet.m_a != p_gamma.m_a || m_gammaSet.m_b != p_gamma.m_b) {
 		m_gammaSet.m_a = p_gamma.m_a;
 		m_gammaSet.m_b = p_gamma.m_b;
-		for (int i = 0; i < 0x800; ++i) {
+		for (int i = 0; i < Map->m_noVid && i < MAP::MAX_VIDS; ++i) {
 			VID* vid = Map->GetVid(i);
 			if (vid != EmptyVid) {
 				vid = Map->GetVid(i);

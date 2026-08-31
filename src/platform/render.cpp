@@ -150,7 +150,7 @@ static int ReplaceLogicalTargets(int p_width, int p_height)
 		SDL_DestroyTexture(texture);
 		return 1;
 	}
-	if (!SDL_SetRenderLogicalPresentation(s_renderer, p_width, p_height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+	if (!SDL_SetRenderLogicalPresentation(s_renderer, p_width, p_height, SDL_LOGICAL_PRESENTATION_STRETCH)) {
 		free(pixels);
 		SDL_DestroyTexture(texture);
 		return 1;
@@ -326,7 +326,7 @@ int Platform_RenderHandleDeviceReset()
 	if (!texture) {
 		return 1;
 	}
-	if (!SDL_SetRenderLogicalPresentation(s_renderer, s_width, s_height, SDL_LOGICAL_PRESENTATION_LETTERBOX)) {
+	if (!SDL_SetRenderLogicalPresentation(s_renderer, s_width, s_height, SDL_LOGICAL_PRESENTATION_STRETCH)) {
 		SDL_DestroyTexture(texture);
 		return 1;
 	}

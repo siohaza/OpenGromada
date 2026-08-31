@@ -104,7 +104,7 @@ static bool IsConfigArgument(const STRING& p_argument)
 	return length >= 4 && SDL_strcasecmp(p_argument.m_str + length - 4, ".cfg") == 0;
 }
 
-static bool IsGameplayMapName(const STRING& p_name)
+static bool IsGameplayMapName(const STRING& p_name, float p_width, float p_height)
 {
 	const char* leaf = p_name.m_str;
 	for (const char* p = p_name.m_str; *p; ++p) {
@@ -112,7 +112,26 @@ static bool IsGameplayMapName(const STRING& p_name)
 			leaf = p + 1;
 		}
 	}
-	return SDL_strncasecmp(leaf, "Level_", 6) == 0 || SDL_strncasecmp(leaf, "survive_", 8) == 0;
+	if (SDL_strncasecmp(leaf, "Level_", 6) != 0) {
+		return SDL_strncasecmp(leaf, "survive_", 8) == 0;
+	}
+	const bool level06 = SDL_strcasecmp(leaf, "Level_06") == 0 || SDL_strcasecmp(leaf, "Level_06.map") == 0;
+	if ((p_width > 640.0f || p_height > 480.0f) || !level06) {
+		return true;
+	}
+
+	const char* parent = p_name.m_str;
+	const char* separator = leaf > p_name.m_str ? leaf - 1 : leaf;
+	for (const char* p = p_name.m_str; p < separator; ++p) {
+		if (*p == '/' || *p == '\\') {
+			parent = p + 1;
+		}
+	}
+	const size_t parentLength = (size_t) (separator - parent);
+	return !(
+		(parentLength == 5 && SDL_strncasecmp(parent, "ADDON", 5) == 0) ||
+		(parentLength == 6 && SDL_strncasecmp(parent, "ADDON2", 6) == 0)
+	);
 }
 
 static void RefreshPointerAfterFrameResize(MAP* p_map)
@@ -809,7 +828,7 @@ int MAP::Load(STRING p_name)
 		m_shiftX1 = 0.0f;
 		m_shiftY2 = m_h;
 		m_shiftY1 = 0.0f;
-		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name));
+		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {
 				((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
@@ -952,7 +971,7 @@ int MAP::Load(STRING p_name)
 		m_shiftX2 = m_w;
 		m_shiftY1 = 0.0f;
 		m_shiftY2 = m_h;
-		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name));
+		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {
 				((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
@@ -1109,7 +1128,7 @@ int MAP::Load(STRING p_name)
 		return 0;
 	}
 
-	FinalizeTerrainCamera(IsGameplayMapName(p_name) ? 1 : 0);
+	FinalizeTerrainCamera(IsGameplayMapName(p_name, m_w, m_h) ? 1 : 0);
 
 	m_flag &= ~0x20;
 	res.Close();

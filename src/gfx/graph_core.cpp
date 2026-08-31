@@ -304,7 +304,9 @@ int GRAPH_CORE::ConfigureFrameForTerrain(int p_width, int p_height)
 int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNative)
 {
 	DISPLAY_MATH::RESOLUTION target = {p_width, p_height};
-	const int targetUIScale = DISPLAY_MATH::ResolveUIScale(target.m_width, target.m_height, m_uiScaleSetting);
+	const int targetUIScale =
+		p_mapSafeNative ? DISPLAY_MATH::ResolveGameplayUIScale(m_outputWidth, m_outputHeight, m_uiScaleSetting)
+						: DISPLAY_MATH::ResolveUIScale(target.m_width, target.m_height, m_uiScaleSetting);
 	float targetUIPresentationScale = 1.0f;
 	if (p_mapSafeNative && (target.m_width < m_outputWidth || target.m_height < m_outputHeight) && m_outputWidth > 0 &&
 		m_outputHeight > 0) {

@@ -174,10 +174,7 @@ static unsigned int prev_second_time;
 // FUNCTION: ALIEN 0x405a90
 VID* MAP::Vid(int p_idx) const
 {
-	if (p_idx < 0) {
-		return EmptyVid;
-	}
-	if (p_idx >= m_noVid) {
+	if (!ValidVidIndex(p_idx) || p_idx >= m_noVid) {
 		return EmptyVid;
 	}
 	VID* result = m_vids[p_idx];
@@ -530,9 +527,11 @@ SPRITE* MAP::NextSprite(int p_layer, int* p_iter) const
 
 VID* MAP::ReadVid(STREAM* p_stream) const
 {
-	int idx;
-	p_stream->Read(&idx, 4);
-	if (idx < 0 || idx >= m_noVid) {
+	int idx = -1;
+	if (p_stream->Read(&idx, sizeof(idx))) {
+		return 0;
+	}
+	if (!ValidVidIndex(idx) || idx >= m_noVid) {
 		return 0;
 	}
 	return m_vids[idx];
@@ -613,13 +612,14 @@ inline static int IsSpriteCorrectForGetSprite(const SPRITE* p_sprite, int p_quer
 SPRITE* MAP::GetSprite(int p_type, float p_x, float p_y, SPRITE* p_prev)
 {
 	bool menuQuery = false;
-	if ((p_type & 0x800) && VidExist(p_type & 0x7ff)) {
-		int spriteClass = m_vids[p_type & 0x7ff]->m_sprClass;
+	int queryVid = VidFromQuery(p_type);
+	if (IsVidQuery(p_type) && VidExist(queryVid)) {
+		int spriteClass = m_vids[queryVid]->m_sprClass;
 		menuQuery = spriteClass == 10 || spriteClass == 19;
 	}
 
 	if (menuQuery) {
-		VID* requested = m_vids[p_type & 0x7ff];
+		VID* requested = m_vids[queryVid];
 		if (requested->m_entitiesNumber[0] + requested->m_entitiesNumber[1] + requested->m_entitiesNumber[2] +
 				requested->m_entitiesNumber[3] ==
 			0) {
@@ -706,7 +706,7 @@ inline static int IsSpriteCorrectForGetSprite(const SPRITE* p_sprite, int p_quer
 	if ((p_query & 0x1000) && (int) p_sprite->m_vid->m_sprClass != (p_query & 0x7ff)) {
 		return 0;
 	}
-	if ((p_query & 0x800) && p_sprite->m_vid->m_idx != (p_query & 0x7ff)) {
+	if (MAP::IsVidQuery(p_query) && p_sprite->m_vid->m_idx != MAP::VidFromQuery(p_query)) {
 		return 0;
 	}
 	return 1;
@@ -754,8 +754,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 
 	int type;
 	int iter = 0;
-	if (p_type & 0x800) { // GETSPRITE_VID
-		int idx = p_type & 0x7ff;
+	if (IsVidQuery(p_type)) { // GETSPRITE_VID
+		int idx = VidFromQuery(p_type);
 		VID* vid = VidExist(idx) ? m_vids[idx] : EmptyVid;
 		if (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] + vid->m_entitiesNumber[3] ==
 			0) {
@@ -765,7 +765,7 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 		if (v->m_flag & 0x40) {
 			p_type |= 0x8000;
 		}
-		type = (VidExist(p_type & 0x7ff) ? m_vids[p_type & 0x7ff] : EmptyVid)->m_unk0x0c;
+		type = (VidExist(idx) ? m_vids[idx] : EmptyVid)->m_unk0x0c;
 	}
 	else {
 		type = (p_type >> 20) & 0x67f;
@@ -811,7 +811,7 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 		return result;
 	}
 
-	if ((p_type & 0x800) && (int) GetVid(p_type & 0x7ff)->m_sprClass == 10) { // B_FRAME
+	if (IsVidQuery(p_type) && (int) GetVid(VidFromQuery(p_type))->m_sprClass == 10) { // B_FRAME
 		for (SPRITE* sprite = LastMenuSprite(m_menu, &iter); sprite; sprite = NextMenuSprite(m_menu, &iter)) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
 				((0x10000u << ((sprite->m_flag >> 11) & 3)) & army) && IsSpriteCorrectForGetSprite(sprite, p_type) &&
@@ -826,8 +826,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 	}
 
 	if (type & U_REGION) {
-		int startLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer : 0;
-		int endLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer + 1 : 16;
+		int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
+		int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
 		for (int layer = startLayer; layer < endLayer; ++layer) {
 			iter = m_layers[layer].m_n;
 			SPRITE* sprite = NextSprite(layer, &iter);
@@ -853,8 +853,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 		}
 	}
 	else {
-		int startLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer : 0;
-		int endLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer + 1 : 16;
+		int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
+		int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
 		for (int layer = startLayer; layer < endLayer; ++layer) {
 			iter = m_layers[layer].m_n;
 			SPRITE* sprite = NextSprite(layer, &iter);
@@ -883,7 +883,7 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 // FUNCTION: ALIEN 0x410640
 int MAP::VidExist(int p_idx) const
 {
-	return p_idx >= 0 && p_idx < m_noVid && m_vids[p_idx];
+	return ValidVidIndex(p_idx) && p_idx < m_noVid && m_vids[p_idx];
 }
 
 inline static float NearDistanceInline(float p_x, float p_y)
@@ -909,16 +909,17 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		army = 0xf0000;
 	}
 
-	if (p_type & 0x800) { // GETSPRITE_VID
-		VID* vid = GetVid(p_type & 0x7ff);
+	if (IsVidQuery(p_type)) { // GETSPRITE_VID
+		int idx = VidFromQuery(p_type);
+		VID* vid = GetVid(idx);
 		if (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] + vid->m_entitiesNumber[3] ==
 			0) {
 			return 0;
 		}
-		if (GetVid(p_type & 0x7ff)->m_flag & 0x40) {
+		if (GetVid(idx)->m_flag & 0x40) {
 			p_type |= 0x8000;
 		}
-		type = GetVid(p_type & 0x7ff)->m_unk0x0c;
+		type = GetVid(idx)->m_unk0x0c;
 	}
 	else {
 		type = (p_type >> 20) & 0x67f;
@@ -961,8 +962,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		return result;
 	}
 
-	if ((p_type & 0x800) && ((int) GetVid(p_type & 0x7ff)->m_sprClass == 10        // B_FRAME
-							 || (int) GetVid(p_type & 0x7ff)->m_sprClass == 19)) { // B_TEXT
+	if (IsVidQuery(p_type) && ((int) GetVid(VidFromQuery(p_type))->m_sprClass == 10        // B_FRAME
+							   || (int) GetVid(VidFromQuery(p_type))->m_sprClass == 19)) { // B_TEXT
 		for (SPRITE* sprite = LastMenuSprite(m_menu, &iter); sprite; sprite = NextMenuSprite(m_menu, &iter)) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
 				((0x10000u << ((sprite->m_flag >> 11) & 3)) & army) && IsSpriteCorrectForGetSprite(sprite, p_type)) {
@@ -977,8 +978,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		return result;
 	}
 
-	int startLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer : 0;
-	int endLayer = (p_type & 0x800) ? GetVid(p_type & 0x7ff)->m_layer + 1 : 16;
+	int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
+	int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
 	for (int layer = startLayer; layer < endLayer; ++layer) {
 		iter = m_layers[layer].m_n;
 		SPRITE* sprite = NextSprite(layer, &iter);
@@ -1095,16 +1096,20 @@ void MAP::LoadVid(RESOURCE* p_res)
 	}
 	int hadVids = m_noVid != 0;
 	do {
-		p_res->Read(&idx, 4);
-		if (idx >= 2048 && ::Error) {
-			MYERROR::Error(
-				::Error,
-				"MAP",
-				4,
-				// STRING: ALIEN 0x4829a4
-				"nvid > MAX_VID",
-				idx
-			);
+		idx = -1;
+		int readError = p_res->m_subSize < (int) sizeof(idx) ? 1 : p_res->Read(&idx, sizeof(idx));
+		if (readError || !ValidVidIndex(idx)) {
+			if (::Error) {
+				MYERROR::Error(
+					::Error,
+					"MAP",
+					4,
+					// STRING: ALIEN 0x4829a4
+					"nvid > MAX_VID",
+					idx
+				);
+			}
+			continue;
 		}
 		VID* old = m_vids[idx];
 		if (old) {
@@ -1180,7 +1185,8 @@ void MAP::LoadVid(RESOURCE* p_res)
 void MAP::ExchangeVid(VID* p_vid1, VID* p_vid2)
 {
 	VID* v1 = p_vid1;
-	if (p_vid1 && p_vid2 && p_vid1 != p_vid2) {
+	if (p_vid1 && p_vid2 && p_vid1 != p_vid2 && ValidVidIndex(p_vid1->m_idx) && ValidVidIndex(p_vid2->m_idx) &&
+		p_vid1->m_idx < m_noVid && p_vid2->m_idx < m_noVid) {
 		int i = 0;
 		if (m_noVid > 0) {
 			VID** vids = m_vids;
@@ -1295,12 +1301,24 @@ void MAP::ReloadVid()
 		return;
 	}
 	do {
-		res.Read(&i, 4);
-		if (i >= 2048 && ::Error) {
-			MYERROR::Error(::Error, "MAP", 4, "nvid > MAX_VID", i);
+		i = -1;
+		int readError = res.m_subSize < (int) sizeof(i) ? 1 : res.Read(&i, sizeof(i));
+		if (readError || !ValidVidIndex(i)) {
+			if (::Error) {
+				MYERROR::Error(::Error, "MAP", 4, "nvid > MAX_VID", i);
+			}
+			continue;
 		}
 		if (m_vids[i]) {
-			i = m_vids[i]->m_mirror->m_idx;
+			VID* mirror = m_vids[i]->m_mirror;
+			int mirrorIdx = mirror ? mirror->m_idx : -1;
+			if (!ValidVidIndex(mirrorIdx) || mirrorIdx >= m_noVid || !m_vids[mirrorIdx]) {
+				if (::Error) {
+					MYERROR::Error(::Error, "MAP", 4, "nvid > MAX_VID", mirrorIdx);
+				}
+				continue;
+			}
+			i = mirrorIdx;
 			((STRING*) &m_vids[i]->m_name)->Read_res(&res);
 			m_vids[i]->LoadParameters(&res);
 			VID* vid = m_vids[i];

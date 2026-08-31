@@ -1747,6 +1747,9 @@ int LOGIC::func()
 		m_unk0x54 = 0;
 		STRING value;
 		GetLine(&value);
+		if (!strcmp(name.m_str, "GETSPRITE_VID")) {
+			value = "0x2000";
+		}
 		int define;
 		if ((define = m_strings.Location(name)) < 0) {
 			m_strings.Insert(name, STRING(value.m_str));

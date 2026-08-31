@@ -70,17 +70,16 @@ void MAP::FinalizeTerrainCamera(int p_gameplay)
 		focusY = flagman->m_y - flagman->m_z;
 	}
 
-	DISPLAY_MATH::RESOLUTION retail =
-		DISPLAY_MATH::ResolveInternal(graph->m_outputWidth, graph->m_outputHeight, 0, false);
 	int targetWidth = (int) graph->m_width;
 	int targetHeight = (int) graph->m_height;
+	DISPLAY_MATH::RESOLUTION retail = DISPLAY_MATH::ResolveInternal(targetWidth, targetHeight, 0, false);
 	if (!camera->SelectFrame(
 			targetWidth,
 			targetHeight,
 			retail.m_width,
 			retail.m_height,
-			graph->m_outputWidth,
-			graph->m_outputHeight,
+			targetWidth,
+			targetHeight,
 			focusX,
 			focusY,
 			&targetWidth,

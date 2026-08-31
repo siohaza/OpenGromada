@@ -26,6 +26,33 @@ extern VID* EmptyVid;
 
 class MAP {
 public:
+	static constexpr int MAX_VIDS = 4096;
+	static constexpr int GETSPRITE_VID_LEGACY = 0x800;
+	static constexpr int GETSPRITE_VID = 0x2000;
+
+	static constexpr bool ValidVidIndex(int p_idx) { return (unsigned int) p_idx < MAX_VIDS; }
+
+	static constexpr int MakeVidQuery(int p_idx)
+	{
+		if (!ValidVidIndex(p_idx)) {
+			return 0;
+		}
+		return GETSPRITE_VID + p_idx;
+	}
+
+	static constexpr bool IsVidQuery(int p_query)
+	{
+		return (p_query & 0x3000) == GETSPRITE_VID || (p_query & 0x2800) == GETSPRITE_VID_LEGACY;
+	}
+
+	static constexpr int VidFromQuery(int p_query)
+	{
+		if (!IsVidQuery(p_query)) {
+			return -1;
+		}
+		return p_query & ((p_query & 0x3000) == GETSPRITE_VID ? MAX_VIDS - 1 : GETSPRITE_VID_LEGACY - 1);
+	}
+
 	MAP(STRING& p_argv, SETTINGS* p_settings);
 	virtual ~MAP(); // 0x00
 
@@ -71,19 +98,19 @@ public:
 	void* m_window;                                 // 0x234
 
 	int m_quit;
-	undefined4 m_curArmy;  // 0x23c
-	PLAYER* m_player[4];   // 0x240
-	INPUT_AS m_input;      // 0x250
-	MENU m_menu;           // 0x270
-	GROUPS m_groups;       // 0x288
-	int m_noWeapon;        // 0x2ac
-	void* m_weapon;        // 0x2b0
-	int m_noVid;           // 0x2b4
-	VID* m_vids[0x800];    // 0x2b8
-	MOUSETIPS m_mousetips; // 0x22b8
+	undefined4 m_curArmy; // 0x23c
+	PLAYER* m_player[4];  // 0x240
+	INPUT_AS m_input;     // 0x250
+	MENU m_menu;          // 0x270
+	GROUPS m_groups;      // 0x288
+	int m_noWeapon;       // 0x2ac
+	void* m_weapon;       // 0x2b0
+	int m_noVid;          // 0x2b4
+	VID* m_vids[MAX_VIDS];
+	MOUSETIPS m_mousetips;
 
 	union {
-		undefined m_unk0x22c0[4]; // 0x22c0
+		undefined m_unk0x22c0[4];
 		unsigned int m_unk0x22c0_d;
 	};
 
@@ -102,7 +129,7 @@ public:
 	VID* PopVid(const char* p_context);
 	VID* ReadVid(STREAM* p_stream) const;
 	void WriteVid(STREAM* p_stream, const VID* p_vid) const;
-	int VidExists(int p_n) { return p_n >= 0 && p_n < m_noVid && m_vids[p_n] != 0; }
+	int VidExists(int p_n) { return ValidVidIndex(p_n) && p_n < m_noVid && m_vids[p_n] != 0; }
 	VID* GetVid(int p_n)
 	{
 		if (VidExists(p_n)) {
@@ -165,5 +192,39 @@ public:
 extern MAP* Map;
 
 extern int EvFunctionNumber[64];
+
+static_assert(MAP::ValidVidIndex(2047));
+static_assert(MAP::ValidVidIndex(2048));
+static_assert(MAP::ValidVidIndex(4095));
+static_assert(!MAP::ValidVidIndex(-1));
+static_assert(!MAP::ValidVidIndex(4096));
+static_assert(sizeof(((MAP*) 0)->m_vids) / sizeof(VID*) == MAP::MAX_VIDS);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(2047)) == 2047);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(2048)) == 2048);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(4095)) == 4095);
+static_assert(MAP::MakeVidQuery(0) == 0x2000);
+static_assert(MAP::MakeVidQuery(2047) == 0x27ff);
+static_assert(MAP::MakeVidQuery(2048) == 0x2800);
+static_assert(MAP::MakeVidQuery(4095) == 0x2fff);
+static_assert(MAP::VidFromQuery(0x800) == 0);
+static_assert(MAP::VidFromQuery(0xfff) == 2047);
+static_assert(MAP::VidFromQuery(0x1800) == 0);
+static_assert(MAP::VidFromQuery(0x1fff) == 2047);
+static_assert(!MAP::IsVidQuery(0x1000));
+static_assert(!MAP::IsVidQuery(0x1015));
+static_assert(!MAP::IsVidQuery(0x9015));
+static_assert(MAP::VidFromQuery(0x9015) == -1);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(0) | 0x18000) == 0);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(4095) | 0x18000) == 4095);
+static_assert(MAP::MakeVidQuery(-1) == 0);
+static_assert(MAP::MakeVidQuery(4096) == 0);
+static_assert(MAP::IsVidQuery(MAP::GETSPRITE_VID));
+static_assert(MAP::VidFromQuery(MAP::GETSPRITE_VID) == 0);
+static_assert(!MAP::IsVidQuery(-1));
+static_assert(!MAP::IsVidQuery(0x3000));
+static_assert(!MAP::IsVidQuery(0x3fff));
+static_assert(MAP::VidFromQuery(-1) == -1);
+static_assert(MAP::VidFromQuery(0x3000) == -1);
+static_assert(MAP::VidFromQuery(0x3fff) == -1);
 
 #endif
