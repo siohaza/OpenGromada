@@ -185,7 +185,7 @@ jobs:
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_INSTALL_BINDIR=.
+          "-DCMAKE_INSTALL_BINDIR=."
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           "-DALIEN_STEAMWORKS_SDK=${{ github.workspace }}/SteamworksSDK"
           "-DCMAKE_PREFIX_PATH=${{ steps.sdl.outputs.prefix }}"
