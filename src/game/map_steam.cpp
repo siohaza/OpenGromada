@@ -165,7 +165,7 @@ int MAP_STEAM::Tact()
 				}
 			}
 		}
-		if (m_flag & 0x10) {
+		if ((m_flag & 0x10) || m_menuFrameActive) {
 			for (int i = m_menu.m_n - 1; i >= 0; --i) {
 				((SPRITE*) m_menu.m_data[i])->Tact();
 			}
@@ -181,7 +181,7 @@ int MAP_STEAM::Tact()
 		}
 		m_mousetips.Tact(&m_input);
 		ControlShiftCoor();
-		if (!(m_flag & 0x10) && (m_flag & 0x80)) {
+		if (!(m_flag & 0x10) && !m_menuFrameActive && (m_flag & 0x80)) {
 			// there was used to be "Presentation version. Not for sale!" banner
 			// removed because it was too annoying
 			for (int i = 0; i < 4; ++i) {

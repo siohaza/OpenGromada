@@ -38,6 +38,7 @@ ANGLE SPRITE::Direction()
 SPRITE::SPRITE(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE* p_parent)
 {
 	m_uiScale = p_parent ? (p_parent->m_uiScale & 0xff) : 0;
+	m_invulnerable = 0;
 	m_flag = 0;
 	if (p_vid->m_flag & 0x100) {
 		p_x = (float) (8 - GameRand() % 17) + p_x;
@@ -1122,6 +1123,13 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 			return 0;
 		}
 		return m_parent->Action(p_action, p_a, p_b, p_c);
+	case 83: // ACT_SET_INVULNERABLE
+		m_invulnerable = (int) p_a;
+		return 0;
+	case 84: // ACT_GET_INVULNERABLE
+		return m_invulnerable;
+	case 99: // ACT_GET_PARENT
+		return (decomp_intptr) m_parent;
 	case 111:
 		return (m_flag >> 2) & 0x1f;
 	case 100: {

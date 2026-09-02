@@ -1,3 +1,4 @@
+#include "game/data_version.h"
 #include "game/map.h"
 #include "game/player_arcade.h"
 #include "game/terrain_camera.h"
@@ -51,7 +52,7 @@ void MAP::FinalizeTerrainCamera(int p_gameplay)
 	}
 	TERRAIN_COVERAGE* coverage = ground->TakeTerrainCoverage();
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	if (!coverage || !p_gameplay || !graph || !graph->m_nativeResolution) {
+	if (!coverage || !p_gameplay || !graph || !graph->m_nativeResolution || GameData_IsSteam()) {
 		delete coverage;
 		return;
 	}
@@ -113,6 +114,66 @@ void MAP::FinalizeTerrainCamera(int p_gameplay)
 
 	SetShiftCoor(oldShiftX + graph->m_width * 0.5f, oldShiftY + graph->m_height * 0.5f, 0);
 	MYERROR::Log(::Error, "Terrain-safe frame %ix%i for map %.0fx%.0f", targetWidth, targetHeight, m_w, m_h);
+}
+
+void MAP::EnterFullscreenMenuFrame()
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	if (!graph || m_menuFrameActive) {
+		return;
+	}
+	const int outputWidth = graph->m_outputWidth;
+	const int outputHeight = graph->m_outputHeight;
+	if (outputWidth <= 0 || outputHeight <= 0 ||
+		((int) graph->m_width == outputWidth && (int) graph->m_height == outputHeight)) {
+		return;
+	}
+	const int savedWidth = (int) graph->m_width;
+	const int savedHeight = (int) graph->m_height;
+	const float oldShiftX = m_shiftX;
+	const float oldShiftY = m_shiftY;
+	const unsigned int inFrame = graph->m_flags & 0x10000;
+	graph->m_flags &= ~0x10000u;
+	const int resized = graph->ConfigureFrameSize(outputWidth, outputHeight, 0);
+	graph->m_flags |= inFrame;
+	if (resized <= 0) {
+		return;
+	}
+	m_menuFrameActive = 1;
+	m_menuFrameSavedW = savedWidth;
+	m_menuFrameSavedH = savedHeight;
+	for (int player = 0; player < 4; ++player) {
+		if (m_player[player]) {
+			((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
+		}
+	}
+	RefreshPointerForTerrainFrame(this);
+	SetShiftCoor(oldShiftX + graph->m_width * 0.5f, oldShiftY + graph->m_height * 0.5f, 0);
+}
+
+void MAP::LeaveFullscreenMenuFrame()
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	if (!graph || !m_menuFrameActive) {
+		return;
+	}
+	m_menuFrameActive = 0;
+	const float oldShiftX = m_shiftX;
+	const float oldShiftY = m_shiftY;
+	const unsigned int inFrame = graph->m_flags & 0x10000;
+	graph->m_flags &= ~0x10000u;
+	const int resized = graph->ConfigureFrameSize(m_menuFrameSavedW, m_menuFrameSavedH, 1);
+	graph->m_flags |= inFrame;
+	if (resized <= 0) {
+		return;
+	}
+	for (int player = 0; player < 4; ++player) {
+		if (m_player[player]) {
+			((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
+		}
+	}
+	RefreshPointerForTerrainFrame(this);
+	SetShiftCoor(oldShiftX + graph->m_width * 0.5f, oldShiftY + graph->m_height * 0.5f, 0);
 }
 
 bool MAP::CurrentTerrainViewSafe() const

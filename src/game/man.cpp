@@ -188,6 +188,9 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 	case 0x55: {
 		int dmg = p_a;
 		if (dmg > 0) {
+			if (m_invulnerable) {
+				return 0;
+			}
 			if (m_vid->m_idx != 350) {
 				for (SPRITE* p = m_child; p; p = p->m_child) {
 					int idx = p->m_vid->m_idx;

@@ -1,7 +1,13 @@
 newoption {
 	trigger = "sdl3-dir",
 	value = "PATH",
-	description = "Path to an extracted SDL3 Visual C++ development package"
+	description = "Path to SDL3"
+}
+
+newoption {
+	trigger = "steam-sdk",
+	value = "PATH",
+	description = "Path to a Steamworks SDK"
 }
 
 if not _ACTION then
@@ -35,6 +41,20 @@ local sdl_major = tonumber(version_text:match("#define%s+SDL_MAJOR_VERSION%s+(%d
 local sdl_minor = tonumber(version_text:match("#define%s+SDL_MINOR_VERSION%s+(%d+)"))
 if sdl_major ~= 3 or not sdl_minor or sdl_minor < 4 then
 	error("Alien Shooter requires SDL 3.4 or newer")
+end
+
+local steam_sdk = _OPTIONS["steam-sdk"] or os.getenv("STEAM_SDK_DIR")
+if not steam_sdk and os.isfile("../SteamworksSDK/public/steam/steam_api.h") then
+	steam_sdk = "../SteamworksSDK"
+end
+if steam_sdk then
+	steam_sdk = path.getabsolute(steam_sdk)
+	if not os.isfile(path.join(steam_sdk, "public/steam/steam_api.h")) then
+		error("Not a Steamworks SDK: " .. steam_sdk)
+	end
+	print("Steamworks: enabled (" .. steam_sdk .. "); x86/x64 only")
+else
+	print("Steamworks: disabled. Store is local only")
 end
 
 workspace "AlienShooter"
@@ -82,6 +102,13 @@ local function configure_project()
 	filter "files:**.cpp"
 		forceincludes { "src/util/compat.h" }
 
+	if steam_sdk then
+		filter "platforms:x86 or x64"
+			defines { "ALIEN_HAVE_STEAMWORKS=1" }
+			externalincludedirs { path.join(steam_sdk, "public") }
+			buildoptions { "/Zc:__cplusplus" }
+	end
+
 	filter {}
 end
 
@@ -124,6 +151,18 @@ project "AlienShooter"
 		postbuildcommands {
 			'{COPYFILE} "' .. path.join(sdl3_dir, "lib/x64/SDL3.dll") .. '" "%{cfg.targetdir}"'
 		}
+
+	if steam_sdk then
+		filter "platforms:x86"
+			postbuildcommands {
+				'{COPYFILE} "' .. path.join(steam_sdk, "redistributable_bin/steam_api.dll") .. '" "%{cfg.targetdir}"'
+			}
+
+		filter "platforms:x64"
+			postbuildcommands {
+				'{COPYFILE} "' .. path.join(steam_sdk, "redistributable_bin/win64/steam_api64.dll") .. '" "%{cfg.targetdir}"'
+			}
+	end
 
 	filter "platforms:ARM64"
 		libdirs { path.join(sdl3_dir, "lib/arm64") }

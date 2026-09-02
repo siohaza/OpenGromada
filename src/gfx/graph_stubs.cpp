@@ -39,7 +39,7 @@ void GRAPH::Tact(int p_draw)
 		Map->SetShiftCoor(width * 0.5f + s_oldShiftX + 4.0f - jx, height * 0.5f + s_oldShiftY + 4.0f - jy, 0);
 	}
 	if (p_draw) {
-		if (Map->m_noVid <= 1024 || !Map->m_vids[1024] || Map->m_shiftX < 0.0f ||
+		if (Map->m_menuFrameActive || Map->m_noVid <= 1024 || !Map->m_vids[1024] || Map->m_shiftX < 0.0f ||
 			core->m_viewXMax + Map->m_shiftX - core->m_viewXMin > (double) Map->m_w || Map->m_shiftY < 0.0f ||
 			core->m_viewYMax + Map->m_shiftY - core->m_viewYMin > (double) Map->m_h) {
 			core->ClearScreen(COLOR(0, 0, 0));

@@ -112,6 +112,7 @@ bool INI_FILE::Save()
 		return false;
 	}
 
+	bool wroteSection = false;
 	for (const Section& s : m_sections) {
 		if (s.m_entries.empty()) {
 			continue;
@@ -119,6 +120,10 @@ bool INI_FILE::Save()
 		if (!s.m_name.empty()) {
 			fprintf(file, "[%s]\n", s.m_name.c_str());
 		}
+		else if (wroteSection) {
+			fprintf(file, "[]\n");
+		}
+		wroteSection = true;
 		for (const Entry& e : s.m_entries) {
 			fprintf(file, "%s=%s\n", e.m_key.c_str(), e.m_value.c_str());
 		}
@@ -219,4 +224,23 @@ void INI_FILE::Erase(const char* p_section, const char* p_key)
 			return;
 		}
 	}
+}
+
+void INI_FILE::EraseSection(const char* p_section)
+{
+	Section* section = Find(p_section);
+	if (!section || section->m_entries.empty()) {
+		return;
+	}
+	section->m_entries.clear();
+	m_dirty = true;
+}
+
+const char* INI_FILE::KeyAt(const char* p_section, int p_index) const
+{
+	const Section* section = Find(p_section);
+	if (!section || p_index < 0 || p_index >= (int) section->m_entries.size()) {
+		return nullptr;
+	}
+	return section->m_entries[p_index].m_key.c_str();
 }

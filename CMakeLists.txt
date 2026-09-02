@@ -56,9 +56,79 @@ if(NOT MSVC)
     endif()
 endif()
 
+set(ALIEN_STEAMWORKS_SDK "" CACHE PATH
+    "Steamworks SDK path ('' = auto-detect ../SteamworksSDK, OFF = disable)")
+if(ALIEN_STEAMWORKS_SDK STREQUAL "" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../SteamworksSDK/public/steam/steam_api.h")
+    set(ALIEN_STEAMWORKS_SDK "${CMAKE_CURRENT_SOURCE_DIR}/../SteamworksSDK")
+endif()
+
+set(ALIEN_STEAM_LIB "")
+set(ALIEN_STEAM_RUNTIME "")
+if(ALIEN_STEAMWORKS_SDK AND NOT ALIEN_STEAMWORKS_SDK STREQUAL "OFF")
+    if(NOT EXISTS "${ALIEN_STEAMWORKS_SDK}/public/steam/steam_api.h")
+        message(FATAL_ERROR "Not a Steamworks SDK: ${ALIEN_STEAMWORKS_SDK}")
+    endif()
+    set(ALIEN_STEAM_BIN "${ALIEN_STEAMWORKS_SDK}/redistributable_bin")
+    if(WIN32)
+        if(NOT MSVC)
+            message(STATUS "Steamworks skipped (MSVC only on Windows)")
+        elseif(CMAKE_CXX_COMPILER_ARCHITECTURE_ID MATCHES "ARM64"
+               OR CMAKE_SYSTEM_PROCESSOR MATCHES "ARM64|aarch64")
+            message(STATUS "Steamworks: no Windows arm64 redistributable. Building without Steam...")
+        elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(ALIEN_STEAM_LIB "${ALIEN_STEAM_BIN}/win64/steam_api64.lib")
+            set(ALIEN_STEAM_RUNTIME "${ALIEN_STEAM_BIN}/win64/steam_api64.dll")
+        else()
+            set(ALIEN_STEAM_LIB "${ALIEN_STEAM_BIN}/steam_api.lib")
+            set(ALIEN_STEAM_RUNTIME "${ALIEN_STEAM_BIN}/steam_api.dll")
+        endif()
+    elseif(APPLE)
+        set(ALIEN_STEAM_LIB "${ALIEN_STEAM_BIN}/osx/libsteam_api.dylib")
+        set(ALIEN_STEAM_RUNTIME "${ALIEN_STEAM_LIB}")
+    else()
+        if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+            set(ALIEN_STEAM_ARCH linuxarm64)
+        elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            set(ALIEN_STEAM_ARCH linux64)
+        else()
+            set(ALIEN_STEAM_ARCH linux32)
+        endif()
+        set(ALIEN_STEAM_LIB "${ALIEN_STEAM_BIN}/${ALIEN_STEAM_ARCH}/libsteam_api.so")
+        set(ALIEN_STEAM_RUNTIME "${ALIEN_STEAM_LIB}")
+    endif()
+endif()
+
+if(ALIEN_STEAM_LIB)
+    message(STATUS "Steamworks: enabled (${ALIEN_STEAM_LIB})")
+    target_compile_definitions(alien_core PRIVATE ALIEN_HAVE_STEAMWORKS=1)
+    target_include_directories(alien_core SYSTEM PRIVATE "${ALIEN_STEAMWORKS_SDK}/public")
+    if(MSVC)
+        target_compile_options(alien_core PRIVATE "/Zc:__cplusplus")
+    endif()
+else()
+    message(STATUS "Steamworks: disabled. Store is local only.")
+endif()
+
 add_executable(alien_portable "${ALIEN_MAIN}")
 target_link_libraries(alien_portable PRIVATE alien_core)
 set_target_properties(alien_portable PROPERTIES OUTPUT_NAME "AlienShooter")
+
+if(ALIEN_STEAM_RUNTIME)
+    add_custom_command(TARGET alien_portable POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+            "${ALIEN_STEAM_RUNTIME}" "$<TARGET_FILE_DIR:alien_portable>"
+        VERBATIM)
+    if(UNIX AND NOT APPLE)
+        set_target_properties(alien_portable PROPERTIES
+            BUILD_RPATH "\$ORIGIN"
+            INSTALL_RPATH "\$ORIGIN")
+    endif()
+    if(NOT APPLE)
+        install(FILES "${ALIEN_STEAM_RUNTIME}"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+endif()
 
 set(ALIEN_APP_ICON_PNG
     "${CMAKE_CURRENT_SOURCE_DIR}/resources/AlienShooter.png")

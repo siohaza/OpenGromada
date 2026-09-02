@@ -20,7 +20,7 @@ public:
 
 	int NVidUnderCursor() const;
 	unsigned int NDirUnderCursor() const;
-	int Load(const STRING& p_name);
+	int Load(const STRING& p_name, int p_opt = 0);
 	int DeleteFromFile(const STRING& p_name);
 };
 

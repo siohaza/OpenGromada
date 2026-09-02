@@ -115,6 +115,9 @@ public:
 	};
 
 	TERRAIN_CAMERA* m_terrainCamera;
+	int m_menuFrameActive;
+	int m_menuFrameSavedW;
+	int m_menuFrameSavedH;
 
 	int DemoTact();
 	VID* Vid(int p_idx) const;
@@ -177,6 +180,8 @@ public:
 	void PauseOff();
 	void CreateEmptyHardwareGround();
 	void FinalizeTerrainCamera(int p_gameplay);
+	void EnterFullscreenMenuFrame();
+	void LeaveFullscreenMenuFrame();
 	void ClearTerrainCamera();
 	bool CurrentTerrainViewSafe() const;
 	SPRITE* ReadPointer(STREAM* p_stream);

@@ -4,6 +4,7 @@
 #include "game/settings.h"
 #include "platform/gamepad.h"
 #include "platform/paths.h"
+#include "platform/store.h"
 #include "util/string.h"
 
 #include <SDL3/SDL.h>
@@ -26,7 +27,7 @@ bool CheckGameData()
 		sizeof(message),
 		"Alien Shooter game data was not found.\n\n"
 		"Expected objects.res and the Maps directory under:\n%s\n"
-		"Copy the contents of an Alien Shooter 1.2 retail or GOG installation there or run:\n\n"
+		"Copy the contents of an Alien Shooter installation (GOG/Steam or retail 1.2) there or run:\n\n"
 		"AlienShooter --data-path=\"/path/to/Alien Shooter\"\n\n",
 		Platform_BasePath()
 	);
@@ -50,6 +51,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 	Platform_GamepadInit();
+	Platform_StoreInit();
 
 	int result = 0;
 	Map = new MAP_STEAM(commandLine, &Settings);
@@ -67,6 +69,7 @@ int main(int argc, char** argv)
 	else {
 		result = 1;
 	}
+	Platform_StoreShutdown();
 	Platform_GamepadShutdown();
 	SDL_Quit();
 	return result;

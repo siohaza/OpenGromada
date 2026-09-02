@@ -68,6 +68,7 @@ public:
 	EX_SPRITE_DATA* m_exData;  // 0x68
 	PTR_SPRITE m_unk0x6c;      // 0x6c
 	int m_uiScale;
+	int m_invulnerable;
 
 	void DrawRectangle();
 	float UIDrawScale() const;

@@ -2,7 +2,9 @@
 
 #include "audio/sound.h"
 #include "game/const.h"
+#include "game/data_version.h"
 #include "game/engine.h"
+#include "game/filedata.h"
 #include "game/gametime.h"
 #include "game/player_arcade.h"
 #include "game/region.h"
@@ -16,7 +18,10 @@
 #include "gfx/picture_font.h"
 #include "gfx/picture_makevid.h"
 #include "platform/gamepad.h"
+#include "platform/paths.h"
+#include "platform/portable_config.h"
 #include "platform/render.h"
+#include "platform/store.h"
 #include "platform/timing.h"
 #include "sprite/ex_sprite_data.h"
 #include "sprite/r_map.h"
@@ -29,6 +34,8 @@
 #include "util/registry.h"
 #include "util/string.h"
 #include "video/vid.h"
+
+#include <string>
 #include "video/vid_exdata.h"
 #include "video/vid_font.h"
 #include "video/vid_hardware.h"
@@ -496,6 +503,7 @@ int MAP::StartTact()
 		ProcessEvent(event);
 	}
 	m_input.ApplyGamepad(delta);
+	Platform_StorePump();
 	return m_quit;
 }
 
@@ -1577,7 +1585,7 @@ VID** MAP::ExecFunc(int p_cmd)
 					return 0;
 				}
 				if (action == 0x5a || action == 0x9c || action == 0x9b || action == 0x9a || action == 0x65 ||
-					action == 0x67) {
+					action == 0x67 || action == 0x63) {
 					decomp_intptr result = sprite->Action(action, var1, var2, var3);
 					m_logic.PushObject(reinterpret_cast<const void*>(result));
 					return 0;
@@ -1672,6 +1680,10 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushInt(direction);
 		return 0;
 	}
+	case 91: // script: ViewXMin()
+	case 92: // script: ViewYMin()
+		PushInt(0);
+		return 0;
 	case 96: { // script: GetCommands(unit)
 		SPRITE* sprite = (SPRITE*) m_logic.m_stack.PopObject();
 		if (sprite) {
@@ -1748,13 +1760,16 @@ VID** MAP::ExecFunc(int p_cmd)
 		m_logic.PushObject(0);
 		return 0;
 	}
-	case 102: // script: MenuLoad(filename)
-		m_menu.Load(*PopStr());
+	case 102: { // script: MenuLoad(filename, opt=1)
+		int opt = GameData_IsSteam() ? PopInt() : 0;
+		m_menu.Load(*PopStr(), opt);
 		return 0;
+	}
 	case 103: { // script: MenuRelease(filename="")
 		STRING name(*PopStr());
 		if (!strcmp(name.m_str, empty_str)) {
 			m_menu.DeleteAll();
+			LeaveFullscreenMenuFrame();
 		}
 		else {
 			m_menu.DeleteFromFile(name);
@@ -1925,7 +1940,7 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 120: // script: ScreenY()
 		m_logic.PushInt((int) ((GRAPH_CORE*) Graph)->m_height);
 		return 0;
-	case 121: { // script: toggle the 0x80 map flag
+	case 121: { // script: SetPlayerControl(flag) | SetSelectUnit(flag)
 		int on = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
 		m_flag = (m_flag & ~0x80u) | (on ? 0x80 : 0);
 		return 0;
@@ -2123,9 +2138,28 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 149: // script: GetPrevMapName()
 		PushStr(m_prevMap);
 		return 0;
-	case 150: // script: GetRegistrationInfo()
+	case 150: { // script: GetRegistrationInfo() | SetGraphScreen(sx, sy, fullscreen)
+		if (GameData_IsSteam()) {
+			int fullscreen = PopInt();
+			int sizeY = PopInt();
+			int sizeX = PopInt();
+			if ((sizeX != -1 || sizeY != -1) && ::Error) {
+				MYERROR::Log(::Error, "SetGraphScreen(%i, %i) resolution request ignored", sizeX, sizeY);
+			}
+			if (fullscreen != -1) {
+				Platform_RenderSetFullscreen(fullscreen);
+				GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+				if (graph) {
+					graph->m_flags = (graph->m_flags & ~0x80u) | (fullscreen ? 0x80 : 0);
+				}
+				PortableConfig_SetInt("display", "FullScreen", fullscreen != 0);
+				PortableConfig_Flush();
+			}
+			return 0;
+		}
 		PushStr(STRING(RegistrationInfo));
 		return 0;
+	}
 	case 151: // script: GetMapName()
 		PushStr(m_mapName);
 		return 0;
@@ -2148,12 +2182,16 @@ VID** MAP::ExecFunc(int p_cmd)
 		// The script's Exec always names a document or a URL to hand to the
 		// desktop, never an executable with arguments, so the parameters are
 		// appended rather than passed as a command line.
-		if (params.m_str && *params.m_str) {
-			SDL_OpenURL((file + " " + params).m_str);
+		STRING target = params.m_str && *params.m_str ? file + " " + params : file;
+		if (!strstr(target.m_str, "://")) {
+			std::string resolved(Platform_ResolvePath((std::string(Platform_BasePath()) + target.m_str).c_str()));
+			if (FILE* doc = fopen(resolved.c_str(), "rb")) {
+				fclose(doc);
+				SDL_OpenURL(("file://" + resolved).c_str());
+				return 0;
+			}
 		}
-		else {
-			SDL_OpenURL(file.m_str);
-		}
+		SDL_OpenURL(target.m_str);
 		return 0;
 	}
 	case 153: { // script: CharAt(str, idx) - signed character code at a position
@@ -2675,6 +2713,24 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 185: // script: GetDefaultRegPath()
 		m_logic.PushStr(Registry->m_path);
 		return 0;
+	case 186: { // script: FSaveData(path, value)
+		STRING value(*PopStr());
+		STRING path(*PopStr());
+		FileData_Save(path.m_str, value.m_str);
+		return 0;
+	}
+	case 187: { // script: FLoadData(path, def_value)
+		STRING def(*PopStr());
+		STRING path(*PopStr());
+		PushStr(STRING(FileData_Load(path.m_str, def.m_str)));
+		return 0;
+	}
+	case 188: // script: FileExist(filename)
+		PushInt(FileData_FileExists(PopStr()->m_str));
+		return 0;
+	case 189: // script: SaveFolder()
+		PushStr(STRING(FileData_SaveFolder()));
+		return 0;
 	case 159: // script: StrLen(text)
 	case 205:
 		PushInt((int) PopStr()->Length());
@@ -2690,7 +2746,66 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushStr(PopStr()->ToBase64(key));
 		return 0;
 	}
-	case 212: { // script: TrainInfo(engine, query) - query accumulated train parameters
+	case 210: // script: StoreSetAchievement(achievement_id)
+		Platform_StoreSetAchievement(PopStr()->m_str);
+		return 0;
+	case 211: // script: StoreGetAchievement(achievement_id)
+		PushInt(Platform_StoreGetAchievement(PopStr()->m_str));
+		return 0;
+	case 213: // script: StoreResetAllStats()
+		Platform_StoreResetAllStats();
+		return 0;
+	case 214: { // script: StoreSetStat(stats_id, value)
+		int value = PopInt();
+		Platform_StoreSetStat(PopStr()->m_str, value);
+		return 0;
+	}
+	case 215: // script: StoreGetStat(stats_id)
+		PushInt(Platform_StoreGetStat(PopStr()->m_str));
+		return 0;
+	case 216: // script: StoreSaveStatsIfNeed()
+		Platform_StoreSaveStatsIfNeeded();
+		return 0;
+	case 217: { // script: StoreActivateGameOverlayToStore(app_id)
+		int appId = PopInt();
+		if (appId <= 0) {
+			appId = ALIEN_STEAM_APPID;
+		}
+		char url[64];
+		snprintf(url, sizeof(url), "https://store.steampowered.com/app/%i", appId);
+		SDL_OpenURL(url);
+		return 0;
+	}
+	case 218: // script: StoreInitLeaderboards(names)
+		Platform_StoreInitLeaderboards(PopStr()->m_str);
+		return 0;
+	case 219: { // script: StoreUpdateLeaderboard(leaderboard_name, new_score)
+		int score = PopInt();
+		STRING name(*PopStr());
+		STRING player(FileData_Load("save://common/PlayerName", "Player"));
+		Platform_StoreUpdateLeaderboard(name.m_str, player.m_str, score);
+		return 0;
+	}
+	case 220: { // script: StoreDownloadLeaderboardEntries(leaderboard_name, no_entries, offset)
+		int offset = PopInt();
+		int count = PopInt();
+		PushInt(Platform_StoreDownloadLeaderboardEntries(PopStr()->m_str, count, offset));
+		return 0;
+	}
+	case 221: // script: StoreGetLeaderboardEntriesName(index)
+		PushStr(STRING(Platform_StoreLeaderboardEntryName(PopInt())));
+		return 0;
+	case 222: // script: StoreGetLeaderboardEntriesScore(index)
+		PushInt(Platform_StoreLeaderboardEntryScore(PopInt()));
+		return 0;
+	case 223: // script: GetUpdateLeaderboardRank()
+		PushInt(Platform_StoreLastUploadRank());
+		return 0;
+	case 212: { // script: TrainInfo(engine, query) | StoreClearAchievement(achievement_id)
+		if (GameData_IsSteam()) {
+			Platform_StoreClearAchievement(PopStr()->m_str);
+			return 0;
+		}
 		int query = PopInt();
 		SPRITE* sprite = (SPRITE*) PopObject();
 		if (!sprite || !sprite->IsClass(0x15)) {

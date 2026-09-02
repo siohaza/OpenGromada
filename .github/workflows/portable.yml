@@ -55,11 +55,17 @@ jobs:
           cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF
           install-linux-dependencies: true
           discriminator: linux-${{ matrix.arch }}-${{ matrix.compiler }}-release-static
+      - name: Fetch Steamworks SDK
+        run: |
+          # v1.65a
+          git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
+          git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_BINDIR=.
+          -DALIEN_STEAMWORKS_SDK="${{ github.workspace }}/SteamworksSDK"
           -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
       - name: Build
         run: cmake --build build --parallel
@@ -108,12 +114,18 @@ jobs:
           cmake-generator: Ninja
           cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           discriminator: macos-${{ matrix.arch }}-release-static
+      - name: Fetch Steamworks SDK
+        run: |
+          # v1.65a
+          git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
+          git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
           -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          -DALIEN_STEAMWORKS_SDK="${{ github.workspace }}/SteamworksSDK"
           -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
       - name: Build
         run: cmake --build build --parallel
@@ -163,6 +175,11 @@ jobs:
           cmake-generator: Ninja
           cmake-arguments: -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST_LIBRARY=OFF -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           discriminator: windows-${{ matrix.arch }}-release-static
+      - name: Fetch Steamworks SDK
+        run: |
+          # v1.65a
+          git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
+          git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
       - name: Configure
         shell: pwsh
         run: >
@@ -170,6 +187,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_BINDIR=.
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          "-DALIEN_STEAMWORKS_SDK=${{ github.workspace }}/SteamworksSDK"
           "-DCMAKE_PREFIX_PATH=${{ steps.sdl.outputs.prefix }}"
       - name: Build
         run: cmake --build build --parallel

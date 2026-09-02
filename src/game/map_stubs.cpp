@@ -2,6 +2,7 @@
 #include "game/builded_terrain.h"
 #include "game/const.h"
 #include "game/constant.h"
+#include "game/data_version.h"
 #include "game/engine.h"
 #include "game/gametime.h"
 #include "game/man.h"
@@ -182,6 +183,9 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	m_window = 0;
 	m_quit = 0;
 	m_terrainCamera = 0;
+	m_menuFrameActive = 0;
+	m_menuFrameSavedW = 0;
+	m_menuFrameSavedH = 0;
 	ResetGroundZ();
 
 	::Error = new MYERROR(1);
@@ -200,6 +204,10 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 		STRING configPath = Platform_IsAbsolutePath(p_argv.m_str) ? p_argv : base + p_argv;
 		profile.Load(configPath);
 	}
+
+	GameDataVersion = profile.GetInt(STRING("common"), STRING("Steam"), -1) != (unsigned int) -1
+		? GAME_DATA_STEAM_122
+		: GAME_DATA_RETAIL_12;
 
 	Strings = new PROFILE;
 	if (Strings) {
@@ -828,6 +836,7 @@ int MAP::Load(STRING p_name)
 		m_shiftX1 = 0.0f;
 		m_shiftY2 = m_h;
 		m_shiftY1 = 0.0f;
+		m_menuFrameActive = 0;
 		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {
@@ -971,6 +980,7 @@ int MAP::Load(STRING p_name)
 		m_shiftX2 = m_w;
 		m_shiftY1 = 0.0f;
 		m_shiftY2 = m_h;
+		m_menuFrameActive = 0;
 		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {

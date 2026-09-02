@@ -1,6 +1,7 @@
 #include "sprite/sprite.h"
 
 #include "audio/sound.h"
+#include "game/data_version.h"
 #include "game/engine.h"
 #include "game/gametime.h"
 #include "game/map.h"
@@ -596,10 +597,12 @@ float SPRITE::UIDrawScale() const
 	if (!m_uiScale) {
 		return 1.0f;
 	}
-	// VID746 is the authored full-screen pause/options backdrop. It must retain
-	// the world's presentation enlargement so counter-scaled controls do not
-	// expose live gameplay in strips around its 1024x768 canvas.
-	if (m_vid && m_vid->m_idx == 746) {
+	// In 1.2 data, VID746 is the authored full-screen pause/options backdrop.
+	// It must retain the world's presentation enlargement so counter-scaled
+	// controls do not expose live gameplay in strips around its 1024x768
+	// canvas. The 1.22 data reuses the nvid as 500x360 frame tiles placed as a
+	// grid, which must draw at the same scale their placement used.
+	if (!GameData_IsSteam() && m_vid && m_vid->m_idx == 746) {
 		return (float) UIScale();
 	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;

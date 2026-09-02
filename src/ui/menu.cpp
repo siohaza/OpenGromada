@@ -1,5 +1,6 @@
 #include "ui/menu.h"
 
+#include "game/data_version.h"
 #include "game/input_as.h"
 #include "game/map.h"
 #include "gfx/graph.h"
@@ -300,7 +301,7 @@ int MENU::Control(INPUT_AS* p_input)
 }
 
 // FUNCTION: ALIEN 0x43e2b0
-int MENU::Load(const STRING& p_name)
+int MENU::Load(const STRING& p_name, int p_opt)
 {
 	RESOURCE resource;
 	std::string resolvedName = ResolveMenuName(p_name);
@@ -329,7 +330,15 @@ int MENU::Load(const STRING& p_name)
 	}
 	MENU_HEADER header;
 	ReadMenuHeader(&resource, &header);
+	if (GameData_IsSteam() && !(p_opt & 2) && Map) {
+		// no need for rescale in steam version
+		Map->EnterFullscreenMenuFrame();
+	}
 	MENU_LAYOUT layout = ResolveMenuLayout(resolvedName);
+	if (p_opt & 2) {
+		layout.m_gamebarWidth = 1024;
+		layout.m_gamebarHeight = 768;
+	}
 	int firstLoaded = m_n;
 
 	if (!resource.GoNext(0x20525053)) {

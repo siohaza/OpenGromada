@@ -16,6 +16,8 @@ public:
 	void Set(const char* p_section, const char* p_key, const char* p_value);
 	void SetInt(const char* p_section, const char* p_key, int p_value);
 	void Erase(const char* p_section, const char* p_key);
+	void EraseSection(const char* p_section);
+	const char* KeyAt(const char* p_section, int p_index) const;
 
 	const std::string& Path() const { return m_path; }
 	bool Dirty() const { return m_dirty; }
