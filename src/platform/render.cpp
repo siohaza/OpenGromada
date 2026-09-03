@@ -25,7 +25,7 @@ static void SetPortableWindowIcon()
 	}
 
 	std::string iconPath(basePath);
-	iconPath += "AlienShooter.png";
+	iconPath += "OpenGromada.png";
 	SDL_Surface* icon = SDL_LoadPNG(iconPath.c_str());
 	if (!icon) {
 		SDL_ClearError();
@@ -289,7 +289,20 @@ void Platform_RenderPresent()
 		return;
 	}
 
+	static int s_profile = -1;
+	if (s_profile < 0) {
+		const char* env = SDL_getenv("ALIEN_FRAME_PROFILE");
+		s_profile = env && *env && *env != '0';
+	}
+	static Uint64 s_lastPresentNs, s_gameNs, s_updateNs, s_presentNs;
+	static int s_frames;
+	Uint64 t0 = SDL_GetTicksNS();
+	if (s_profile && s_lastPresentNs) {
+		s_gameNs += t0 - s_lastPresentNs;
+	}
+
 	SDL_UpdateTexture(s_texture, 0, s_pixels, s_width * (int) sizeof(unsigned int));
+	Uint64 t1 = s_profile ? SDL_GetTicksNS() : 0;
 
 	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
 	SDL_RenderClear(s_renderer);
@@ -314,7 +327,45 @@ void Platform_RenderPresent()
 	SDL_SetRenderScale(s_renderer, 1.0f, 1.0f);
 	s_debugTextCount = 0;
 
+	static int s_dump = -1;
+	static int s_dumpFrame;
+	if (s_dump < 0) {
+		const char* env = SDL_getenv("ALIEN_FRAME_DUMP");
+		s_dump = env && *env ? 1 : 0;
+	}
+	if (s_dump) {
+		++s_dumpFrame;
+		if (s_dumpFrame % 300 == 0) {
+			SDL_Surface* shot = SDL_CreateSurfaceFrom(s_width, s_height, SDL_PIXELFORMAT_XRGB8888, s_pixels, s_width * 4);
+			if (shot) {
+				char path[512];
+				SDL_snprintf(path, sizeof(path), "%s/frame%04d.bmp", SDL_getenv("ALIEN_FRAME_DUMP"), s_dumpFrame);
+				SDL_SaveBMP(shot, path);
+				SDL_DestroySurface(shot);
+			}
+		}
+	}
+
+	Uint64 t2 = s_profile ? SDL_GetTicksNS() : 0;
 	SDL_RenderPresent(s_renderer);
+	if (s_profile) {
+		Uint64 t3 = SDL_GetTicksNS();
+		s_updateNs += t2 - t1;
+		s_presentNs += t3 - t2;
+		s_lastPresentNs = t3;
+		if (++s_frames >= 120) {
+			SDL_Log(
+				"frame profile: game+draw %.1fms, texture update %.1fms, present %.1fms (%dx%d)",
+				(double) s_gameNs / s_frames * 1e-6,
+				(double) s_updateNs / s_frames * 1e-6,
+				(double) s_presentNs / s_frames * 1e-6,
+				s_width,
+				s_height
+			);
+			s_frames = 0;
+			s_gameNs = s_updateNs = s_presentNs = 0;
+		}
+	}
 }
 
 int Platform_RenderHandleDeviceReset()

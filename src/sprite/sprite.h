@@ -134,6 +134,7 @@ public:
 	void PlaySFX(int p_sfx) const;
 	void CreateChild();
 	void CreateChildAndPlaySFX(int p_ani);
+	void FireAniEvent(int p_ani, const SPRITE* p_arg);
 	STRING GetTextItems();
 	void SetTextItems(const STRING& p_text);
 	int GetFireDamage();

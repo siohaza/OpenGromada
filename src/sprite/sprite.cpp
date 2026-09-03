@@ -1102,6 +1102,23 @@ int SPRITE::GetFireDamage()
 }
 
 // FUNCTION: ALIEN 0x446430
+void SPRITE::FireAniEvent(int p_ani, const SPRITE* p_arg)
+{
+	int ani = m_ani;
+	m_ani = p_ani;
+	if (m_vid->m_aniChildVid[p_ani]) {
+		CreateChild();
+	}
+	if (m_vid->m_aniSfx[p_ani]) {
+		PlaySFX(m_vid->m_aniSfx[p_ani]);
+	}
+	int script = m_vid->m_unk0x408[p_ani];
+	if (script >= 0 && p_ani != 14) {
+		Map->ScriptRun(script, this, p_arg, 0);
+	}
+	m_ani = ani;
+}
+
 void SPRITE::CreateChildAndPlaySFX(int p_ani)
 {
 	if (m_vid->m_aniChildVid[p_ani]) {

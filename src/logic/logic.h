@@ -8,6 +8,8 @@
 #include "util/string.h"
 
 #include <cstring>
+#include <utility>
+#include <vector>
 
 namespace LOGIC_BYTECODE
 {
@@ -53,8 +55,16 @@ public:
 	int m_main;    // 0x50
 	int m_unk0x54; // 0x54
 
+	std::vector<std::pair<int, int>> m_protoFixups;
+	int m_inBody = 0;
+	int m_declStatic = 0;
+	int m_actionN[256];
+
 	LOGIC()
 	{
+		for (int i = 0; i < 256; ++i) {
+			m_actionN[i] = -1;
+		}
 		m_stackData = 0;
 		m_stackPos = 0;
 		m_pos = 0;
@@ -73,6 +83,8 @@ public:
 	int Load(const STRING& p_name);
 	int LoadVar(STREAM* p_stream);
 	int func();
+	int GetActionN(int p_n);
+	void SetActionN(int p_n, int p_value);
 	int Error(int p_type, const char* p_word, int p_line);
 	char** GetVariableStr(char** p_out, const STRING& p_name);
 	int skipempty();
@@ -83,6 +95,10 @@ public:
 	void cmpslag();
 	void logicslag();
 	void vyrag();
+	void vyragAnd();
+	void vyragXor();
+	void vyragOr();
+	void vyragCmpAnd();
 	int vyrag_oper();
 	void oper(int* p_breakFixups);
 	int GetInt();

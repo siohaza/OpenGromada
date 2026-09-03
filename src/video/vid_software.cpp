@@ -292,6 +292,7 @@ VID_SOFTWARE::VID_SOFTWARE()
 	m_unk0x488 = 0;
 	m_unk0x48c = 0;
 	m_unk0x484 = 0;
+	m_recolorBase = 0;
 }
 
 // FUNCTION: ALIEN 0x415440
@@ -308,6 +309,112 @@ VID_SOFTWARE::~VID_SOFTWARE()
 		m_unk0x484 = 0;
 		VID::MemoryInUse -= m_unk0x488;
 		m_unk0x488 = 0;
+	}
+	if (m_recolorBase) {
+		operator delete(m_recolorBase);
+		m_recolorBase = 0;
+	}
+}
+
+unsigned char* VID_SOFTWARE::PrepareRecolor()
+{
+	if (!(m_pixelFlag16 & 8)) {
+		Error(
+			10,
+			"SetReColorForArmy for non paletted vid",
+			0
+		);
+		return 0;
+	}
+	int palSize = PaletteSize();
+	if (!m_unk0x48c || palSize <= 0) {
+		return 0;
+	}
+
+	if (m_weaponPtr != this) {
+		VID* next = m_weaponPtr;
+		VID* last = next;
+		while (last->m_weaponPtr != this) {
+			last = last->m_weaponPtr;
+		}
+		last->m_weaponPtr = next;
+		m_weaponPtr = this;
+
+		void* sharedPalette = m_unk0x48c;
+		m_unk0x48c = operator new(m_unk0x488);
+		if (!m_unk0x48c) {
+			Error(2, "SetGamma", m_unk0x488);
+			return 0;
+		}
+		VID::MemoryInUse += m_unk0x488;
+		memcpy(m_unk0x48c, sharedPalette, m_unk0x488);
+
+		int* sharedFrames = m_unk0x484;
+		m_unk0x484 = (int*) operator new(4 * m_dotFrameCount);
+		if (!m_unk0x484) {
+			Error(2, "cadrShift", m_dotFrameCount);
+			return 0;
+		}
+		memcpy(m_unk0x484, sharedFrames, 4 * m_dotFrameCount);
+	}
+
+	unsigned char* base = (unsigned char*) m_unk0x48c + ((m_pixelFlag16 & 0x400) ? 4 : 1) * palSize;
+	if (!m_recolorBase) {
+		m_recolorBase = operator new(palSize);
+		if (!m_recolorBase) {
+			return 0;
+		}
+		memcpy(m_recolorBase, base, palSize);
+	}
+	return base;
+}
+
+void VID_SOFTWARE::SetReColorForArmy(unsigned int p_color)
+{
+	unsigned char* base = PrepareRecolor();
+	if (!base) {
+		return;
+	}
+	int palSize = PaletteSize();
+
+	const unsigned int* pristine = (const unsigned int*) m_recolorBase;
+	unsigned int* entries = (unsigned int*) base;
+	int destB = p_color & 0xff;
+	int destG = (p_color >> 8) & 0xff;
+	int destR = (p_color >> 16) & 0xff;
+	for (int i = 0; i < palSize / 4; ++i) {
+		unsigned int original = pristine[i];
+		int b = original & 0xff;
+		int g = (original >> 8) & 0xff;
+		int r = (original >> 16) & 0xff;
+		float key = (float) r * (1.0f / 148.0f);
+		if (r <= 0x14 || g > (int) (key * 80.0f) || abs(r - b) > (int) (key * 30.0f)) {
+			continue;
+		}
+		float scale = (float) r * 0.0078125f;
+		int nb = (int) ((float) destB * scale);
+		int ng = (int) ((float) destG * scale);
+		int nr = (int) ((float) destR * scale);
+		nb = nb < 0 ? 0 : nb > 255 ? 255 : nb;
+		ng = ng < 0 ? 0 : ng > 255 ? 255 : ng;
+		nr = nr < 0 ? 0 : nr > 255 ? 255 : nr;
+		nb += g;
+		ng += g;
+		nr += g;
+		nb = nb > 255 ? 255 : nb;
+		ng = ng > 255 ? 255 : ng;
+		nr = nr > 255 ? 255 : nr;
+		entries[i] = 0xff000000u | ((unsigned int) nr << 16) | ((unsigned int) ng << 8) | (unsigned int) nb;
+	}
+
+	if (m_pixelFlag16 & 0x400) {
+		SetGamma(m_gamma[0], 0);
+		SetGamma(m_gamma[1], 1);
+		SetGamma(m_gamma[2], 2);
+		SetGamma(m_gamma[3], 3);
+	}
+	else {
+		SetGamma(*(const GAMMA*) &m_colorSub, 4);
 	}
 }
 

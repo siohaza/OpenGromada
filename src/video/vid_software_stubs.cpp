@@ -11,6 +11,7 @@ VID_SOFTWARE::VID_SOFTWARE(STREAM* p_stream) throw()
 	};
 
 	VID_SOFTWARE& o = *(VID_SOFTWARE*) p_stream;
+	m_recolorBase = 0;
 	m_weaponPtr = o.m_weaponPtr;
 	o.m_weaponPtr = this;
 	m_layer = o.m_layer;

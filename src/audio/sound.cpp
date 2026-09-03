@@ -72,7 +72,7 @@ void SOUND::Tact()
 	if (m_music) {
 		m_music->Tact();
 		if (m_fade < 0) {
-			if (!g_fadeStartTime || RealCurrentTime - g_fadeStartTime > 1000) {
+			if (!g_fadeStartTime || (m_fadeMs <= 0 && RealCurrentTime - g_fadeStartTime > 1000)) {
 				g_fadeStartTime = RealCurrentTime;
 			}
 			int vol;
@@ -83,7 +83,13 @@ void SOUND::Tact()
 				vol = 0;
 			}
 			m_music->SetVolume(vol + m_fade);
-			m_fade += (int) (RealCurrentTime - g_fadeStartTime) / -2;
+			if (m_fadeMs > 0) {
+				unsigned int elapsed = RealCurrentTime - g_fadeStartTime;
+				m_fade = elapsed >= (unsigned int) m_fadeMs ? -3001 : -1 - (int) (3000 * elapsed / (unsigned int) m_fadeMs);
+			}
+			else {
+				m_fade += (int) (RealCurrentTime - g_fadeStartTime) / -2;
+			}
 			if (m_fade < -3000) {
 				g_fadeStartTime = m_fade = 0;
 				if (strcmp(m_musicName.m_str, empty_str)) {
@@ -267,15 +273,31 @@ void SOUND::VolumeMusic(int p_volume)
 }
 
 // FUNCTION: ALIEN 0x41dec0
-int SOUND::FadeAndPlayFile(const STRING& p_file, int p_loop)
+int SOUND::FadeAndPlayFile(const STRING& p_file, int p_loop, int p_fadeMs)
 {
 	if (!m_music) {
 		return PlayFile(p_file, p_loop);
 	}
 	m_fade = -1;
+	m_fadeMs = p_fadeMs > 0 ? p_fadeMs : 0;
+	if (m_fadeMs > 0) {
+		g_fadeStartTime = 0;
+	}
 	m_musicName = p_file;
 	m_loop = p_loop;
 	return 0;
+}
+
+void SOUND::StopMusicFade(int p_fadeMs)
+{
+	if (p_fadeMs <= 0 || !m_music) {
+		StopMusic();
+		return;
+	}
+	m_fade = -1;
+	m_fadeMs = p_fadeMs;
+	g_fadeStartTime = 0;
+	m_musicName = empty_str;
 }
 
 // FUNCTION: ALIEN 0x41df20
@@ -286,6 +308,7 @@ int SOUND::PlayFile(STRING p_file, int p_loop)
 	}
 	m_loop = p_loop;
 	m_fade = 0;
+	m_fadeMs = 0;
 	m_musicName = p_loop ? p_file : STRING(empty_str);
 	if (m_music && !strcmp(p_file.m_str, m_music->m_name.m_str)) {
 	}
@@ -442,7 +465,12 @@ SOUND_SAMPLE* SOUND::CreateWavSample(STRING* p_name)
 	}
 
 	long size = compat_filelength(file);
-	unsigned char* raw = size > 0 ? new unsigned char[size] : 0;
+	if (size <= 0 || size > 0x4000000) {
+		MYERROR::Log(::Error, "!!!ERROR!!!SFX:'%s' incorrect size %i", p_name->m_str, (int) size);
+		fclose(file);
+		return 0;
+	}
+	unsigned char* raw = new unsigned char[size];
 	if (!raw || fread(raw, 1, size, file) != (size_t) size) {
 		MYERROR::Log(::Error, "!!!ERROR!!!SFX:'%s' incorrect size %i", p_name->m_str, (int) size);
 		delete[] raw;

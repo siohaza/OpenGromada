@@ -165,6 +165,9 @@ public:
 	unsigned int m_unk0x47c; // 0x47c
 	unsigned int m_prop;     // 0x480
 
+	float m_randomSpeed;
+	float m_randomZSpeed;
+
 	const char* GetFileName() const { return m_fname; }
 	void SetName(const char* p_name);
 	void SetFileName(const char* p_name);
@@ -192,6 +195,7 @@ public:
 	unsigned int GetRecolorsTotal();
 	unsigned int GetNotCreateAsChild();
 	unsigned int SetNotCreateAsChild(unsigned int p_value);
+	virtual void SetReColorForArmy(unsigned int p_color) {}
 	unsigned int IsLight();
 	void LoadParameters(RESOURCE* p_res);
 	VID* SetMaxHp(int p_army, int p_maxHp);

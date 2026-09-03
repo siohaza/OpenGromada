@@ -1,5 +1,6 @@
 #include "game/settings.h"
 
+#include "game/game_descriptor.h"
 #include "util/string.h"
 
 #include <SDL3/SDL.h>
@@ -141,6 +142,18 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 		}
 		else if ((value = OptionValue(arg, "--pref-path", &i, p_argc, p_argv))) {
 			SDL_setenv_unsafe("ALIEN_SHOOTER_PREF_PATH", value, 1);
+		}
+		else if ((value = OptionValue(arg, "--game", &i, p_argc, p_argv))) {
+			if (!strcmp(value, "as1")) {
+				Game_SetCliOverride(GAME_AS1);
+			}
+			else if (!strcmp(value, "zs1")) {
+				Game_SetCliOverride(GAME_ZS1);
+			}
+			else {
+				fprintf(stderr, "Unknown --game value '%s'. Valid games are: as1, zs1.\n", value);
+				exit(1);
+			}
 		}
 		else if ((value = OptionValue(arg, "--config", &i, p_argc, p_argv))) {
 			SetGameArgument(p_gameArgument, value);

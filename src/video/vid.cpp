@@ -73,6 +73,8 @@ VID::VID() : m_name(STRING::EMPTY), m_colorSub(0), m_colorAdd(0), m_fname(STRING
 	m_unk0x478 = 0;
 	m_canMove = 0;
 	m_prop = 0;
+	m_randomSpeed = 0.0f;
+	m_randomZSpeed = 0.0f;
 	for (int ani = 0; ani < 17; ++ani) {
 		m_aniSfx[ani] = 0;
 		m_unk0x20c[ani] = 0;

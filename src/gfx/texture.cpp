@@ -1,6 +1,7 @@
 #include "gfx/texture.h"
 
 #include <algorithm>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -1072,6 +1073,47 @@ static void DispatchLightDestColorOne(
 	}
 }
 
+static void Argb4444AlphaBlendRow(
+	const unsigned short* p_src,
+	unsigned int* p_out,
+	int p_count,
+	int p_u0,
+	int p_stepU,
+	unsigned int p_dr,
+	unsigned int p_dg,
+	unsigned int p_db,
+	unsigned int p_da,
+	int p_shift
+)
+{
+	int u = p_u0;
+	for (int i = 0; i < p_count; ++i, u += p_stepU) {
+		unsigned int v = p_src[u >> 16];
+		unsigned int ta = (((v >> 12) * 17) * (p_da + 1)) >> 8;
+		if (ta == 0) {
+			continue;
+		}
+		unsigned int r = ((((v >> 8) & 0xf) * 17) * (p_dr + 1)) >> p_shift;
+		unsigned int g = ((((v >> 4) & 0xf) * 17) * (p_dg + 1)) >> p_shift;
+		unsigned int b = (((v & 0xf) * 17) * (p_db + 1)) >> p_shift;
+		if (r > 255) {
+			r = 255;
+		}
+		if (g > 255) {
+			g = 255;
+		}
+		if (b > 255) {
+			b = 255;
+		}
+		unsigned int d = p_out[i];
+		unsigned int inv = 255 - ta;
+		unsigned int outR = (r * ta + ((d >> 16) & 0xff) * inv) / 255;
+		unsigned int outG = (g * ta + ((d >> 8) & 0xff) * inv) / 255;
+		unsigned int outB = (b * ta + (d & 0xff) * inv) / 255;
+		p_out[i] = 0xff000000u | (outR << 16) | (outG << 8) | outB;
+	}
+}
+
 static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const GAMMA* p_gamma)
 {
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
@@ -1187,6 +1229,29 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 				db,
 				modulateShift
 			);
+			return;
+		}
+	}
+
+	if (p_tex->m_format == D3DFMT_A4R4G4B4 && !bilinear && !useSpecular && blend && srcBlend == D3DBLEND_SRCALPHA &&
+		dstBlend == D3DBLEND_INVSRCALPHA) {
+		int count = clipR - clipL;
+		int u0 = (int) (((long long) (clipL - dstL) * 2 + 1) * stepU / 2) + (srcL << 16);
+		int uLast = u0 + (count - 1) * stepU;
+		if (count > 0 && (u0 >> 16) >= 0 && (uLast >> 16) < p_tex->m_width) {
+			for (int y = clipT; y < clipB; ++y) {
+				int ty = (int) (((long long) (y - dstT) * 2 + 1) * stepV / 2 + ((long long) srcT << 16)) >> 16;
+				if (ty < 0) {
+					ty = 0;
+				}
+				else if (ty >= p_tex->m_height) {
+					ty = p_tex->m_height - 1;
+				}
+				const unsigned short* src =
+					(const unsigned short*) ((const unsigned char*) p_tex->m_data + (size_t) ty * p_tex->m_pitch);
+				unsigned int* out = (unsigned int*) graph->m_color + (size_t) y * graph->m_pitch + clipL;
+				Argb4444AlphaBlendRow(src, out, count, u0, stepU, dr, dg, db, da, modulateShift);
+			}
 			return;
 		}
 	}

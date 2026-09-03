@@ -2,6 +2,7 @@
 #include "audio/sound.h"
 #include "game/const.h"
 #include "game/engine.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/region.h"
@@ -157,7 +158,7 @@ void* SPRITE::ScalarDeletingDestructor(unsigned int p_flags)
 SPRITE::~SPRITE()
 {
 	int fn = m_vid->m_unk0x408[17];
-	if (fn >= 0) {
+	if (fn >= 0 && !(Game_IsZS1() && ENGINE::globaldeleting)) {
 		Map->ScriptRun(fn, this, 0, 0);
 	}
 	if (m_vid->m_nLinkDots) {
@@ -607,7 +608,8 @@ void SPRITE::Tact()
 	}
 
 	for (int script = m_vid->m_unk0x408[m_ani]; script >= 0; script = m_vid->m_unk0x408[m_ani]) {
-		if (m_noCadr != m_begCadr && !(m_vid->m_flag & 0x10)) {
+		if (m_noCadr != m_begCadr && !(m_vid->m_flag & 0x10) &&
+			!(Game_IsZS1() && (m_vid->m_flag & 0x400))) {
 			break;
 		}
 		int ani = m_ani;
@@ -668,9 +670,16 @@ void SPRITE::Tact()
 		else {
 			if (((ani < 15 && ani >= 7 && ani != 10) || (ani == 2 && m_speed == 0.0f)) &&
 				m_actions.m_data[m_actions.m_n - 1].m_cmd >= 17) {
-				ChangeAnimation(0); // ANI_STAND
+				ChangeAnimation(0);
 			}
-			if (m_actions.m_data[m_actions.m_n - 1].m_cmd != 73) {
+			int topCmd = m_actions.m_data[m_actions.m_n - 1].m_cmd;
+			if (Game_IsZS1() && topCmd == 79) {
+				ACT* wait = &m_actions.m_data[m_actions.m_n - 1];
+				if (Map->m_logic.GetActionN((int) wait->m_a) == (int) wait->m_b) {
+					--m_actions.m_n;
+				}
+			}
+			else if (topCmd != 73) {
 				ACT* act = &m_actions.m_data[--m_actions.m_n];
 				if (act->m_cmd < 17) {
 					ChangeAnimation(act->m_cmd);
@@ -748,8 +757,40 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		}
 		m_exData->m_unk0x10 = p_a;
 		return 0;
+	case 118:
+		if (Game_IsZS1()) {
+			SetGamma(GAMMA(GAMMA::DECODE, (unsigned int) p_a));
+		}
+		return 0;
+	case 119:
+		if (Game_IsZS1()) {
+			SetCommand((int) p_a, (SPRITE*) p_b);
+		}
+		return 0;
+	case 138:
+		if (Game_IsZS1()) {
+			if (!m_exData) {
+				m_exData = new EX_SPRITE_DATA(this);
+			}
+			m_exData->m_unk0x20 = (float) p_a * 0.001f;
+			if (m_speed > m_exData->m_unk0x20) {
+				m_speed = m_exData->m_unk0x20;
+			}
+		}
+		return 0;
 	case 134: {
+		if (Game_IsZS1() && p_a == -1) {
+			ScalarDeletingDestructor(1);
+			return 0;
+		}
 		if (p_a < 0 || p_a >= Map->m_noVid || !Map->m_vids[p_a]) {
+			return 0;
+		}
+		if (Game_IsZS1() && p_a > 0 && p_b == 0 && p_c == 0) {
+			while (SPRITE* victim
+				   = Map->FindNearestSprite(MAP::MakeVidQuery((int) p_a), 0.0f, 0.0f, 40000.0f, 0)) {
+				victim->ScalarDeletingDestructor(1);
+			}
 			return 0;
 		}
 		SPRITE* found = Map->GetSpriteScr(MAP::MakeVidQuery((int) p_a), (float) p_b, (float) p_c);
@@ -786,6 +827,9 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 
 		SPRITE* child = Map->CreateSprite(Map->Vid(nvid), x, y, GetZ(), Direction(), this);
 		if (!child) {
+			return 0;
+		}
+		if (Game_IsZS1() && !ActionStackHaveCommand(73)) {
 			return 0;
 		}
 		Action(75, (decomp_intptr) child, 0, 0);
@@ -1066,6 +1110,14 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		PlaySFX(p_a);
 		return 0;
 	case 131:
+		if (Game_IsZS1()) {
+			int value = (int) p_b;
+			if ((int) p_c == 1) {
+				value += Map->m_logic.GetActionN((int) p_a);
+			}
+			Map->m_logic.SetActionN((int) p_a, value);
+			return 0;
+		}
 		Map->ScriptRun(p_a, this, 0, 0);
 		return 0;
 	case 42: // ACT_STOP
@@ -1164,8 +1216,19 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		if (m_ani >= 15) {
 			return 0;
 		}
-		if (m_vid->m_unk0x408[18] >= 0 && Map->ScriptRun(m_vid->m_unk0x408[18], this, (SPRITE*) p_b, p_a)) {
-			return 0;
+		if (m_vid->m_unk0x408[18] >= 0) {
+			int hook = Map->ScriptRun(m_vid->m_unk0x408[18], this, (SPRITE*) p_b, p_a);
+			if (Game_IsZS1()) {
+				if (hook > 0) {
+					return 0;
+				}
+				if (hook < 0) {
+					p_a = -hook;
+				}
+			}
+			else if (hook) {
+				return 0;
+			}
 		}
 		if (m_vid->m_defaultMaxHp) {
 			ChangeHp(m_unk0x54 - p_a);
@@ -1460,7 +1523,29 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 				dst.m_data[j] = list.m_data[j];
 			}
 		}
+		if (Game_IsZS1() && p_b >= 13) {
+			STRING name;
+			name.Read_res(res);
+			if (*name.m_str) {
+				if (!m_exData) {
+					m_exData = new EX_SPRITE_DATA(this);
+				}
+				m_exData->m_spriteName = name;
+			}
+		}
 		return 0;
+	}
+	case 125: {
+		static STRING emptyName;
+		if (!Game_IsZS1()) {
+			MYERROR::Error(::Error, "SPRITE %i", 10, "Action() have not this act", p_action, m_vid ? m_vid->m_idx : -1);
+			return 0;
+		}
+		if (m_exData && *m_exData->m_spriteName.m_str) {
+			return (decomp_intptr) &m_exData->m_spriteName;
+		}
+		emptyName = "";
+		return (decomp_intptr) &emptyName;
 	}
 	case 15: {
 		VID* vid = m_vid;
@@ -2213,7 +2298,11 @@ void SPRITE::ChangeHp(int p_hp)
 		if (m_ani < 0xf) {
 			VID* v = m_vid;
 			v->m_deaths[(m_flag >> 11) & 3]++;
-			if (m_unk0x54 - p_hp > m_vid->m_maxHp[(m_flag >> 11) & 3] && m_vid->m_unk0x290) {
+			int maxHp = m_vid->m_maxHp[(m_flag >> 11) & 3];
+			int overkill = Game_IsZS1() ? 3 * maxHp / 2 : maxHp;
+			int hasDeath2
+				= Game_IsZS1() ? (m_vid->m_unk0x290 || m_vid->m_noAnimCadr[16]) : (m_vid->m_unk0x290 != 0);
+			if (m_unk0x54 - p_hp > overkill && hasDeath2) {
 				ChangeAnimation(0x10);
 			}
 			else {
@@ -2229,7 +2318,12 @@ void SPRITE::ChangeHp(int p_hp)
 		}
 		int half2 = m_vid->m_maxHp[(m_flag >> 11) & 3] / 2;
 		if (p_hp <= half2 && m_unk0x54 > half2) {
-			ChangeAnimation(0xd);
+			if (Game_IsZS1() && !(m_vid->m_noAnimCadr[13] && (m_ani == 0 || m_ani == 2))) {
+				FireAniEvent(13, 0);
+			}
+			else {
+				ChangeAnimation(0xd);
+			}
 		}
 		m_unk0x54 = p_hp;
 	}

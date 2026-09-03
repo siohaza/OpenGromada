@@ -290,6 +290,17 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 				indexActive = 1;
 				break;
 			}
+			case 44:
+			case 45: {
+				int value = ((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1].Int();
+				if (operation == 44 ? value == 0 : value != 0) {
+					instruction += LOGIC_BYTECODE::ReadInt32(m_stackData + instruction);
+				}
+				else {
+					instruction += 4;
+				}
+				break;
+			}
 			default:
 				if ((unsigned char) m_stackData[instruction - 1] == 84) {
 					LOGICSTACK* top = &((LOGICSTACK*) m_stack.m_data)[stackCount - 1];

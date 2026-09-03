@@ -1,6 +1,8 @@
 
 #include "gfx/graph_core.h"
 
+#include "game/game_descriptor.h"
+
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/settings.h"
@@ -270,27 +272,50 @@ GRAPH_CORE::GRAPH_CORE(SETTINGS* p_settings)
 
 void GRAPH_CORE::ResolveDisplaySize()
 {
-	DISPLAY_MATH::RESOLUTION logical =
-		DISPLAY_MATH::ResolveInternal(m_outputWidth, m_outputHeight, m_renderWidth, m_nativeResolution != 0);
+	DISPLAY_MATH::RESOLUTION logical = DISPLAY_MATH::ResolveInternal(
+		m_outputWidth,
+		m_outputHeight,
+		m_renderWidth,
+		m_nativeResolution != 0,
+		GameDesc->m_uiBaseHeight
+	);
+	if (m_renderWidth <= 0 && GameDesc->m_fixedFrameWidth > 0) {
+		logical = {GameDesc->m_fixedFrameWidth, GameDesc->m_fixedFrameHeight};
+	}
 	m_width = (float) logical.m_width;
 	m_height = (float) logical.m_height;
-	m_uiScale = DISPLAY_MATH::ResolveUIScale(logical.m_width, logical.m_height, m_uiScaleSetting);
+	m_uiScale = DISPLAY_MATH::ResolveUIScale(
+		logical.m_width,
+		logical.m_height,
+		m_uiScaleSetting,
+		GameDesc->m_uiBaseWidth,
+		GameDesc->m_uiBaseHeight
+	);
 	m_uiPresentationScale = 1.0f;
 }
 
 int GRAPH_CORE::ConfigureFrameForMap(float p_mapWidth, float p_mapHeight, int p_gameplay)
 {
-	DISPLAY_MATH::RESOLUTION target =
-		DISPLAY_MATH::ResolveInternal(m_outputWidth, m_outputHeight, m_renderWidth, m_nativeResolution != 0);
+	DISPLAY_MATH::RESOLUTION target = DISPLAY_MATH::ResolveInternal(
+		m_outputWidth,
+		m_outputHeight,
+		m_renderWidth,
+		m_nativeResolution != 0,
+		GameDesc->m_uiBaseHeight
+	);
 	bool mapSafeNative = p_gameplay && m_nativeResolution && std::isfinite(p_mapWidth) && std::isfinite(p_mapHeight) &&
 						 p_mapWidth > 0.0f && p_mapHeight > 0.0f && p_mapWidth <= (float) INT_MAX &&
 						 p_mapHeight <= (float) INT_MAX;
+	if (m_renderWidth <= 0 && GameDesc->m_fixedFrameWidth > 0) {
+		target = {GameDesc->m_fixedFrameWidth, GameDesc->m_fixedFrameHeight};
+	}
 	if (mapSafeNative) {
 		target = DISPLAY_MATH::ResolveMapSafeInternal(
 			target,
 			{m_outputWidth, m_outputHeight},
 			(int) p_mapWidth,
-			(int) p_mapHeight
+			(int) p_mapHeight,
+			GameDesc->m_uiBaseHeight
 		);
 	}
 	return ConfigureFrameSize(target.m_width, target.m_height, mapSafeNative ? 1 : 0);
@@ -305,8 +330,20 @@ int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNativ
 {
 	DISPLAY_MATH::RESOLUTION target = {p_width, p_height};
 	const int targetUIScale =
-		p_mapSafeNative ? DISPLAY_MATH::ResolveGameplayUIScale(m_outputWidth, m_outputHeight, m_uiScaleSetting)
-						: DISPLAY_MATH::ResolveUIScale(target.m_width, target.m_height, m_uiScaleSetting);
+		p_mapSafeNative ? DISPLAY_MATH::ResolveGameplayUIScale(
+							  m_outputWidth,
+							  m_outputHeight,
+							  m_uiScaleSetting,
+							  GameDesc->m_uiBaseWidth,
+							  GameDesc->m_uiBaseHeight
+						  )
+						: DISPLAY_MATH::ResolveUIScale(
+							  target.m_width,
+							  target.m_height,
+							  m_uiScaleSetting,
+							  GameDesc->m_uiBaseWidth,
+							  GameDesc->m_uiBaseHeight
+						  );
 	float targetUIPresentationScale = 1.0f;
 	if (p_mapSafeNative && (target.m_width < m_outputWidth || target.m_height < m_outputHeight) && m_outputWidth > 0 &&
 		m_outputHeight > 0) {
@@ -440,7 +477,7 @@ int GRAPH_CORE::Init()
 	}
 
 	if (Platform_RenderOpen(
-			"Alien Shooter",
+			GameDesc->m_title,
 			m_outputWidth,
 			m_outputHeight,
 			w,

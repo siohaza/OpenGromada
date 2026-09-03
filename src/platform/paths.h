@@ -12,6 +12,8 @@ const char* Platform_BasePath();
 // Writable user directory with a trailing separator; ALIEN_SHOOTER_PREF_PATH overrides it.
 const char* Platform_PrefPath();
 
+void Platform_SetPrefApp(const char* p_app);
+
 // Executable path, or the base path when unavailable.
 const char* Platform_ExecutablePath();
 

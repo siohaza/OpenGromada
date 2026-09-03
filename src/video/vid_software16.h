@@ -20,6 +20,7 @@ public:
 	void DrawToVid(const SPRITE* p_sprite, const VID_TEXCOOR* p_texCoor, TEXTURE* p_texture, TEXTURE* p_zTexture);
 
 	void SetGammaToPalette(unsigned char* p_palette, const GAMMA& p_gamma);
+	virtual void SetReColorForArmy(unsigned int p_color);
 	int PaletteSize();
 
 private:

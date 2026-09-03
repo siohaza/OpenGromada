@@ -15,6 +15,9 @@ public:
 	SOUND_SAMPLE* m_samples[8]; // 0x24
 	int m_unk0x44;              // 0x44
 
+	unsigned int m_property;
+	int m_volume;
+
 	int MaxVoices() const
 	{
 		if (m_unk0x20 == 100) {

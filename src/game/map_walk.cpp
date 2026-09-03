@@ -8,7 +8,7 @@
 void MAP::PauseOff()
 {
 	if (m_flag & 0x10) {
-		for (int layer = 0; layer < 17; ++layer) {
+		for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 			int iterator;
 			SPRITE* sprite = FirstSprite(layer, &iterator);
 			while (sprite) {
@@ -25,7 +25,7 @@ void MAP::PauseOff()
 // FUNCTION: ALIEN 0x411440
 void MAP::DeleteExtraVid()
 {
-	for (int layer = 0; layer < 17; ++layer) {
+	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 		int iter;
 		for (SPRITE* sprite = FirstSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {
 			if (sprite->m_vid->m_pixelFlag16 & 0x200) {

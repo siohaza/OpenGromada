@@ -26,9 +26,11 @@ extern VID* EmptyVid;
 
 class MAP {
 public:
-	static constexpr int MAX_VIDS = 4096;
+	static constexpr int MAX_VIDS = 8192;
+	static constexpr int MAX_LAYERS = 21;
 	static constexpr int GETSPRITE_VID_LEGACY = 0x800;
 	static constexpr int GETSPRITE_VID = 0x2000;
+	static constexpr int GETSPRITE_VID_INDEX = 0x1fff;
 
 	static constexpr bool ValidVidIndex(int p_idx) { return (unsigned int) p_idx < MAX_VIDS; }
 
@@ -42,7 +44,7 @@ public:
 
 	static constexpr bool IsVidQuery(int p_query)
 	{
-		return (p_query & 0x3000) == GETSPRITE_VID || (p_query & 0x2800) == GETSPRITE_VID_LEGACY;
+		return (p_query & GETSPRITE_VID) != 0 || (p_query & 0x2800) == GETSPRITE_VID_LEGACY;
 	}
 
 	static constexpr int VidFromQuery(int p_query)
@@ -50,8 +52,17 @@ public:
 		if (!IsVidQuery(p_query)) {
 			return -1;
 		}
-		return p_query & ((p_query & 0x3000) == GETSPRITE_VID ? MAX_VIDS - 1 : GETSPRITE_VID_LEGACY - 1);
+		if (p_query & GETSPRITE_VID) {
+			return p_query & GETSPRITE_VID_INDEX;
+		}
+		return p_query & (GETSPRITE_VID_LEGACY - 1);
 	}
+
+	static bool IsVidQueryFor(int p_query);
+	static int VidFromQueryFor(int p_query);
+
+	static int LayerCount();
+	static int LayerWalkCount();
 
 	MAP(STRING& p_argv, SETTINGS* p_settings);
 	virtual ~MAP(); // 0x00
@@ -87,7 +98,7 @@ public:
 	float m_shiftY2;                                // 0x4c
 	float m_shiftX;                                 // 0x50
 	float m_shiftY;                                 // 0x54
-	SPRITE_LIST m_layers[17];                       // 0x58
+	SPRITE_LIST m_layers[MAX_LAYERS];
 	LOGIC m_logic;                                  // 0x168
 	RESOURCE m_resource;                            // 0x1c0
 	RELATION m_relation;                            // 0x200
@@ -201,12 +212,21 @@ extern int EvFunctionNumber[64];
 static_assert(MAP::ValidVidIndex(2047));
 static_assert(MAP::ValidVidIndex(2048));
 static_assert(MAP::ValidVidIndex(4095));
+static_assert(MAP::ValidVidIndex(4096));
+static_assert(MAP::ValidVidIndex(8191));
+static_assert(!MAP::ValidVidIndex(8192));
+
 static_assert(!MAP::ValidVidIndex(-1));
-static_assert(!MAP::ValidVidIndex(4096));
+
 static_assert(sizeof(((MAP*) 0)->m_vids) / sizeof(VID*) == MAP::MAX_VIDS);
 static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(2047)) == 2047);
 static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(2048)) == 2048);
 static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(4095)) == 4095);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(4096)) == 4096);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(8191)) == 8191);
+static_assert(MAP::MakeVidQuery(4096) == 0x3000);
+static_assert(MAP::MakeVidQuery(8191) == 0x3fff);
+
 static_assert(MAP::MakeVidQuery(0) == 0x2000);
 static_assert(MAP::MakeVidQuery(2047) == 0x27ff);
 static_assert(MAP::MakeVidQuery(2048) == 0x2800);
@@ -222,14 +242,16 @@ static_assert(MAP::VidFromQuery(0x9015) == -1);
 static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(0) | 0x18000) == 0);
 static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(4095) | 0x18000) == 4095);
 static_assert(MAP::MakeVidQuery(-1) == 0);
-static_assert(MAP::MakeVidQuery(4096) == 0);
+static_assert(MAP::MakeVidQuery(8192) == 0);
 static_assert(MAP::IsVidQuery(MAP::GETSPRITE_VID));
 static_assert(MAP::VidFromQuery(MAP::GETSPRITE_VID) == 0);
-static_assert(!MAP::IsVidQuery(-1));
-static_assert(!MAP::IsVidQuery(0x3000));
-static_assert(!MAP::IsVidQuery(0x3fff));
-static_assert(MAP::VidFromQuery(-1) == -1);
-static_assert(MAP::VidFromQuery(0x3000) == -1);
-static_assert(MAP::VidFromQuery(0x3fff) == -1);
+static_assert(MAP::IsVidQuery(0x3000));
+static_assert(MAP::IsVidQuery(0x3fff));
+static_assert(MAP::VidFromQuery(0x3000) == 4096);
+static_assert(MAP::VidFromQuery(0x3fff) == 8191);
+static_assert(!MAP::IsVidQuery(0x400000));
+static_assert(!MAP::IsVidQuery(0x1000 | 10));
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(5000) | 0x80000000) == 5000);
+static_assert(MAP::VidFromQuery(MAP::MakeVidQuery(5000) | 0xf8000) == 5000);
 
 #endif

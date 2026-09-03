@@ -144,6 +144,15 @@ const char* Platform_BasePath()
 	return g_basePath.c_str();
 }
 
+static std::string g_prefApp = "AlienShooter";
+
+void Platform_SetPrefApp(const char* p_app)
+{
+	if (p_app && *p_app) {
+		g_prefApp = p_app;
+	}
+}
+
 const char* Platform_PrefPath()
 {
 	if (g_prefPath.empty()) {
@@ -152,7 +161,7 @@ const char* Platform_PrefPath()
 			SetOverrideDirectoryPath(g_prefPath, overridePath);
 		}
 		else {
-			char* pref = SDL_GetPrefPath("SigmaTeam", "AlienShooter");
+			char* pref = SDL_GetPrefPath("SigmaTeam", g_prefApp.c_str());
 			if (pref) {
 				SetDirectoryPath(g_prefPath, pref);
 				SDL_free(pref);

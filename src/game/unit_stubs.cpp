@@ -1,3 +1,4 @@
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/unit.h"
@@ -315,7 +316,8 @@ decomp_intptr UNIT::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	}
 	case 85: { // ACT_DAMAGE
 		decomp_intptr result = TERRAIN::Action(p_action, p_a, p_b, p_c);
-		if (p_a >= 0 && 0 == (m_flag & 0x7c) && (m_exData ? m_exData->m_unk0x20 : m_vid->m_unk0x2c) != 0.0f) {
+		if (!Game_IsZS1() && p_a >= 0 && 0 == (m_flag & 0x7c) &&
+			(m_exData ? m_exData->m_unk0x20 : m_vid->m_unk0x2c) != 0.0f) {
 			unsigned char dir = GameRand() % 256;
 			float z = m_z;
 			float y = m_y;
@@ -378,7 +380,7 @@ decomp_intptr UNIT::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	case 97: { // ACT_SET_ARMY
 		state = (m_flag >> 11) & 3;
 		ChangeArmy(p_a);
-		if (state != ((m_flag >> 11) & 3) && m_vid->m_idx == 104) {
+		if (!Game_IsZS1() && state != ((m_flag >> 11) & 3) && m_vid->m_idx == 104) {
 			Map->ScriptRun(EvFunctionNumber[15], this, 0, 0);
 		}
 		break;

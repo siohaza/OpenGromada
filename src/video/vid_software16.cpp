@@ -30,6 +30,61 @@ int VID_SOFTWARE16::PaletteSize()
 	return ((m_pixelFlag & 2) != 0 ? 4 : 2) << 8;
 }
 
+void VID_SOFTWARE16::SetReColorForArmy(unsigned int p_color)
+{
+	if (m_pixelFlag & 2) {
+		VID_SOFTWARE::SetReColorForArmy(p_color);
+		return;
+	}
+	unsigned char* base = PrepareRecolor();
+	if (!base) {
+		return;
+	}
+	int palSize = PaletteSize();
+
+	const unsigned short* pristine = (const unsigned short*) m_recolorBase;
+	unsigned short* entries = (unsigned short*) base;
+	int destB = p_color & 0xff;
+	int destG = (p_color >> 8) & 0xff;
+	int destR = (p_color >> 16) & 0xff;
+	for (int i = 0; i < palSize / 2; ++i) {
+		unsigned short packed = pristine[i];
+		int b = (packed & 0x1f) << 3;
+		int g = ((packed << (8 - RGB16_gShift)) & 0xff00) >> 8;
+		int r = ((packed << (16 - RGB16_rShift)) & 0xff0000) >> 16;
+		float key = (float) r * (1.0f / 148.0f);
+		if (r <= 0x14 || g > (int) (key * 80.0f) || abs(r - b) > (int) (key * 30.0f)) {
+			continue;
+		}
+		float scale = (float) r * 0.0078125f;
+		int nb = (int) ((float) destB * scale);
+		int ng = (int) ((float) destG * scale);
+		int nr = (int) ((float) destR * scale);
+		nb = nb < 0 ? 0 : nb > 255 ? 255 : nb;
+		ng = ng < 0 ? 0 : ng > 255 ? 255 : ng;
+		nr = nr < 0 ? 0 : nr > 255 ? 255 : nr;
+		nb += g;
+		ng += g;
+		nr += g;
+		nb = nb > 255 ? 255 : nb;
+		ng = ng > 255 ? 255 : ng;
+		nr = nr > 255 ? 255 : nr;
+		unsigned int value = ((unsigned int) nr << 16) | ((unsigned int) ng << 8) | (unsigned int) nb;
+		entries[i] = (unsigned short) (((value >> 3) & 0x1f) | (RGB16_rMask & (value >> (16 - RGB16_rShift))) |
+									   (RGB16_gMask & (value >> (8 - RGB16_gShift))));
+	}
+
+	if (m_pixelFlag16 & 0x400) {
+		SetGamma(m_gamma[0], 0);
+		SetGamma(m_gamma[1], 1);
+		SetGamma(m_gamma[2], 2);
+		SetGamma(m_gamma[3], 3);
+	}
+	else {
+		SetGamma(*(const GAMMA*) &m_colorSub, 4);
+	}
+}
+
 extern int RGB16_rMask;
 extern int RGB16_gMask;
 

@@ -2,6 +2,7 @@
 #define EX_SPRITE_DATA_H
 
 #include "util/decomp.h"
+#include "util/string.h"
 
 class SPRITE;
 class STREAM;
@@ -80,6 +81,8 @@ public:
 	int m_unk0x24;          // 0x24
 	int m_unk0x28;          // 0x28
 	LIST_INT m_list;        // 0x2c
+
+	STRING m_spriteName;
 };
 
 #endif

@@ -1,5 +1,6 @@
 #include "game/man.h"
 
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "gfx/graph.h"
@@ -191,18 +192,42 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			if (m_invulnerable) {
 				return 0;
 			}
-			if (m_vid->m_idx != 350) {
+			if (m_vid->m_idx != 350 && !(Game_IsZS1() && m_vid->m_idx == 1987)) {
 				for (SPRITE* p = m_child; p; p = p->m_child) {
 					int idx = p->m_vid->m_idx;
 					if (idx == 203 || idx == 181) {
 						return 0;
 					}
 				}
-				for (SPRITE* c = m_child; c; c = c->m_child) {
-					int idx = c->m_vid->m_idx;
-					if (idx >= 200 && idx <= 202) {
-						c->Action(0x55, (dmg * g_damagePercent[idx - 200] + 50) / 100, p_b, p_c);
-						dmg += dmg * g_damagePercent[c->m_vid->m_idx - 200] / -100;
+				if (Game_IsZS1()) {
+					for (SPRITE* c = m_child; c; c = c->m_child) {
+						int idx = c->m_vid->m_idx;
+						if (idx < 200 || idx > 202) {
+							continue;
+						}
+						int vestHp = c->m_unk0x54;
+						if (vestHp <= 0) {
+							break;
+						}
+						int tier = vestHp < 100 ? 0 : (vestHp >= 150 ? 2 : 1);
+						if ((dmg * g_damagePercent[tier] + 50) / 100 >= vestHp) {
+							c->FireAniEvent(15, 0);
+							c->ScalarDeletingDestructor(1);
+						}
+						else {
+							c->m_unk0x54 = vestHp - (dmg * g_damagePercent[tier] + 50) / 100;
+						}
+						dmg += dmg * g_damagePercent[tier] / -100;
+						break;
+					}
+				}
+				else {
+					for (SPRITE* c = m_child; c; c = c->m_child) {
+						int idx = c->m_vid->m_idx;
+						if (idx >= 200 && idx <= 202) {
+							c->Action(0x55, (dmg * g_damagePercent[idx - 200] + 50) / 100, p_b, p_c);
+							dmg += dmg * g_damagePercent[c->m_vid->m_idx - 200] / -100;
+						}
 					}
 				}
 			}

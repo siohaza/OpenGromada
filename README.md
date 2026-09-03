@@ -1,36 +1,37 @@
-# Alien Shooter
+# OpenGromada
+
+Reverse engineered engine that is used in variety of games developed by Sigma Games and some of 3rdparty games using this engine. Naming comes from the internal naming of the engine in registry code.
 
 ## Features
 
+- Supports Alien Shooter/Zombie Shooter
 - Cross-platform and cross-arch support
 - Widescreen resolution support
 - Gamepad support
-- Bumped engine limits. Use `GETSPRITE_VID + nvid` for the
+- Bumped engine limits up to 8192. Use `GETSPRITE_VID + nvid` for the
 entire range
 
 ## Building
 
 Requirements:
 
-- CMake
+- CMake/Premake
 - C++20 compiler
 - SDL3
+- Steamworks SDK (optional, needed only for Steam's AS1)
 
 ```sh
 cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
 cmake --build build/native --parallel
 ```
 
-The single-configuration executable is `build/native/AlienShooter` on Unix-like
-systems or `AlienShooter.exe` on Windows.
+The single-configuration executable is `build/native/OpenGromada` on Unix-like
+systems or `OpenGromada.exe` on Windows.
 
-Game assets are not distributed here. Use the data from the
-[GOG release](https://www.gog.com/en/game/alien_shooter_expansions), [Steam release](https://store.steampowered.com/app/33100/) (v1.22) or retail
-Alien Shooter 1.2.
 
 Place the executable beside `objects.res` and
 the game's data directories. Alternatively, point to that directory with
-`--data-path="/path/to/Alien Shooter"`.
+`--data-path="/path/to/game"`.
 
 ## Runtime options
 
@@ -45,6 +46,7 @@ the game's data directories. Alternatively, point to that directory with
 | `--vsync` / `--no-vsync` | Turns vertical sync on or off. |
 | `--red-blood` | Shows the original red blood effects. |
 | `--data-path=PATH` | Sets the folder that holds the game data. |
+| `--game=as1\|zs1` | Overrides game detection. Without it, the engine identifies the game from `objects.res`. |
 | `--pref-path=PATH` | Sets the folder for saves, settings, and logs. |
 | `--config=PATH` / `--script=PATH` | Loads an extra configuration file |
 
@@ -54,9 +56,9 @@ Writable configuration, progress, saves, and logs use SDL's
 [per-user preference directory](https://wiki.libsdl.org/SDL3/SDL_GetPrefPath).
 The default locations are:
 
-- Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/SigmaTeam/AlienShooter/`
-- Windows: `%APPDATA%\SigmaTeam\AlienShooter\`
-- macOS: `~/Library/Application Support/SigmaTeam/AlienShooter/`
+- Linux: `${XDG_DATA_HOME:-$HOME/.local/share}/SigmaTeam/`
+- Windows: `%APPDATA%\SigmaTeam\`
+- macOS: `~/Library/Application Support/SigmaTeam/`
 
 ## License
 

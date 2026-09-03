@@ -3,6 +3,8 @@
 #include "audio/sound.h"
 #include "game/const.h"
 #include "game/data_version.h"
+#include "game/game_descriptor.h"
+#include "game/zs1_commands.h"
 #include "game/engine.h"
 #include "game/filedata.h"
 #include "game/gametime.h"
@@ -503,6 +505,40 @@ int MAP::StartTact()
 		ProcessEvent(event);
 	}
 	m_input.ApplyGamepad(delta);
+
+	{
+		static const char* schedule = 0;
+		static int scheduleRead;
+		if (!scheduleRead) {
+			scheduleRead = 1;
+			schedule = SDL_getenv("ALIEN_AUTOKEYS");
+		}
+		if (schedule) {
+			static unsigned int startTime;
+			if (!startTime) {
+				startTime = Platform_Ticks();
+			}
+			static int fired[32];
+			unsigned int elapsed = Platform_Ticks() - startTime;
+			const char* p = schedule;
+			for (int i = 0; i < 32 && p && *p; ++i) {
+				int when = atoi(p);
+				const char* colon = strchr(p, ':');
+				if (!colon) {
+					break;
+				}
+				int key = atoi(colon + 1);
+				if (!fired[i] && (int) elapsed >= when) {
+					fired[i] = 1;
+					m_input.m_key = key;
+					MYERROR::Log(::Error, "AUTOKEY: %i at %ums", key, elapsed);
+				}
+				const char* comma = strchr(colon, ',');
+				p = comma ? comma + 1 : 0;
+			}
+		}
+	}
+
 	Platform_StorePump();
 	return m_quit;
 }
@@ -620,8 +656,8 @@ inline static int IsSpriteCorrectForGetSprite(const SPRITE* p_sprite, int p_quer
 SPRITE* MAP::GetSprite(int p_type, float p_x, float p_y, SPRITE* p_prev)
 {
 	bool menuQuery = false;
-	int queryVid = VidFromQuery(p_type);
-	if (IsVidQuery(p_type) && VidExist(queryVid)) {
+	int queryVid = VidFromQueryFor(p_type);
+	if (IsVidQueryFor(p_type) && VidExist(queryVid)) {
 		int spriteClass = m_vids[queryVid]->m_sprClass;
 		menuQuery = spriteClass == 10 || spriteClass == 19;
 	}
@@ -711,10 +747,11 @@ inline static int IsSpriteCorrectForGetSprite(const SPRITE* p_sprite, int p_quer
 	if ((p_query & 0x80000000) && 0 != (p_sprite->m_flag & 0x7c)) {
 		return 0;
 	}
-	if ((p_query & 0x1000) && (int) p_sprite->m_vid->m_sprClass != (p_query & 0x7ff)) {
+	if (!MAP::IsVidQueryFor(p_query) && (p_query & 0x1000) &&
+		(int) p_sprite->m_vid->m_sprClass != (p_query & 0x7ff)) {
 		return 0;
 	}
-	if (MAP::IsVidQuery(p_query) && p_sprite->m_vid->m_idx != MAP::VidFromQuery(p_query)) {
+	if (MAP::IsVidQueryFor(p_query) && p_sprite->m_vid->m_idx != MAP::VidFromQueryFor(p_query)) {
 		return 0;
 	}
 	return 1;
@@ -762,8 +799,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 
 	int type;
 	int iter = 0;
-	if (IsVidQuery(p_type)) { // GETSPRITE_VID
-		int idx = VidFromQuery(p_type);
+	if (IsVidQueryFor(p_type)) {
+		int idx = VidFromQueryFor(p_type);
 		VID* vid = VidExist(idx) ? m_vids[idx] : EmptyVid;
 		if (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] + vid->m_entitiesNumber[3] ==
 			0) {
@@ -819,7 +856,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 		return result;
 	}
 
-	if (IsVidQuery(p_type) && (int) GetVid(VidFromQuery(p_type))->m_sprClass == 10) { // B_FRAME
+	if (IsVidQueryFor(p_type) && ((int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 10 ||
+								  (Game_IsZS1() && (int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 19))) {
 		for (SPRITE* sprite = LastMenuSprite(m_menu, &iter); sprite; sprite = NextMenuSprite(m_menu, &iter)) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
 				((0x10000u << ((sprite->m_flag >> 11) & 3)) & army) && IsSpriteCorrectForGetSprite(sprite, p_type) &&
@@ -834,8 +872,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 	}
 
 	if (type & U_REGION) {
-		int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
-		int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
+		int startLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer : 0;
+		int endLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer + 1 : LayerWalkCount();
 		for (int layer = startLayer; layer < endLayer; ++layer) {
 			iter = m_layers[layer].m_n;
 			SPRITE* sprite = NextSprite(layer, &iter);
@@ -861,8 +899,8 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 		}
 	}
 	else {
-		int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
-		int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
+		int startLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer : 0;
+		int endLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer + 1 : LayerWalkCount();
 		for (int layer = startLayer; layer < endLayer; ++layer) {
 			iter = m_layers[layer].m_n;
 			SPRITE* sprite = NextSprite(layer, &iter);
@@ -917,8 +955,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		army = 0xf0000;
 	}
 
-	if (IsVidQuery(p_type)) { // GETSPRITE_VID
-		int idx = VidFromQuery(p_type);
+	if (IsVidQueryFor(p_type)) {
+		int idx = VidFromQueryFor(p_type);
 		VID* vid = GetVid(idx);
 		if (vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] + vid->m_entitiesNumber[3] ==
 			0) {
@@ -970,8 +1008,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		return result;
 	}
 
-	if (IsVidQuery(p_type) && ((int) GetVid(VidFromQuery(p_type))->m_sprClass == 10        // B_FRAME
-							   || (int) GetVid(VidFromQuery(p_type))->m_sprClass == 19)) { // B_TEXT
+	if (IsVidQueryFor(p_type) && ((int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 10
+							   || (int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 19)) {
 		for (SPRITE* sprite = LastMenuSprite(m_menu, &iter); sprite; sprite = NextMenuSprite(m_menu, &iter)) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
 				((0x10000u << ((sprite->m_flag >> 11) & 3)) & army) && IsSpriteCorrectForGetSprite(sprite, p_type)) {
@@ -986,8 +1024,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		return result;
 	}
 
-	int startLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer : 0;
-	int endLayer = IsVidQuery(p_type) ? GetVid(VidFromQuery(p_type))->m_layer + 1 : 16;
+	int startLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer : 0;
+	int endLayer = IsVidQueryFor(p_type) ? GetVid(VidFromQueryFor(p_type))->m_layer + 1 : LayerWalkCount();
 	for (int layer = startLayer; layer < endLayer; ++layer) {
 		iter = m_layers[layer].m_n;
 		SPRITE* sprite = NextSprite(layer, &iter);
@@ -1084,7 +1122,7 @@ void MAP::LoadVid(RESOURCE* p_res)
 				// STRING: ALIEN 0x4829c0
 				"LoadWeapon::No=%-5i             sizeof(WEAPON)=%-4i",
 				noWeapon,
-				612
+				GameDesc->m_weapRecordBytes
 			);
 		}
 	}
@@ -1145,7 +1183,7 @@ void MAP::LoadVid(RESOURCE* p_res)
 			VID* vid = m_vids[idx];
 			int weapon = vid->m_weaponIdx;
 			if (weapon < m_noWeapon) {
-				vid->m_exData = (VID_EXDATA*) ((char*) m_weapon + 612 * weapon);
+				vid->m_exData = (VID_EXDATA*) m_weapon + weapon;
 			}
 			else {
 				vid->Error(
@@ -1245,34 +1283,73 @@ int MAP::LoadWeapon(RESOURCE* p_res)
 		operator delete(m_weapon);
 	}
 	m_weapon = 0;
-	int result = p_res->Load(0x50414557, &m_weapon, 0x264);
-	int i = 0;
-	m_noWeapon = result;
-	if (result > 0) {
-		int off = 580;
-		do {
-			int o = off;
-			int n = 8;
-			do {
-				unsigned char* first = (unsigned char*) m_weapon + o - 32;
-				if (PackedRead<int>(first) != 0x497423f0) {
-					float v = PackedRead<float>(first);
-					PackedWrite<float>(first, v * 0.001f);
-				}
-				unsigned char* second = (unsigned char*) m_weapon + o;
-				if (PackedRead<int>(second) != 0x497423f0) {
-					float v = PackedRead<float>(second);
-					PackedWrite<float>(second, v * 0.001f);
-				}
-				o += 4;
-				--n;
-			} while (n);
-			result = m_noWeapon;
-			++i;
-			off += 612;
-		} while (i < result);
+	int count = p_res->GetNoSubRes(0x50414557);
+	if (count <= 0) {
+		return p_res->Load(0x50414557, &m_weapon, sizeof(VID_EXDATA));
 	}
-	return result;
+	m_noWeapon = count;
+	VID_EXDATA* weapons = (VID_EXDATA*) operator new(sizeof(VID_EXDATA) * count);
+	memset(weapons, 0, sizeof(VID_EXDATA) * count);
+	m_weapon = weapons;
+	p_res->GoBegin(0x50414557);
+
+	if (p_res->m_subSize != GameDesc->m_weapRecordBytes) {
+		MYERROR::LogExit(
+			::Error,
+			"LoadWeapon: WEAP record is %i bytes, expected %i for %s data",
+			p_res->m_subSize,
+			GameDesc->m_weapRecordBytes,
+			GameDesc->m_className
+		);
+	}
+
+	for (int i = 0; i < count; ++i) {
+		VID_EXDATA* w = &weapons[i];
+		if (Game_IsZS1()) {
+			p_res->Read(&w->m_unk0x00, 4);
+			p_res->Read(&w->m_unk0x04, 4);
+			p_res->Read(&w->m_unk0x08, 4);
+			p_res->Read(&w->m_unk0x0c, 4);
+			p_res->Read(&w->m_unk0x10, 4);
+			p_res->Read(&w->m_detectPeriod, 4);
+			p_res->Read(&w->m_unk0x14, 4);
+			p_res->Read(&w->m_unk0x18, 4);
+			p_res->Read(&w->m_unk0x1c, 4);
+			p_res->Read(&w->m_fireInVolley, 4);
+			p_res->Read(&w->m_maxAmmo, 4);
+			p_res->Read(&w->m_unk0x20, 4);
+			p_res->Read(&w->m_reloadTimeInVolley, 4);
+			p_res->Read(&w->m_buildTime, 4);
+			p_res->Read(&w->m_army, 4);
+			p_res->Read(&w->m_defaultBehavior, 4);
+			p_res->Read(w->m_unk0x34, 4);
+			FILE* file = p_res->m_file;
+			p_res->m_state = 2;
+			fseek(file, 16, SEEK_CUR);
+			p_res->Read(&w->m_unk0x38, 4);
+			p_res->Read(&w->m_unk0x3c, 4);
+			p_res->Read(&w->m_unk0x40, 4);
+			p_res->Read(w->m_unk0x44, 0x220);
+		}
+		else {
+			p_res->Read(w, 0x264);
+		}
+		p_res->GoNextSub(0x50414557);
+	}
+
+	for (int i = 0; i < count; ++i) {
+		for (int j = 0; j < 8; ++j) {
+			unsigned char* speed = (unsigned char*) &weapons[i].m_speed[j];
+			if (PackedRead<int>(speed) != 0x497423f0) {
+				PackedWrite<float>(speed, PackedRead<float>(speed) * 0.001f);
+			}
+			unsigned char* zSpeed = (unsigned char*) &weapons[i].m_zSpeed[j];
+			if (PackedRead<int>(zSpeed) != 0x497423f0) {
+				PackedWrite<float>(zSpeed, PackedRead<float>(zSpeed) * 0.001f);
+			}
+		}
+	}
+	return count;
 }
 
 // FUNCTION: ALIEN 0x411920
@@ -1379,6 +1456,57 @@ void MAP::CreateEmptyHardwareGround()
 int MAP::Tact()
 {
 	return 0;
+}
+
+
+static unsigned int EncodeGammaPacked(const GAMMA& p_gamma)
+{
+	static const unsigned int masks[4] = {0x7f, 0x7f80, 0x7f8000, 0xff800000};
+	static const unsigned int signs[4] = {0x80, 0x8000, 0x800000, 0x80000000};
+	unsigned int packed = 0;
+	for (int i = 0; i < 4; ++i) {
+		unsigned int add = ((unsigned int) p_gamma.m_a >> 1) & masks[i];
+		unsigned int sub = ((unsigned int) p_gamma.m_b >> 1) & masks[i];
+		if (sub) {
+			packed |= (~sub & masks[i]) | signs[i];
+		}
+		else {
+			packed |= add;
+		}
+	}
+	return packed;
+}
+
+bool MAP::IsVidQueryFor(int p_query)
+{
+	if (p_query & GETSPRITE_VID) {
+		return true;
+	}
+	if (Game_IsZS1()) {
+		return (p_query & 0xfff) != 0 && !(p_query & 0x1000);
+	}
+	return IsVidQuery(p_query);
+}
+
+int MAP::VidFromQueryFor(int p_query)
+{
+	if (p_query & GETSPRITE_VID) {
+		return p_query & GETSPRITE_VID_INDEX;
+	}
+	if (Game_IsZS1()) {
+		return IsVidQueryFor(p_query) ? p_query & 0xfff : -1;
+	}
+	return VidFromQuery(p_query);
+}
+
+int MAP::LayerCount()
+{
+	return Game_IsZS1() ? 21 : 17;
+}
+
+int MAP::LayerWalkCount()
+{
+	return Game_IsZS1() ? 20 : 16;
 }
 
 // FUNCTION: ALIEN 0x4335d0
@@ -1552,15 +1680,29 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 76: { // script: FirstSprite()
-		spriteLayer = 0;
-		spriteIterator = m_layers[0].m_n;
-		SPRITE* sprite = NextSprite(0, &spriteIterator);
+		SPRITE* sprite = 0;
+		if (Game_IsZS1()) {
+			spriteLayer = -1;
+			while (spriteLayer < LayerWalkCount()) {
+				++spriteLayer;
+				spriteIterator = m_layers[spriteLayer].m_n;
+				sprite = NextSprite(spriteLayer, &spriteIterator);
+				if (sprite) {
+					break;
+				}
+			}
+		}
+		else {
+			spriteLayer = 0;
+			spriteIterator = m_layers[0].m_n;
+			sprite = NextSprite(0, &spriteIterator);
+		}
 		m_logic.PushObject(sprite);
 		return 0;
 	}
 	case 77: { // script: NextSprite()
 		SPRITE* sprite = NextSprite(spriteLayer, &spriteIterator);
-		while (!sprite && spriteLayer < 16) {
+		while (!sprite && spriteLayer < LayerWalkCount()) {
 			++spriteLayer;
 			spriteIterator = m_layers[spriteLayer].m_n;
 			sprite = NextSprite(spriteLayer, &spriteIterator);
@@ -1579,13 +1721,18 @@ VID** MAP::ExecFunc(int p_cmd)
 				sprite->ChangeAnimation(action);
 			}
 			else {
-				if (action == 0x79) {
+				if (action == 0x79 || (Game_IsZS1() && (action == 124 || action == 125))) {
 					decomp_intptr result = sprite->Action(action, var1, var2, var3);
-					m_logic.PushStr(*reinterpret_cast<const STRING*>(result));
+					if (result) {
+						m_logic.PushStr(*reinterpret_cast<const STRING*>(result));
+					}
+					else {
+						m_logic.PushStr(STRING(""));
+					}
 					return 0;
 				}
 				if (action == 0x5a || action == 0x9c || action == 0x9b || action == 0x9a || action == 0x65 ||
-					action == 0x67 || action == 0x63) {
+					action == 0x67 || (action == 0x63 && !Game_IsZS1())) {
 					decomp_intptr result = sprite->Action(action, var1, var2, var3);
 					m_logic.PushObject(reinterpret_cast<const void*>(result));
 					return 0;
@@ -1729,7 +1876,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		if (m_resource.m_file) {
 			return 0;
 		}
-		m_resource.OpenForWrite(*PopStr(), 0x4f4d4544); // 'DEMO'
+		m_resource.OpenForWrite(*PopStr(), 0x4f4d4544);
 		return 0;
 	case 101: { // script: MenuFind(nvid, ndir=999999)
 		int ndir = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
@@ -1751,7 +1898,9 @@ VID** MAP::ExecFunc(int p_cmd)
 			for (int i = 0; i < m_menu.m_n; ++i) {
 				SPRITE* sprite = (SPRITE*) m_menu.m_data[i];
 				if (sprite->m_vid == vid &&
-					(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)))) {
+					(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)) ||
+					 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 &&
+					  ndir - 999000 == (int) sprite->m_dir))) {
 					m_logic.PushObject(sprite);
 					return 0;
 				}
@@ -1782,7 +1931,7 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 105: // script: NDirUnderCursor()
 		m_logic.PushInt((int) m_menu.NDirUnderCursor());
 		return 0;
-	case 106: { // script: MenuAction(nvid, ndir, action, var1=0, var2=0, var3=0)
+	case 106: {
 		decomp_intptr var3 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
 		decomp_intptr var2 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
 		decomp_intptr var1 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
@@ -1805,7 +1954,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		for (int i = 0; i < m_menu.m_n; ++i) {
 			SPRITE* sprite = (SPRITE*) m_menu.m_data[i];
 			if (sprite->m_vid == vid &&
-				(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)))) {
+				(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)) ||
+				 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 &&
+				  ndir - 999000 == (int) sprite->m_dir))) {
 
 				if (action >= 17) {
 					sprite->Action(action, var1, var2, var3);
@@ -1994,7 +2145,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		}
 		return 0;
 	}
-	case 129: { // script: send cursor action 63 with two parameters
+	case 129: {
 		int val1 = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
 		int val2 = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
 		Mouse->Action(0x3f, val2, val1, 0);
@@ -2011,10 +2162,14 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 132: // script: PlaySFX(sfxId)
 		Sound->PlaySFX(InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n), 0, 0);
 		return 0;
-	case 133: // script: StopSFX(sfxId)
+	case 133:
 		Sound->StopSFX(InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n));
 		return 0;
-	case 134: // script: StopMusic()
+	case 134:
+		if (Game_IsZS1()) {
+			Sound->StopMusicFade(PopInt());
+			return 0;
+		}
 		Sound->StopMusic();
 		return 0;
 	case 135: { // script: PlaySFXFromCoor(sfx, x, y) - play a sound at a screen position
@@ -2032,8 +2187,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 136: { // script: PlayMusicFile(file, loop=1)
+		int fadeMs = Game_IsZS1() ? PopInt() : 0;
 		int loop = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
-		Sound->FadeAndPlayFile(*PopStr(), loop);
+		Sound->FadeAndPlayFile(*PopStr(), loop, fadeMs);
 		return 0;
 	}
 	case 137: { // script: Effect(effect, var1, var2, duration)
@@ -2207,7 +2363,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	case 155: { // script: Random(n) - uniform value in 0..n
 		int n = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
-		m_logic.PushInt(GameRand() % (n + 1));
+		m_logic.PushInt(n > 0 ? GameRand() % (n + 1) : 0);
 		return 0;
 	}
 	case 156: { // script: ChangeZUnit(vidIdx, z) - set the z of every sprite of a vid type
@@ -2266,8 +2422,12 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushObject((void*) Hash->CanPlace(vid, (float) x, (float) y, (float) z));
 		return 0;
 	}
-	case 162: { // script: GetVidData(nvid, type)
+	case 162: {
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		if (Game_IsZS1() && type == 245) {
+			PushInt(VidExists(PopInt()) ? 1 : 0);
+			return 0;
+		}
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x4840c4
 			"for GetVid"
@@ -2277,13 +2437,64 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 		switch (type) {
-		case 1: // script: VID_MAXHP
+		case 1:
 			PushInt(vid->m_defaultMaxHp);
 			return 0;
-		case 23: // script: VID_BATTLERANGE
+		case 18:
+		case 19:
+		case 20:
+		case 21:
+			if (Game_IsZS1()) {
+				PushInt((int) EncodeGammaPacked(vid->m_gamma[type - 18]));
+				return 0;
+			}
+			break;
+		case 22:
+			if (Game_IsZS1()) {
+				PushInt(vid->m_flag);
+				return 0;
+			}
+			break;
+		case 23:
 
 			PushInt((int) vid->m_exData->m_unk0x18);
 			return 0;
+		case 52:
+			if (Game_IsZS1()) {
+				PushInt(vid->m_mirror ? vid->m_mirror->m_idx : vid->m_idx);
+				return 0;
+			}
+			break;
+		case 130:
+			if (Game_IsZS1()) {
+				PushInt(vid->m_exData->m_unk0x20);
+				return 0;
+			}
+			break;
+		case 134:
+			if (Game_IsZS1()) {
+				PushInt((int) vid->m_blastRadius);
+				return 0;
+			}
+			break;
+		case 239:
+		case 240:
+		case 241:
+			if (Game_IsZS1()) {
+				float size = type == 239 ? vid->m_footprintWidth : type == 240 ? vid->m_footprintHeight : vid->m_unk0x24;
+				PushInt((int) size);
+				return 0;
+			}
+			break;
+		case 242:
+		case 243:
+		case 244:
+			if (Game_IsZS1()) {
+				float scale = type == 242 ? vid->m_gammaR : type == 243 ? vid->m_gammaG : vid->m_gammaB;
+				PushInt((int) (scale * 1000.0f));
+				return 0;
+			}
+			break;
 		case 26: // script: VID_AMMO
 			PushInt(vid->GetMaxAmmo());
 			return 0;
@@ -2388,10 +2599,13 @@ VID** MAP::ExecFunc(int p_cmd)
 				"GetVid type",
 				type
 			);
+			if (Game_IsZS1()) {
+				PushInt(0);
+			}
 			return 0;
 		}
 	}
-	case 163: { // script: SetVidData(nvid, type, value)
+	case 163: {
 		int value = PopInt();
 		int type = PopInt();
 		VID* vid = PopVid(
@@ -2402,9 +2616,55 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 		switch (type) {
-		case 1: // script: VID_MAXHP
+		case 1:
 			vid->m_defaultMaxHp = value;
 			return 0;
+		case 23:
+			if (Game_IsZS1()) {
+				vid->m_exData->m_unk0x18 = (float) value;
+				return 0;
+			}
+			break;
+		case 125:
+			if (Game_IsZS1()) {
+				vid->SetReColorForArmy((unsigned int) value);
+				return 0;
+			}
+			break;
+		case 130:
+			if (Game_IsZS1()) {
+				vid->m_exData->m_unk0x20 = value;
+				return 0;
+			}
+			break;
+		case 134:
+			if (Game_IsZS1()) {
+				vid->m_blastRadius = (float) value;
+				return 0;
+			}
+			break;
+		case 239:
+		case 240:
+		case 241:
+			if (Game_IsZS1()) {
+				float* size = type == 239 ? &vid->m_footprintWidth : type == 240 ? &vid->m_footprintHeight : &vid->m_unk0x24;
+				*size = (float) value;
+				if (type != 241) {
+					vid->m_unk0x384 = vid->m_footprintWidth * 0.5f;
+					vid->m_unk0x388 = vid->m_footprintHeight * 0.5f;
+				}
+				return 0;
+			}
+			break;
+		case 242:
+		case 243:
+		case 244:
+			if (Game_IsZS1()) {
+				float* scale = type == 242 ? &vid->m_gammaR : type == 243 ? &vid->m_gammaG : &vid->m_gammaB;
+				*scale = (float) value * 0.001f;
+				return 0;
+			}
+			break;
 		case 26: { // script: VID_AMMO (the weapon-bearing vid: the link when it has a weapon)
 			VID* weapon = (vid->m_linkVid && vid->m_linkVid->HaveWeapon()) ? vid->m_linkVid : vid;
 			weapon->m_exData->m_maxAmmo = value;
@@ -2436,6 +2696,9 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		case 48: { // script: VID_SPEED - update the vid and every live sprite's movement override
 			vid->m_unk0x2c = (value == 999999) ? 999999.0f : value * 0.001f;
+			if (Game_IsZS1()) {
+				vid->m_randomSpeed = vid->m_unk0x2c;
+			}
 			int iter;
 			for (SPRITE* sprite = FirstSprite(vid->m_layer, &iter); sprite; sprite = NextSprite(vid->m_layer, &iter)) {
 				if (sprite->GetVid() == vid && sprite->m_exData) {
@@ -2725,7 +2988,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushStr(STRING(FileData_Load(path.m_str, def.m_str)));
 		return 0;
 	}
-	case 188: // script: FileExist(filename)
+	case 188:
 		PushInt(FileData_FileExists(PopStr()->m_str));
 		return 0;
 	case 189: // script: SaveFolder()
@@ -2753,6 +3016,10 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushInt(Platform_StoreGetAchievement(PopStr()->m_str));
 		return 0;
 	case 213: // script: StoreResetAllStats()
+		if (Game_IsZS1()) {
+			PushInt(ZS1_CountUnitsInMap(this));
+			return 0;
+		}
 		Platform_StoreResetAllStats();
 		return 0;
 	case 214: { // script: StoreSetStat(stats_id, value)
@@ -2836,7 +3103,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		case 7:
 			PushInt(info.m_unk0x2c);
 			return 0;
-		case 9: { // script: Test whether every engine is idle.
+		case 9: {
 			for (ENGINE* e = engine->FirstEngine(); e; e = e->NextEngine()) {
 				if (!e->IsCommand(0)) {
 					PushInt(0);
@@ -2856,12 +3123,83 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 	}
-	case 231: { // script: SetSemaphoreOrMine(x, y, value, d) on the rail map
+	case 231: {
+		if (Game_IsZS1()) {
+			STRING name(*PopStr());
+			for (int i = 0; i < m_menu.m_n; ++i) {
+				SPRITE* sprite = (SPRITE*) m_menu.m_data[i];
+				const char* itemName = sprite->m_exData ? sprite->m_exData->m_spriteName.m_str : "";
+				if (!strcmp(itemName, name.m_str)) {
+					m_logic.PushObject(sprite);
+					return 0;
+				}
+			}
+			m_logic.PushObject(0);
+			return 0;
+		}
 		int d = PopInt();
 		int value = PopInt();
 		int y = PopInt();
 		int x = PopInt();
 		RailMap.SetSemaphoreOrMine(x, y, value, d);
+		return 0;
+	}
+	case 232:
+		if (!Game_IsZS1()) {
+			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			return 0;
+		}
+		m_logic.PushObject(m_menu.m_underCursor);
+		return 0;
+	case 255: {
+		if (!Game_IsZS1()) {
+			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			return 0;
+		}
+		STRING str2(*PopStr());
+		STRING str1(*PopStr());
+		int var2 = PopInt();
+		int var1 = PopInt();
+		int id = PopInt();
+		int outInt = 0;
+		const void* outObj = 0;
+		STRING outStr;
+		switch (ZS1_SendCommand2(this, id, var1, var2, str1.m_str, str2.m_str, &outInt, &outObj, &outStr)) {
+		case ZS1_CMD_STR:
+			PushStr(outStr);
+			break;
+		case ZS1_CMD_OBJ:
+			m_logic.PushObject(outObj);
+			break;
+		default:
+			PushInt(outInt);
+			break;
+		}
+		return 0;
+	}
+	case 78: {
+		if (!Game_IsZS1()) {
+			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			return 0;
+		}
+		decomp_intptr var3 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
+		decomp_intptr var2 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
+		decomp_intptr var1 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
+		int act = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		STRING name(*PopStr());
+		for (int layer = 0; layer < LayerCount(); ++layer) {
+			for (int i = m_layers[layer].m_n - 1; i >= 0; --i) {
+				if (i >= m_layers[layer].m_n) {
+					i = m_layers[layer].m_n;
+					continue;
+				}
+				SPRITE* sprite = (SPRITE*) m_layers[layer].m_data[i];
+				const char* spriteName = sprite->m_exData ? sprite->m_exData->m_spriteName.m_str : "";
+				if (!strcmp(spriteName, name.m_str)) {
+					sprite->Action(act, var1, var2, var3);
+				}
+			}
+		}
 		return 0;
 	}
 	case 239: { // script: BreakTrain(engine, x, y) - split a train at a point

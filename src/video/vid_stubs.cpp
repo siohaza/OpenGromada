@@ -1,4 +1,5 @@
 #include "audio/sound.h"
+#include "game/game_descriptor.h"
 #include "game/map.h"
 #include "sprite/sprite.h"
 #include "ui/mouse.h"
@@ -38,7 +39,13 @@ void VID::LoadParameters(RESOURCE* p_res)
 	p_res->Read(&m_unk0x24, 4);
 	p_res->Read(&m_defaultMaxHp, 4);
 	p_res->Read(&m_unk0x2c, 4);
+	if (Game_IsZS1()) {
+		p_res->Read(&m_randomSpeed, 4);
+	}
 	p_res->Read(&m_unk0x30, 4);
+	if (Game_IsZS1()) {
+		p_res->Read(&m_randomZSpeed, 4);
+	}
 	p_res->Read(&m_unk0x34, 4);
 	p_res->Read(&m_unk0x38, 4);
 	p_res->Read(&m_unk0x3c, 4);
@@ -162,6 +169,12 @@ void VID::LoadParameters(RESOURCE* p_res)
 	if (m_unk0x30 != 999999.0f) {
 		m_unk0x30 = m_unk0x30 * 0.001f;
 	}
+	if (m_randomSpeed != 999999.0f) {
+		m_randomSpeed = m_randomSpeed * 0.001f;
+	}
+	if (m_randomZSpeed != 999999.0f) {
+		m_randomZSpeed = m_randomZSpeed * 0.001f;
+	}
 	if (m_unk0x34 != 999999.0f) {
 		m_unk0x34 = m_unk0x34 * 0.000001f;
 	}
@@ -169,6 +182,9 @@ void VID::LoadParameters(RESOURCE* p_res)
 		m_unk0x38 = m_unk0x38 * 0.000001f;
 	}
 	m_canMove = m_unk0x2c != 0.0f || m_unk0x30 != 0.0f || (m_flag & 6) != 0 || (m_flag & 0x1000) != 0;
+	if (Game_IsZS1() && (m_randomSpeed != 0.0f || m_randomZSpeed != 0.0f)) {
+		m_canMove = 1;
+	}
 	if (!m_noDir) {
 		Error(
 			4,
@@ -280,7 +296,9 @@ void VID::LoadParameters(RESOURCE* p_res)
 		m_sprClass = 0;
 	}
 	if (m_flag & 8) {
-		float* dots = new float[3 * (((int) m_footprintWidth + 17) / 8 * ((int) m_footprintWidth + 17) / 8 + 1)];
+		float* dots =
+			new float[3 * ((((int) m_footprintWidth + 17) / 8) * (((int) m_footprintHeight + 17) / 8) + 1)];
+		m_nLinkDots = 0;
 		int yi = 0;
 		if (0.0f < m_footprintHeight) {
 			float y = 0.0f;

@@ -171,7 +171,7 @@ int MAP_STEAM::Tact()
 			}
 		}
 		else {
-			for (int layer = 0; layer < 16; ++layer) {
+			for (int layer = 0; layer < MAP::LayerWalkCount(); ++layer) {
 				int iter = m_layers[layer].m_n;
 				SPRITE* sprite;
 				for (sprite = FirstSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {

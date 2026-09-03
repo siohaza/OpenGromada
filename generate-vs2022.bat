@@ -19,4 +19,4 @@ if exist "%~dp0premake5.exe" (
 "%PREMAKE%" vs2022 --sdl3-dir="%SDL3_DIR%"
 if errorlevel 1 exit /b %errorlevel%
 
-echo Generated build\premake\AlienShooter.sln
+echo Generated build\premake\OpenGromada.sln

@@ -8,6 +8,8 @@
 #include "util/game_random.h"
 #include "video/vid.h"
 
+#include "game/game_descriptor.h"
+
 #include <math.h>
 
 // FUNCTION: ALIEN 0x447fe0
@@ -16,7 +18,10 @@ CANNON::CANNON(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE*
 {
 	m_unk0x70 |= 1;
 	VID* vid = m_vid;
-	if ((vid->m_flag & 0x400000) && vid->m_unk0x30 != 0.0f) {
+	if (Game_IsZS1() && vid->m_randomZSpeed != vid->m_unk0x30) {
+		m_unk0x24 = vid->m_unk0x30 + (float) GameRand() * (vid->m_randomZSpeed - vid->m_unk0x30) * 3.0518509e-5f;
+	}
+	else if ((vid->m_flag & 0x400000) && vid->m_unk0x30 != 0.0f) {
 		if (GameRand() % 2) {
 			float za = m_vid->m_unk0x30;
 			m_unk0x24 = ((float) GameRand() * za) * 3.0518509e-5f;

@@ -37,6 +37,7 @@ public:
 	int m_volume;              // 0x404
 	int m_musicVolume;         // 0x408
 	int m_fade;                // 0x40c
+	int m_fadeMs = 0;
 	int m_loop;                // 0x410
 	MUSIC* m_music;            // 0x414
 	STRING m_musicName;        // 0x418
@@ -77,13 +78,14 @@ public:
 	int PauseMusic();
 	int ResumeMusic();
 	int StopMusic();
+	void StopMusicFade(int p_fadeMs);
 
 	int OpenOgg(STRING* p_name, struct OggVorbis_File* p_vf, FILE** p_file);
 	SOUND_SAMPLE* CreateOggSample(STRING* p_name);
 	SOUND_SAMPLE* CreateWavSample(STRING* p_name);
 
 	int PlayFile(STRING p_file, int p_loop);
-	int FadeAndPlayFile(const STRING& p_file, int p_loop);
+	int FadeAndPlayFile(const STRING& p_file, int p_loop, int p_fadeMs = 0);
 
 	void PlaySFX(int p_sfx, int p_pan, int p_volume);
 	void PlaySFXFromCoor(int p_sfx, float p_x, float p_y);

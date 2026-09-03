@@ -1,4 +1,5 @@
 #include "audio/sound.h"
+#include "game/game_descriptor.h"
 #include "platform/timing.h"
 #include "util/myerror.h"
 #include "util/resource.h"
@@ -105,14 +106,25 @@ void SOUND::LoadSFX(RESOURCE* p_res)
 
 	do {
 
+		unsigned int property = 0;
+		int volume = 0;
+		if (Game_IsZS1()) {
+			p_res->Read(&property, 4);
+		}
 		int quality = 0;
 		p_res->Read(&quality, 1);
+		if (Game_IsZS1()) {
+			p_res->Read(&volume, 4);
+			volume *= 10;
+		}
 		for (int j = 0; j != 8; ++j) {
 			names[j].Read_res(p_res);
 		}
 		SFX* sfx = &m_sfx[i];
 		++i;
 		sfx->Load(names, quality, this);
+		sfx->m_property = property;
+		sfx->m_volume = volume;
 	} while (!p_res->GoNextSub(0x20584653));
 
 	MYERROR::Log(

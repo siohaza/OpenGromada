@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=OpenGromada
+Comment=Engine for Sigma Team games such as Alien Shooter and Zombie Shooter
+Exec=OpenGromada
+Icon=io.github.siohaza.OpenGromada
+Terminal=false
+Categories=Game;ActionGame;

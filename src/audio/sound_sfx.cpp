@@ -1,4 +1,6 @@
 #include "audio/sound.h"
+
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "util/myerror.h"
 
@@ -92,7 +94,17 @@ void SOUND::PlaySFXFromCoor(int p_sfx, float p_x, float p_y)
 	if (volX < volY) {
 		volY = volX;
 	}
-	PlaySFX(p_sfx, x * 4, volY);
+	int pan = x * 4;
+	if (Game_IsZS1() && ValidateSFX(p_sfx)) {
+		unsigned int property = m_sfx[p_sfx].m_property;
+		if (property & 2) {
+			volY = 0;
+		}
+		if (property & 4) {
+			pan = 0;
+		}
+	}
+	PlaySFX(p_sfx, pan, volY);
 }
 
 // FUNCTION: ALIEN 0x41d600
@@ -112,7 +124,11 @@ void SOUND::PlaySFX(int p_sfx, int p_pan, int p_volume)
 		);
 		return;
 	}
-	p_volume += 32 * (m_volume - 100);
+	int sfxBase = m_sfx[p_sfx].m_volume;
+	if (Game_IsZS1() && (m_sfx[p_sfx].m_property & 8)) {
+		p_volume = 0;
+	}
+	p_volume += sfxBase + 32 * (m_volume - 100);
 	if (p_volume < -3000) {
 		return;
 	}
@@ -123,7 +139,7 @@ void SOUND::PlaySFX(int p_sfx, int p_pan, int p_volume)
 		p_pan = -10000;
 	}
 	if (m_sfx[p_sfx].m_unk0x20 == 100) {
-		p_volume = 32 * (m_volume - 100);
+		p_volume = sfxBase + 32 * (m_volume - 100);
 	}
 	int i;
 	for (i = 0; i < 32; i++) {

@@ -18,6 +18,8 @@ public:
 	int m_unk0x488;   // 0x488
 	void* m_unk0x48c; // 0x48c
 
+	void* m_recolorBase;
+
 	int Draw(SPRITE* p_sprite);
 	int SetGamma(const GAMMA& p_gamma, unsigned int p_idx);
 	void DrawShadow(SPRITE* p_sprite);
@@ -27,6 +29,10 @@ public:
 	int HaveShadow();
 	VID* CreateMirror();
 	void SetLayer();
+	virtual void SetReColorForArmy(unsigned int p_color);
+
+protected:
+	unsigned char* PrepareRecolor();
 };
 
 #endif

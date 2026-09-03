@@ -1,5 +1,8 @@
 #include "sprite/ex_sprite_data.h"
 
+#include "game/game_descriptor.h"
+#include "util/game_random.h"
+
 #include "game/gametime.h"
 #include "sprite/sprite.h"
 #include "video/vid.h"
@@ -12,6 +15,10 @@ EX_SPRITE_DATA::EX_SPRITE_DATA(SPRITE* p_sprite) : m_unk0x24(0), m_unk0x28(0)
 	m_unk0x1c = 0;
 	m_time = CurrentTime;
 	m_unk0x20 = p_sprite->m_vid->m_unk0x2c;
+	if (Game_IsZS1() && p_sprite->m_vid->m_randomSpeed != p_sprite->m_vid->m_unk0x2c) {
+		VID* vid = p_sprite->m_vid;
+		m_unk0x20 = vid->m_unk0x2c + (float) GameRand() * (vid->m_randomSpeed - vid->m_unk0x2c) * 3.0518509e-5f;
+	}
 	m_x = p_sprite->X();
 	m_y = p_sprite->Y();
 	m_z = p_sprite->Z();

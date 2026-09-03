@@ -169,7 +169,7 @@ inline bool IsShippedLegacyViewport(float p_width, float p_height, float p_scale
 		return false;
 	}
 	return (p_width == 640.0f && p_height == 480.0f) || (p_width == 800.0f && p_height == 600.0f) ||
-		   (p_width == 1024.0f && p_height == 768.0f);
+		   (p_width == 1024.0f && p_height == 768.0f) || (p_width == 1280.0f && p_height == 720.0f);
 }
 
 inline MENU_POINT TransformMenuPoint(

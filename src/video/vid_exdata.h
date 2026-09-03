@@ -40,10 +40,20 @@ public:
 	int m_unk0x1c4[8];        // 0x1c4
 	int m_unk0x1e4[8];        // 0x1e4
 
-	undefined m_unk0x204[0x60]; // 0x204
+	int m_frameSpeed[8];
+	float m_speed[8];
+	float m_zSpeed[8];
+
+	int m_detectPeriod;
+	int m_fireInVolley;
+	int m_reloadTimeInVolley;
+	int m_pad;
 };
 
-static_assert(sizeof(VID_EXDATA) == 0x264);
 static_assert(offsetof(VID_EXDATA, m_army) == 0x2c);
+static_assert(offsetof(VID_EXDATA, m_frameSpeed) == 0x204);
+static_assert(offsetof(VID_EXDATA, m_speed) == 0x224);
+static_assert(offsetof(VID_EXDATA, m_zSpeed) == 0x244);
+static_assert(offsetof(VID_EXDATA, m_detectPeriod) == 0x264);
 
 #endif

@@ -40,7 +40,7 @@ jobs:
     env:
       CC: ${{ matrix.cc }}
       CXX: ${{ matrix.cxx }}
-      ARCHIVE: AlienShooter-linux-${{ matrix.arch }}.tar.gz
+      ARCHIVE: OpenGromada-linux-${{ matrix.arch }}.tar.gz
     steps:
       - uses: actions/checkout@v6
         with:
@@ -72,9 +72,9 @@ jobs:
       - name: Package
         if: matrix.package
         run: |
-          cmake --install build --prefix package/AlienShooter
-          cp README.md LICENSE.md package/AlienShooter/
-          tar -C package -czf "$ARCHIVE" AlienShooter
+          cmake --install build --prefix package/OpenGromada
+          cp README.md LICENSE.md package/OpenGromada/
+          tar -C package -czf "$ARCHIVE" OpenGromada
       - name: Upload release package
         if: matrix.package
         uses: actions/upload-artifact@v7
@@ -100,7 +100,7 @@ jobs:
             cmake_arch: arm64
             runner: macos-15
     env:
-      ARCHIVE: AlienShooter-macos-${{ matrix.arch }}.zip
+      ARCHIVE: OpenGromada-macos-${{ matrix.arch }}.zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -131,9 +131,9 @@ jobs:
         run: cmake --build build --parallel
       - name: Package
         run: |
-          cmake --install build --prefix package/AlienShooter
-          cp README.md LICENSE.md package/AlienShooter/
-          ditto -c -k --sequesterRsrc --keepParent package/AlienShooter "$ARCHIVE"
+          cmake --install build --prefix package/OpenGromada
+          cp README.md LICENSE.md package/OpenGromada/
+          ditto -c -k --sequesterRsrc --keepParent package/OpenGromada "$ARCHIVE"
       - name: Upload release package
         uses: actions/upload-artifact@v7
         with:
@@ -158,7 +158,7 @@ jobs:
           - arch: arm64
             msvc_arch: amd64_arm64
     env:
-      ARCHIVE: AlienShooter-windows-${{ matrix.arch }}.zip
+      ARCHIVE: OpenGromada-windows-${{ matrix.arch }}.zip
     steps:
       - uses: actions/checkout@v6
         with:
@@ -194,9 +194,9 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          cmake --install build --prefix package/AlienShooter
-          Copy-Item README.md, LICENSE.md package/AlienShooter/
-          Compress-Archive -Path package/AlienShooter -DestinationPath $env:ARCHIVE
+          cmake --install build --prefix package/OpenGromada
+          Copy-Item README.md, LICENSE.md package/OpenGromada/
+          Compress-Archive -Path package/OpenGromada -DestinationPath $env:ARCHIVE
       - name: Upload release package
         uses: actions/upload-artifact@v7
         with:
@@ -229,10 +229,10 @@ jobs:
           merge-multiple: true
       - name: Generate checksums
         run: |
-          count="$(find release-assets -maxdepth 1 -type f -name 'AlienShooter-*' | wc -l)"
+          count="$(find release-assets -maxdepth 1 -type f -name 'OpenGromada-*' | wc -l)"
           test "$count" -eq 7
           cd release-assets
-          sha256sum AlienShooter-* > SHA256SUMS.txt
+          sha256sum OpenGromada-* > SHA256SUMS.txt
       - name: Upload assets
         run: |
           if gh release view "$TAG_NAME" >/dev/null 2>&1; then
@@ -241,5 +241,5 @@ jobs:
             gh release create "$TAG_NAME" release-assets/* \
               --verify-tag \
               --generate-notes \
-              --title "Alien Shooter $TAG_NAME"
+              --title "OpenGromada $TAG_NAME"
           fi

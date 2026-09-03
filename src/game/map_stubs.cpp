@@ -3,6 +3,7 @@
 #include "game/const.h"
 #include "game/constant.h"
 #include "game/data_version.h"
+#include "game/game_descriptor.h"
 #include "game/engine.h"
 #include "game/gametime.h"
 #include "game/man.h"
@@ -191,7 +192,8 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	::Error = new MYERROR(1);
 
 	// Keep the profile identity stable if the executable is renamed.
-	STRING className("AlienShooter");
+	STRING className(GameDesc->m_className);
+	MYERROR::Log(::Error, "GAME: %s data detected", GameDesc->m_className);
 
 	STRING base(Platform_BasePath());
 	PROFILE profile;
@@ -223,7 +225,7 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 		STRING("common"),
 		// STRING: ALIEN 0x4824c0
 		STRING("Title"),
-		STRING("Alien Shooter")
+		STRING(GameDesc->m_title)
 	);
 
 	Registry = new REGISTRY;
@@ -495,7 +497,7 @@ void MAP::DeletePointerToSprite(SPRITE* p_sprite)
 		}
 	}
 
-	for (int layer = 0; layer < 17; ++layer) {
+	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 		if (p_sprite->m_noRef > 1) {
 			int idx;
 			SPRITE* sprite = FirstSprite(layer, &idx);
@@ -574,7 +576,7 @@ void MAP::DrawSecondaryInfo()
 		}
 	}
 	if (m_flag & 0x8000) {
-		for (int layer = 0; layer < 16; ++layer) {
+		for (int layer = 0; layer < MAP::LayerWalkCount(); ++layer) {
 			int i;
 			SPRITE* s = FirstSprite(layer, &i);
 			while (s) {
@@ -663,7 +665,7 @@ void MAP::Release()
 		"Sprite release"
 	);
 	ENGINE::globaldeleting = 1;
-	for (int verifyLayer = 0; verifyLayer < 17; ++verifyLayer) {
+	for (int verifyLayer = 0; verifyLayer < MAP::LayerCount(); ++verifyLayer) {
 		int n;
 		SPRITE* sprite = FirstSprite(verifyLayer, &n);
 		while (sprite) {
@@ -678,7 +680,7 @@ void MAP::Release()
 		}
 	}
 	ENGINE::globaldeleting = 0;
-	for (int layer = 0; layer < 17; ++layer) {
+	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 		int idx;
 		if (FirstSprite(layer, &idx)) {
 			SPRITE* sprite = FirstSprite(layer, &idx);
@@ -1280,6 +1282,32 @@ int MAP::Load(STRING p_name)
 		}
 		else if (isdigit(text[4]) && text[5] == '_') {
 			int vid = 1000 * (text[1] - '0') + 100 * (text[2] - '0') + 10 * (text[3] - '0') + text[4] - '0';
+			int slot = -1;
+			int arity = 1;
+			if (!strncmp(text + 6, "DAMAGE", 7)) {
+				slot = 18;
+				arity = 3;
+			}
+			else if (!strncmp(text + 6, "DESTROY", 7)) {
+				slot = 17;
+			}
+			else if (!strncmp(text + 6, "COLLISION", 9)) {
+				slot = 19;
+				arity = 2;
+			}
+			if (slot >= 0) {
+				if (entry.m_var.m_extra != arity) {
+					STRING part("no parameters in functions '", text);
+					STRING message(part.m_str, "'");
+					if (::Error) {
+						MYERROR::Error(::Error, "MAP", 4, message.m_str, entry.m_var.m_extra);
+					}
+				}
+				else if (vid >= 0 && vid < m_noVid && m_vids[vid]) {
+					m_vids[vid]->m_unk0x408[slot] = function;
+				}
+				continue;
+			}
 			int animation = text[7] ? 10 * (text[6] - '0') + text[7] - '0' : text[6] - '0';
 			if (entry.m_var.m_extra != 1) {
 				STRING part("no parameters in functions '", text);
@@ -1310,7 +1338,7 @@ int MAP::Load(STRING p_name)
 			);
 	}
 	if (!(m_flag & 1)) {
-		for (int layer = 0; layer < 17; ++layer) {
+		for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 			int iter = m_layers[layer].m_n;
 			for (SPRITE* sprite = NextSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {
 				int fn = sprite->m_vid->m_unk0x408[14];
@@ -1320,7 +1348,7 @@ int MAP::Load(STRING p_name)
 			}
 		}
 	}
-	for (int layer = 0; layer < 17; ++layer) {
+	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 		int iter = m_layers[layer].m_n;
 		for (SPRITE* sprite = NextSprite(layer, &iter); sprite; sprite = NextSprite(layer, &iter)) {
 			if (sprite->m_vid->m_sprClass == 21) {

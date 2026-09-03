@@ -40,7 +40,7 @@ version_file:close()
 local sdl_major = tonumber(version_text:match("#define%s+SDL_MAJOR_VERSION%s+(%d+)"))
 local sdl_minor = tonumber(version_text:match("#define%s+SDL_MINOR_VERSION%s+(%d+)"))
 if sdl_major ~= 3 or not sdl_minor or sdl_minor < 4 then
-	error("Alien Shooter requires SDL 3.4 or newer")
+	error("OpenGromada requires SDL 3.4 or newer")
 end
 
 local steam_sdk = _OPTIONS["steam-sdk"] or os.getenv("STEAM_SDK_DIR")
@@ -57,12 +57,12 @@ else
 	print("Steamworks: disabled. Store is local only")
 end
 
-workspace "AlienShooter"
+workspace "OpenGromada"
 	location "build/premake"
 	configurations { "Debug", "Release" }
 	platforms { "x86", "x64", "ARM64" }
 	defaultplatform "x64"
-	startproject "AlienShooter"
+	startproject "OpenGromada"
 	system "windows"
 	systemversion "latest"
 	staticruntime "On"
@@ -123,21 +123,21 @@ project "alien_core"
 	removefiles { "src/main.cpp" }
 	configure_project()
 
-project "AlienShooter"
+project "OpenGromada"
 	kind "ConsoleApp"
-	targetname "AlienShooter"
+	targetname "OpenGromada"
 	targetdir "build/premake/bin/%{cfg.platform}/%{cfg.buildcfg}"
 	debugdir "%{cfg.targetdir}"
 	files {
 		"src/main.cpp",
-		"resources/AlienShooter.rc",
-		"resources/AlienShooter.res"
+		"resources/OpenGromada.rc",
+		"resources/OpenGromada.res"
 	}
 	links { "alien_core", "SDL3" }
-	linkoptions { '"' .. path.getabsolute("resources/AlienShooter.res") .. '"' }
+	linkoptions { '"' .. path.getabsolute("resources/OpenGromada.res") .. '"' }
 	configure_project()
 
-	filter "files:resources/AlienShooter.rc or resources/AlienShooter.res"
+	filter "files:resources/OpenGromada.rc or resources/OpenGromada.res"
 		buildaction "None"
 
 	filter "platforms:x86"

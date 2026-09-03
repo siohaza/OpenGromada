@@ -1,6 +1,7 @@
 
 #include "logic/logic.h"
 
+#include "game/game_descriptor.h"
 #include "logic/logicstack.h"
 #include "logic/logicvar.h"
 #include "platform/paths.h"
@@ -51,6 +52,30 @@ void LOGIC::Release()
 	m_line = -1;
 	m_unk0x54 = 0;
 	m_main = -1;
+	m_protoFixups.clear();
+	for (int i = 0; i < 256; ++i) {
+		m_actionN[i] = -1;
+	}
+}
+
+int LOGIC::GetActionN(int p_n)
+{
+	if (p_n < 0 || p_n >= 256 || m_actionN[p_n] < 0 || m_actionN[p_n] >= m_stack.m_n) {
+		MYERROR::Log(::Error, "!!!ERROR!!!SCRIPT: variable for Get Action%i", p_n);
+		return 0;
+	}
+	return ((LOGICSTACK*) m_stack.m_data)[m_actionN[p_n]].Int();
+}
+
+void LOGIC::SetActionN(int p_n, int p_value)
+{
+	if (p_n < 0 || p_n >= 256 || m_actionN[p_n] < 0 || m_actionN[p_n] >= m_stack.m_n) {
+		MYERROR::Log(::Error, "!!!ERROR!!!SCRIPT: variable for Set Action%i", p_n);
+		return;
+	}
+	LOGICSTACK* slot = (LOGICSTACK*) m_stack.m_data + m_actionN[p_n];
+	slot->m_num = p_value;
+	slot->m_type &= ~1;
 }
 
 // STUB: ALIEN 0x41f450
@@ -98,6 +123,27 @@ int LOGIC::LoadLGC(const STRING& p_name)
 	m_variables.NAMED_LIST_LOGICVAR_BASE::Expand(128);
 	m_line = 0;
 	while (!func()) {
+	}
+	if (!m_protoFixups.empty()) {
+		int stub = m_stackPos;
+		m_stackData[m_stackPos++] = 1;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, 0);
+		m_stackPos += 4;
+		m_stackData[m_stackPos++] = 31;
+		int lastLogged = -1;
+		for (size_t f = 0; f < m_protoFixups.size(); ++f) {
+			if (m_protoFixups[f].second != lastLogged) {
+				lastLogged = m_protoFixups[f].second;
+				MYERROR::Log(
+					::Error,
+					"SCRIPT: forward-declared function '%s' has no definition (stubbed)",
+					m_variables.m_data[lastLogged].m_name.m_str
+				);
+			}
+			LOGIC_BYTECODE::WriteInt32(m_stackData + m_protoFixups[f].first, stub);
+			m_variables.m_data[m_protoFixups[f].second].m_var.m_a = stub;
+		}
+		m_protoFixups.clear();
 	}
 	MYERROR::Log(
 		::Error,
@@ -625,7 +671,14 @@ void LOGIC::IntVar()
 		exit(1);
 	}
 
-	m_variables.Insert(name, LOGICVAR(1, m_stack.GetNo()));
+	int slot = m_stack.GetNo();
+	m_variables.Insert(name, LOGICVAR(1, slot));
+	if (!strncmp(name.m_str, "Action", 6) && isdigit((unsigned char) name.m_str[6])) {
+		int actionIndex = atoi(name.m_str + 6);
+		if (actionIndex >= 0 && actionIndex < 256) {
+			m_actionN[actionIndex] = slot;
+		}
+	}
 
 	if (Word("[")) {
 		flags |= 4;
@@ -684,6 +737,15 @@ void LOGIC::IntVar()
 			} while (Word(","));
 			WordEnd("}");
 		}
+		else if (Game_IsZS1() && m_inBody && !m_declStatic) {
+			int slot = m_stack.m_n - 1;
+			vyrag();
+			m_stackData[m_stackPos++] = 38;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, slot);
+			m_stackPos += 4;
+			m_stackData[m_stackPos++] = 26;
+			((LOGICSTACK*) m_stack.m_data)[slot].m_type &= ~0x40;
+		}
 		else {
 			LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1];
 			value->m_num = GetInt();
@@ -732,11 +794,36 @@ void LOGIC::StringVar()
 
 	if (Word("=")) {
 		char buffer[4096];
-		GetString(buffer);
-		LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1];
-		value->m_str = buffer;
-		value->m_type |= 8;
-		((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1].m_type &= ~0x40;
+		if ((flags & 4) && Word("{")) {
+			int initializer = 0;
+			do {
+				if (initializer >= count) {
+					Error(10, "too many initializers", 0);
+					exit(1);
+				}
+				GetString(buffer);
+				LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n + initializer - count];
+				value->m_str = buffer;
+				value->m_type |= 8;
+				++initializer;
+			} while (Word(","));
+			WordEnd("}");
+		}
+		else if (Game_IsZS1() && m_inBody && !m_declStatic && !(flags & 4)) {
+			int slot = m_stack.m_n - 1;
+			vyrag();
+			m_stackData[m_stackPos++] = 38;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, slot);
+			m_stackPos += 4;
+			m_stackData[m_stackPos++] = 26;
+		}
+		else {
+			GetString(buffer);
+			LOGICSTACK* value = &((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1];
+			value->m_str = buffer;
+			value->m_type |= 8;
+			((LOGICSTACK*) m_stack.m_data)[m_stack.m_n - 1].m_type &= ~0x40;
+		}
 	}
 	SetNoElement(count);
 }
@@ -875,6 +962,7 @@ void LOGIC::mnog()
 			done = true;
 		}
 		else if (Word("static")) {
+			m_declStatic = 1;
 			if (Word("int")) {
 				do {
 					IntVar();
@@ -889,6 +977,7 @@ void LOGIC::mnog()
 					StringVar();
 				} while (Word(","));
 			}
+			m_declStatic = 0;
 			done = true;
 		}
 		else if (Word("int")) {
@@ -1183,6 +1272,9 @@ void LOGIC::mnog()
 						exit(1);
 					}
 					m_stackData[m_stackPos++] = 30;
+					if (entry.m_var.m_a == -1) {
+						m_protoFixups.push_back({m_stackPos, variable});
+					}
 					LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, entry.m_var.m_a);
 					m_stackPos += 4;
 					done = true;
@@ -1454,8 +1546,76 @@ void LOGIC::logicslag()
 }
 
 // FUNCTION: ALIEN 0x421f60
+void LOGIC::vyragAnd()
+{
+	int pos = m_stackPos;
+	logicslag();
+	while (1) {
+		skipempty();
+		if (*m_pos != '&' || m_pos[1] == '&') {
+			break;
+		}
+		Word("&");
+		logicslag();
+		SetOperation(pos, 12);
+	}
+}
+
+void LOGIC::vyragXor()
+{
+	int pos = m_stackPos;
+	vyragAnd();
+	while (Word("^")) {
+		vyragAnd();
+		SetOperation(pos, 10);
+	}
+}
+
+void LOGIC::vyragOr()
+{
+	int pos = m_stackPos;
+	vyragXor();
+	while (1) {
+		skipempty();
+		if (*m_pos != '|' || m_pos[1] == '|') {
+			break;
+		}
+		Word("|");
+		vyragXor();
+		SetOperation(pos, 11);
+	}
+}
+
+void LOGIC::vyragCmpAnd()
+{
+	vyragOr();
+	while (Word("&&")) {
+		m_stackData[m_stackPos] = 44;
+		int skip = m_stackPos + 1;
+		m_stackPos = skip + 4;
+		vyragOr();
+		m_stackData[m_stackPos] = 0x15;
+		++m_stackPos;
+		LOGIC_BYTECODE::WriteInt32(m_stackData + skip, m_stackPos - skip);
+	}
+}
+
 void LOGIC::vyrag()
 {
+	if (Game_IsZS1()) {
+		vyragCmpAnd();
+		while (Word("||")) {
+			m_stackData[m_stackPos] = 45;
+			int skip = m_stackPos + 1;
+			m_stackPos = skip + 4;
+			vyragCmpAnd();
+			m_stackData[m_stackPos] = 0x0e;
+			++m_stackPos;
+			LOGIC_BYTECODE::WriteInt32(m_stackData + skip, m_stackPos - skip);
+		}
+		return;
+	}
+
 	int pos = m_stackPos;
 	logicslag();
 	while (1) {
@@ -1743,10 +1903,13 @@ int LOGIC::func()
 		m_pos[6] == 'e') {
 		m_pos += 7;
 		m_unk0x54 = 1;
+		int defineLine = m_line;
 		GetName(&name);
 		m_unk0x54 = 0;
 		STRING value;
-		GetLine(&value);
+		if (m_line == defineLine) {
+			GetLine(&value);
+		}
 		if (!strcmp(name.m_str, "GETSPRITE_VID")) {
 			value = "0x2000";
 		}
@@ -1966,7 +2129,9 @@ int LOGIC::func()
 	else {
 		int variableCount = m_variables.m_n;
 		GetName(&name);
-		if (m_variables.Location(name) >= 0) {
+		int declared = m_variables.Location(name);
+		if (declared >= 0 &&
+			!(m_variables.m_data[declared].m_var.m_flag == 3 && m_variables.m_data[declared].m_var.m_a == -1)) {
 			Error(10, "function redefinition", 0);
 			exit(1);
 		}
@@ -1984,10 +2149,56 @@ int LOGIC::func()
 		} while (Word(","));
 		WordEnd(")");
 		int parameterCount = m_stack.m_n - stackStart;
+
+		if (Word(";")) {
+			if (declared < 0) {
+				if (variableCount <= 0) {
+					m_variables.m_max = 0;
+					m_variables.m_n = 0;
+					delete[] m_variables.m_data;
+					m_variables.m_data = 0;
+				}
+				else if (variableCount < m_variables.m_n) {
+					m_variables.m_n = variableCount;
+				}
+				LOGICVAR function(3, -1);
+				function.m_type = stackStart;
+				function.m_extra = parameterCount;
+				m_variables.Insert(name, function);
+			}
+			else if (variableCount < m_variables.m_n) {
+				m_variables.m_n = variableCount;
+			}
+			return skipempty2();
+		}
+
+		if (declared >= 0) {
+			LOGICVAR* proto = &m_variables.m_data[declared].m_var;
+			if (parameterCount != proto->m_extra) {
+				Error(4, "function parameters number", 0);
+				exit(1);
+			}
+			int protoBase = proto->m_type;
+			LOGICSTACK* slots = (LOGICSTACK*) m_stack.m_data;
+			for (int p = 0; p < parameterCount; ++p) {
+				if (slots[stackStart + p].m_type & 8) {
+					slots[protoBase + p] = slots[stackStart + p];
+				}
+			}
+			for (int v = variableCount; v < m_variables.m_n; ++v) {
+				LOGICVAR* var = &m_variables.m_data[v].m_var;
+				if (var->m_flag == 1 && var->m_a >= stackStart && var->m_a < stackStart + parameterCount) {
+					var->m_a = protoBase + (var->m_a - stackStart);
+				}
+			}
+		}
+
 		WordEnd("{");
+		m_inBody = 1;
 		while (!Word("}")) {
 			oper(0);
 		}
+		m_inBody = 0;
 		m_stackData[m_stackPos++] = 31;
 
 		if (variableCount <= 0) {
@@ -1999,12 +2210,31 @@ int LOGIC::func()
 		else if (variableCount < m_variables.m_n) {
 			m_variables.m_n = variableCount;
 		}
-		LOGICVAR function(3, code);
-		function.m_type = stackStart;
-		function.m_extra = parameterCount;
-		m_variables.Insert(name, function);
-		if (!strcmp(name.m_str, "main")) {
-			m_main = m_variables.m_n - 1;
+		if (declared >= 0) {
+			LOGICVAR* proto = &m_variables.m_data[declared].m_var;
+			proto->m_a = code;
+			for (size_t f = 0; f < m_protoFixups.size();) {
+				if (m_protoFixups[f].second == declared) {
+					LOGIC_BYTECODE::WriteInt32(m_stackData + m_protoFixups[f].first, code);
+					m_protoFixups[f] = m_protoFixups.back();
+					m_protoFixups.pop_back();
+				}
+				else {
+					++f;
+				}
+			}
+			if (!strcmp(name.m_str, "main")) {
+				m_main = declared;
+			}
+		}
+		else {
+			LOGICVAR function(3, code);
+			function.m_type = stackStart;
+			function.m_extra = parameterCount;
+			m_variables.Insert(name, function);
+			if (!strcmp(name.m_str, "main")) {
+				m_main = m_variables.m_n - 1;
+			}
 		}
 	}
 

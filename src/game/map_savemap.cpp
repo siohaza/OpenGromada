@@ -95,7 +95,7 @@ int MAP::SaveMap(STRING p_name)
 	}
 	out.PreAppend(0x20525053 /* 'SPR ' */, 0);
 	SPRITE* buffer = 0;
-	for (int layer = 0; layer < 17; ++layer) {
+	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
 		int i = m_layers[layer].m_n;
 		buffer = NextSprite(layer, &i);
 		while (buffer) {
@@ -119,7 +119,7 @@ int MAP::SaveMap(STRING p_name)
 	int token = -1;
 	out.Write(&token, 4);
 	out.PostAppend();
-	for (int layer2 = 0; layer2 < 17; ++layer2) {
+	for (int layer2 = 0; layer2 < MAP::LayerCount(); ++layer2) {
 		int i = m_layers[layer2].m_n;
 		for (buffer = NextSprite(layer2, &i); buffer; buffer = NextSprite(layer2, &i)) {
 			if (buffer->m_parent) {

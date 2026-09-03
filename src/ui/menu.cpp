@@ -60,7 +60,7 @@ static std::string ResolveMenuName(const STRING& p_name)
 		return candidate;
 	}
 
-	const int widths[] = {1024, 800, 640};
+	const int widths[] = {1280, 1024, 800, 640};
 	for (int width : widths) {
 		if (width == preferred) {
 			continue;

@@ -21,7 +21,7 @@ inline int PreferredGamebarWidth(int p_logicalWidth, int p_uiScale)
 		p_logicalWidth = 640 * p_uiScale;
 	}
 
-	const int widths[] = {640, 800, 1024};
+	const int widths[] = {640, 800, 1024, 1280};
 	int best = widths[0];
 	long long bestDistance = (long long) p_logicalWidth - (long long) best * p_uiScale;
 	if (bestDistance < 0) {
@@ -92,6 +92,9 @@ inline int GamebarVariantWidth(const char* p_path)
 
 inline int GamebarVariantHeight(int p_width)
 {
+	if (p_width == 1280) {
+		return 720;
+	}
 	return p_width > 0 ? p_width * 3 / 4 : 0;
 }
 

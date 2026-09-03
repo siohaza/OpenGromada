@@ -12,6 +12,8 @@ SFX::SFX()
 	memset(m_samples, 0, sizeof(m_samples));
 	m_unk0x20 = 0;
 	m_unk0x44 = 0;
+	m_property = 0;
+	m_volume = 0;
 }
 
 // FUNCTION: ALIEN 0x41d400
