@@ -1,6 +1,7 @@
 #include "ui/menu.h"
 
 #include "game/data_version.h"
+#include "game/game_descriptor.h"
 #include "game/input_as.h"
 #include "game/map.h"
 #include "gfx/graph.h"
@@ -14,6 +15,7 @@
 #include "util/resource.h"
 #include "video/vid.h"
 
+#include <SDL3/SDL_stdinc.h>
 #include <math.h>
 #include <string>
 
@@ -34,7 +36,15 @@ struct MENU_HEADER {
 struct MENU_LAYOUT {
 	int m_gamebarWidth;
 	int m_gamebarHeight;
+	bool m_scriptCanvas;
 };
+
+static std::string MenuKey(const std::string& p_name)
+{
+	std::string key(p_name);
+	for (char& c : key) c = c == '\\' ? '/' : (char) SDL_tolower((unsigned char) c);
+	return key;
+}
 
 static bool MenuFileExists(const std::string& p_name)
 {
@@ -49,7 +59,7 @@ static bool MenuFileExists(const std::string& p_name)
 static std::string ResolveMenuName(const STRING& p_name)
 {
 	std::string requested(p_name.m_str);
-	if (MenuFileExists(requested) || !MENU_PATH::IsGamebarVariant(p_name.m_str)) {
+	if (MenuFileExists(requested) || !GameDesc->m_gamebarNumbersAreWidths || !MENU_PATH::IsGamebarVariant(p_name.m_str)) {
 		return requested;
 	}
 
@@ -84,8 +94,9 @@ static void ReadMenuHeader(RESOURCE* p_resource, MENU_HEADER* p_header)
 
 static MENU_LAYOUT ResolveMenuLayout(const std::string& p_name)
 {
-	int width = MENU_PATH::GamebarVariantWidth(p_name.c_str());
-	MENU_LAYOUT result = {width, MENU_PATH::GamebarVariantHeight(width)};
+	int width = GameDesc->m_gamebarNumbersAreWidths ? MENU_PATH::GamebarVariantWidth(p_name.c_str()) : 0;
+	MENU_LAYOUT result = {width, MENU_PATH::GamebarVariantHeight(width),
+		!width && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0};
 	return result;
 }
 
@@ -144,7 +155,8 @@ static void PlaceLoadedMenuSprite(SPRITE* p_sprite, const MENU_HEADER& p_header,
 		p_layout
 	);
 	p_sprite->ChangeCoor(point.m_x + shiftX, point.m_y + shiftY, point.m_z);
-	p_sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, point.m_anchorX, point.m_anchorY);
+	if (p_layout.m_scriptCanvas) p_sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
+	else p_sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, point.m_anchorX, point.m_anchorY);
 }
 
 static void AlignGamebarBackingWithInventory(MENU* p_menu, int p_firstLoaded, const MENU_LAYOUT& p_layout)
@@ -257,6 +269,36 @@ MENU::MENU()
 	m_state = 0;
 }
 
+void MENU::ClearScriptCanvas() { m_scriptCanvasMenus.clear(); }
+
+void MENU::DeleteAll()
+{
+	LIST_SPRITE::DeleteAll();
+	ClearScriptCanvas();
+}
+
+bool MENU::HasScriptCanvas() const
+{
+	return !m_scriptCanvasMenus.empty() && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0;
+}
+
+int MENU::ScriptCanvasWidth() const { return HasScriptCanvas() ? GameDesc->m_menuScriptWidth : 0; }
+int MENU::ScriptCanvasHeight() const { return HasScriptCanvas() ? GameDesc->m_menuScriptHeight : 0; }
+
+float MENU::ScriptScreenX(float p_frameX) const
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	return HasScriptCanvas() && graph ? UI_SCALING::UntransformCanvasAxis(p_frameX, graph->m_width,
+		GameDesc->m_menuScriptWidth, graph->m_uiScale * graph->m_uiPresentationScale) : p_frameX;
+}
+
+float MENU::ScriptScreenY(float p_frameY) const
+{
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	return HasScriptCanvas() && graph ? UI_SCALING::UntransformCanvasAxis(p_frameY, graph->m_height,
+		GameDesc->m_menuScriptHeight, graph->m_uiScale * graph->m_uiPresentationScale) : p_frameY;
+}
+
 // FUNCTION: ALIEN 0x43e140
 int MENU::Control(INPUT_AS* p_input)
 {
@@ -268,7 +310,12 @@ int MENU::Control(INPUT_AS* p_input)
 			VID* vid = sprite->m_vid;
 			if (vid->m_unk0x18) {
 				int ani = sprite->m_ani;
-				if (ani != 14 && ani < 15 && ani != 7 && ani != 6) {
+
+
+				const bool interactive = GameDesc->m_menuRules == GAME_MENU_ZS1
+					? ani < 14 && ani != 8 && ani != 9
+					: ani != 14 && ani < 15 && ani != 7 && ani != 6;
+				if (interactive) {
 					if (!sprite->IsInside(p_input->m_worldX, p_input->m_worldY) ||
 						(m_underCursor && sprite->Z() <= m_underCursor->Z())) {
 						sprite->ChangeAnimation(sprite->m_ani & 1);
@@ -293,7 +340,21 @@ int MENU::Control(INPUT_AS* p_input)
 		}
 		SPRITE* sprite = m_underCursor;
 		int ani = sprite->m_ani;
-		if ((ani & 0xfffffffe) != 4) {
+		if (GameDesc->m_menuRules == GAME_MENU_ZS1) {
+
+
+			const int state = ani & ~1;
+			if (state != 4 && state != 2 && state != 6) {
+				if (!sprite->m_vid->m_noAnimCadr[6] && !sprite->m_vid->m_noAnimCadr[7]) {
+					sprite->FireAniEvent((ani & 1) | 6, 0);
+					sprite->ChangeAnimation((ani & 1) | 2);
+				}
+				else {
+					sprite->ChangeAnimation((ani & 1) | 6);
+				}
+			}
+		}
+		else if ((ani & 0xfffffffe) != 4) {
 			sprite->ChangeAnimation((ani & 1) | 2);
 		}
 	}
@@ -338,6 +399,7 @@ int MENU::Load(const STRING& p_name, int p_opt)
 	if (p_opt & 2) {
 		layout.m_gamebarWidth = 1024;
 		layout.m_gamebarHeight = 768;
+		layout.m_scriptCanvas = false;
 	}
 	int firstLoaded = m_n;
 
@@ -347,7 +409,8 @@ int MENU::Load(const STRING& p_name, int p_opt)
 			if (sprite) {
 				PlaceLoadedMenuSprite(sprite, header, layout);
 				sprite->Action(0x51, (decomp_intptr) &resource, header.m_version, 0);
-				sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, sprite->UIAnchorX(), sprite->UIAnchorY());
+				if (layout.m_scriptCanvas) sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
+				else sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, sprite->UIAnchorX(), sprite->UIAnchorY());
 			}
 			resource.GoNextSub(0x20525053);
 			sprite = Map->LoadSprite(&resource, header.m_version);
@@ -374,6 +437,8 @@ int MENU::Load(const STRING& p_name, int p_opt)
 		return 1;
 	}
 	AlignGamebarBackingWithInventory(this, firstLoaded, layout);
+	if (!resource.Good()) return 1;
+	if (layout.m_scriptCanvas) m_scriptCanvasMenus.push_back(MenuKey(resolvedName));
 	resource.Close();
 	return 0;
 }
@@ -417,7 +482,13 @@ int MENU::DeleteFromFile(const STRING& p_name)
 			resource.GoNextSub(0x20525053);
 		}
 	}
+	if (!resource.Good()) return 1;
 	resource.Close();
+	const std::string key = MenuKey(resolvedName);
+	for (auto it = m_scriptCanvasMenus.begin(); it != m_scriptCanvasMenus.end();) {
+		if (*it == key) it = m_scriptCanvasMenus.erase(it);
+		else ++it;
+	}
 	return 0;
 }
 

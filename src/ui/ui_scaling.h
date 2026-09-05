@@ -221,6 +221,11 @@ inline MENU_POINT TransformCenteredMenuPoint(
 	return result;
 }
 
+inline float UntransformCanvasAxis(float p_position, float p_viewExtent, float p_canvasExtent, float p_scale)
+{
+	return p_canvasExtent * 0.5f + (p_position - p_viewExtent * 0.5f) / NormalizeDrawScale(p_scale);
+}
+
 inline float TransformAnchoredReferenceAxis(
 	float p_position,
 	float p_referenceExtent,

@@ -1,6 +1,8 @@
 
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
+#include "game/viewport_math.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture.h"
@@ -25,6 +27,61 @@ static float s_oldShiftX;
 // GLOBAL: ALIEN 0x492b78
 static float s_oldShiftY;
 
+static void DrawLocolandLayers(GRAPH* p_graph)
+{
+
+
+
+	p_graph->SetRenderState(D3DRS_ZFUNC, 8);
+	p_graph->SetRenderState(D3DRS_ZWRITEENABLE, 1);
+	for (int layer = 0; layer <= 4; ++layer) {
+		Map->DrawLayer(layer);
+	}
+	p_graph->SetRenderState(D3DRS_ZFUNC, 7);
+	Map->DrawLayer(5);
+	p_graph->SetRenderState(D3DRS_ZWRITEENABLE, 0);
+	p_graph->SetRenderState(D3DRS_ALPHABLENDENABLE, 1);
+	Map->DrawLayer(6);
+	Map->DrawLayer(7);
+
+	if ((p_graph->m_env & 3) && !(p_graph->m_flags & 0x20)) {
+		const float width = p_graph->m_viewXMax - p_graph->m_viewXMin;
+		const float height = p_graph->m_viewYMax - p_graph->m_viewYMin;
+		const int cx =
+			VIEWPORT_MATH::LegacyCoordinate(((double) p_graph->m_viewXMin + p_graph->m_viewXMax) * 0.5 + Map->m_shiftX);
+		const int cy =
+			VIEWPORT_MATH::LegacyCoordinate(((double) p_graph->m_viewYMin + p_graph->m_viewYMax) * 0.5 + Map->m_shiftY);
+
+
+		const int halfWidth = (int) ceil(width * 0.5) + 192 > 512 ? (int) ceil(width * 0.5) + 192 : 512;
+		const int halfHeight = (int) ceil(height * 0.5) + 272 > 512 ? (int) ceil(height * 0.5) + 272 : 512;
+		for (int layer = 2; layer <= 3; ++layer) {
+			int iter;
+			for (SPRITE* sprite = Map->FirstSprite(layer, &iter); sprite; sprite = Map->NextSprite(layer, &iter)) {
+				const int x = VIEWPORT_MATH::LegacyCoordinate(sprite->m_x);
+				const int y = VIEWPORT_MATH::LegacyCoordinate(sprite->m_y);
+				const int z = VIEWPORT_MATH::LegacyCoordinate(sprite->m_z);
+				const int dx = VIEWPORT_MATH::LegacyCoordinateDifference(x, cx);
+				const int dy =
+					VIEWPORT_MATH::LegacyCoordinateDifference(VIEWPORT_MATH::LegacyCoordinateDifference(y, z), cy);
+				if ((dx >= -halfWidth && dx < halfWidth && dy >= -halfHeight && dy < halfHeight) ||
+					VIEWPORT_MATH::LegacyCoordinateDifference(y, cy) >= halfHeight) {
+					sprite->m_vid->DrawShadow(sprite);
+				}
+			}
+		}
+	}
+	p_graph->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+	Map->DrawLayer(8);
+	p_graph->DrawSnow();
+	p_graph->DrawSnowflakes();
+	p_graph->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_POINT);
+	Map->DrawLayer(9);
+	p_graph->DrawRain();
+	p_graph->SetRenderState(D3DRS_ZWRITEENABLE, 1);
+	Map->DrawLayer(10);
+}
+
 // FUNCTION: ALIEN 0x430870
 void GRAPH::Tact(int p_draw)
 {
@@ -39,43 +96,72 @@ void GRAPH::Tact(int p_draw)
 		Map->SetShiftCoor(width * 0.5f + s_oldShiftX + 4.0f - jx, height * 0.5f + s_oldShiftY + 4.0f - jy, 0);
 	}
 	if (p_draw) {
-		if (Map->m_menuFrameActive || Map->m_noVid <= 1024 || !Map->m_vids[1024] || Map->m_shiftX < 0.0f ||
-			core->m_viewXMax + Map->m_shiftX - core->m_viewXMin > (double) Map->m_w || Map->m_shiftY < 0.0f ||
-			core->m_viewYMax + Map->m_shiftY - core->m_viewYMin > (double) Map->m_h) {
+		const bool extendedLayers = GameDesc->m_layerRules == GAME_LAYERS_ZS1;
+
+
+		if (extendedLayers || Map->m_menuFrameActive || Map->m_noVid <= 1024 || !Map->m_vids[1024] ||
+			Map->m_shiftX < 0.0f || core->m_viewXMax + Map->m_shiftX - core->m_viewXMin > (double) Map->m_w ||
+			Map->m_shiftY < 0.0f || core->m_viewYMax + Map->m_shiftY - core->m_viewYMin > (double) Map->m_h) {
 			core->ClearScreen(COLOR(0, 0, 0));
 		}
 
 		core->SetRenderState(D3DRS_ALPHABLENDENABLE, 0);
+		if (extendedLayers) {
+			core->SetRenderState(D3DRS_ZFUNC, 8);
+			core->SetRenderState(D3DRS_ZWRITEENABLE, 1);
+		}
 		core->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_POINT);
-		Map->DrawLayer(0);
-		Map->DrawLayer(1);
-		Map->DrawLayer(2);
-		Map->DrawLayer(3);
-		Map->DrawLayer(4);
-		Map->DrawLayer(5);
-		Map->DrawLayer(6);
-		Map->DrawLayer(7);
-		Map->DrawLayer(8);
-		core->SetRenderState(D3DRS_ALPHABLENDENABLE, 1);
-		Map->DrawLayer(9);
-		Map->DrawLayer(10);
-		core->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
-		Map->DrawLayer(11);
-		DrawSnow();
-		DrawSnowflakes();
-		core->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_POINT);
-		Map->DrawLayer(12);
-		DrawRain();
-		Map->DrawLayer(13);
-		Map->DrawLayer(14);
-		MOUSE* child = Mouse;
-		if (!Mouse->m_unk0x70 && (Mouse->m_vid->m_flag & 0x8000) && Mouse) {
-			do {
-				if (!(child->m_flag & 0x10000)) {
-					child->Draw();
-				}
-				child = (MOUSE*) child->m_child;
-			} while (child);
+		if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+			DrawLocolandLayers(this);
+		}
+		else {
+			Map->DrawLayer(0);
+			Map->DrawLayer(1);
+			Map->DrawLayer(2);
+			Map->DrawLayer(3);
+			Map->DrawLayer(4);
+			Map->DrawLayer(5);
+			Map->DrawLayer(6);
+			Map->DrawLayer(7);
+			if (extendedLayers) {
+				core->SetRenderState(D3DRS_ZFUNC, 7);
+			}
+			Map->DrawLayer(8);
+			if (extendedLayers) {
+				core->SetRenderState(D3DRS_ZWRITEENABLE, 0);
+			}
+			core->SetRenderState(D3DRS_ALPHABLENDENABLE, 1);
+			Map->DrawLayer(9);
+			Map->DrawLayer(10);
+			core->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_LINEAR);
+			Map->DrawLayer(11);
+			DrawSnow();
+			DrawSnowflakes();
+			core->SetTextureStageState(D3DTSS_MAGFILTER, D3DTEXF_POINT);
+			Map->DrawLayer(12);
+			DrawRain();
+			if (extendedLayers) {
+				Map->DrawLayer(14);
+				Map->DrawLayer(13);
+				Map->DrawLayer(15);
+				core->SetRenderState(D3DRS_ZWRITEENABLE, 1);
+				Map->DrawLayer(16);
+				Map->DrawLayer(17);
+				Map->DrawLayer(18);
+			}
+			else {
+				Map->DrawLayer(13);
+				Map->DrawLayer(14);
+			}
+			MOUSE* child = Mouse;
+			if (Mouse && !Mouse->m_unk0x70 && (Mouse->m_vid->m_flag & 0x8000)) {
+				do {
+					if (!(child->m_flag & 0x10000)) {
+						child->Draw();
+					}
+					child = (MOUSE*) child->m_child;
+				} while (child);
+			}
 		}
 	}
 	DrawSquall();
@@ -233,9 +319,12 @@ void GRAPH::DrawEffect(int p_draw)
 				num = (start + dur - t) << 8;
 				dur -= dur / 9;
 			}
-			int scale = num / dur;
-			int color = ((((core->m_effectA[1] & 0xff00) * scale) >> 8) & 0xff00) +
-						(((core->m_effectA[1] & 0xff) * scale) >> 8) + (((core->m_effectA[1] * scale) >> 8) & 0xff0000);
+			unsigned int scale = num / dur;
+
+
+			unsigned int sourceColor = (unsigned int) core->m_effectA[1];
+			unsigned int color = ((((sourceColor & 0xff00u) * scale) >> 8) & 0xff00u) +
+						(((sourceColor & 0xffu) * scale) >> 8) + (((sourceColor * scale) >> 8) & 0xff0000u);
 			LightBar(0, 0, core->m_width, core->m_height, color);
 			LightBar(0, 0, core->m_width, core->m_height, color);
 			LightBar(0, 0, core->m_width, core->m_height, color);

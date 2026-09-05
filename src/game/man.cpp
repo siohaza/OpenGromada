@@ -266,11 +266,20 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			UNIT::Action(0x5d, cap - UNIT::Action(0x5c, 0, 0, 0), 0, 0);
 			break;
 		}
+		float armorY = GetY();
+		if (HasMenuScriptLayout()) {
+			const float scale = UIDrawScale();
+			if (scale != 1.0f) {
+
+
+				armorY += (1.0f - scale) * GetVid()->m_unk0x54;
+			}
+		}
 		if (m_exData && HaveItemFromEnd(m_exData, 204)) {
 			Child()->AddLink(Map->CreateSprite(
 				Map->Vid(200),
 				(float) GetX(),
-				(float) GetY(),
+				armorY,
 				(float) (GetZ() + GetVid()->m_unk0x54),
 				Direction(),
 				0
@@ -280,7 +289,7 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			Child()->AddLink(Map->CreateSprite(
 				Map->Vid(201),
 				(float) GetX(),
-				(float) GetY(),
+				armorY,
 				(float) (GetZ() + GetVid()->m_unk0x54),
 				Direction(),
 				0
@@ -290,7 +299,7 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			Child()->AddLink(Map->CreateSprite(
 				Map->Vid(202),
 				(float) GetX(),
-				(float) GetY(),
+				armorY,
 				(float) (GetZ() + GetVid()->m_unk0x54),
 				Direction(),
 				0

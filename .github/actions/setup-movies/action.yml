@@ -1,0 +1,50 @@
+name: Build shared movie libraries
+description: Build shared FFmpeg libraries
+inputs:
+  triplet:
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v6
+      with:
+        repository: microsoft/vcpkg
+        ref: 04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4
+        path: dependencies/vcpkg
+        persist-credentials: false
+    - name: Install Linux dependency-build tools
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y autoconf automake libtool pkg-config nasm patchelf zip unzip
+    - name: Install macOS dependency-build tools
+      if: runner.os == 'macOS'
+      shell: bash
+      run: brew install autoconf automake libtool pkg-config nasm
+    - name: Bootstrap and build FFmpeg (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        MOVIE_TRIPLET: ${{ inputs.triplet }}
+        VCPKG_BINARY_SOURCES: clear
+      run: |
+        dependencies/vcpkg/bootstrap-vcpkg.sh -disableMetrics
+        dependencies/vcpkg/vcpkg install \
+          "ffmpeg[core,avcodec,avformat,swresample,swscale]:$MOVIE_TRIPLET" \
+          --overlay-triplets="$GITHUB_WORKSPACE/.github/triplets" \
+          --no-print-usage
+    - name: Bootstrap and build FFmpeg (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        MOVIE_TRIPLET: ${{ inputs.triplet }}
+        VCPKG_BINARY_SOURCES: clear
+      run: |
+        & dependencies/vcpkg/bootstrap-vcpkg.bat -disableMetrics
+        if ($LASTEXITCODE -ne 0) { throw 'vcpkg bootstrap failed' }
+        & dependencies/vcpkg/vcpkg.exe install `
+          "ffmpeg[core,avcodec,avformat,swresample,swscale]:$env:MOVIE_TRIPLET" `
+          "--overlay-triplets=$env:GITHUB_WORKSPACE/.github/triplets" `
+          --host-triplet=x64-windows --no-print-usage
+        if ($LASTEXITCODE -ne 0) { throw 'FFmpeg build failed' }

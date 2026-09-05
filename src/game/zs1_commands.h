@@ -23,6 +23,4 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 	STRING* p_outStr
 );
 
-int ZS1_CountUnitsInMap(MAP* p_map);
-
 #endif

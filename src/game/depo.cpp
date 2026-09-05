@@ -8,6 +8,7 @@
 #include "sprite/sprite.h"
 #include "ui/mouse.h"
 #include "util/myerror.h"
+#include "util/resource.h"
 #include "video/vid.h"
 #include "world/hash_map.h"
 
@@ -130,6 +131,10 @@ decomp_intptr DEPO::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	case 81:
 	case 200: {
 		UNIT::Action(p_action, p_a, p_b, p_c);
+		if (Map->m_logic.m_runtimeFault) return 0;
+		if (auto* resource = dynamic_cast<RESOURCE*>((STREAM*) p_a); resource && !resource->Good()) {
+			return 0;
+		}
 		Map->m_player[(m_flag >> 11) & 3]->AddPointerToSprite(this);
 		if (m_exData) {
 			int order[14];

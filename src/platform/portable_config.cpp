@@ -21,7 +21,7 @@ INI_FILE& Config()
 			if (legacy.Load((root + "settings.ini").c_str())) {
 				ini.MergeMissing(legacy);
 				ini.SetInt("meta", "SettingsImported", 1);
-				ini.Save();
+				ini.Save("portable.ini");
 			}
 		}
 	}
@@ -33,6 +33,11 @@ INI_FILE& Config()
 const char* PortableConfig_GetString(const char* p_section, const char* p_key)
 {
 	return Config().Get(p_section, p_key);
+}
+
+const char* PortableConfig_GetRegistryString(const char* p_section, const char* p_key)
+{
+	return Config().GetRaw(p_section, p_key);
 }
 
 int PortableConfig_GetInt(const char* p_section, const char* p_key, int p_default)
@@ -58,5 +63,5 @@ void PortableConfig_Erase(const char* p_section, const char* p_key)
 bool PortableConfig_Flush()
 {
 	INI_FILE& ini = Config();
-	return !ini.Dirty() || ini.Save();
+	return !ini.Dirty() || ini.Save("portable.ini");
 }

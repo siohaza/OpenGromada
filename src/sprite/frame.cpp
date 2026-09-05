@@ -1,5 +1,6 @@
 #include "sprite/frame.h"
 
+#include "game/game_descriptor.h"
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
@@ -54,6 +55,11 @@ decomp_intptr FRAME::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, 
 				else if (ani == 5) {
 					ChangeAnimation(3);
 					m_flag |= 0x200;
+				}
+				else if (GameDesc->m_menuRules == GAME_MENU_ZS1 && (ani == 6 || ani == 7)) {
+
+
+					ChangeAnimation((ani & 1) | 2);
 				}
 				if (m_ani == 0xe) {
 					ChangeAnimation(0);

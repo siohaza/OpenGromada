@@ -7,6 +7,9 @@
 #include "video/vid_exdata.h"
 #include "world/hash_map.h"
 
+#include <unordered_set>
+#include <vector>
+
 #define TRAIN_INFO_UNSET 0x497423f0
 
 // FUNCTION: ALIEN 0x43a8e0
@@ -113,11 +116,33 @@ TRAIN_INFO::TRAIN_INFO(const ENGINE* p_engine)
 	m_unk0x34 = 0;
 	m_unk0x38 = 0;
 	m_unk0x08 = TRAIN_INFO_UNSET;
-	const ENGINE* e;
-	for (e = p_engine; e; e = e->m_nextEngine) {
-		AddEngine(e);
+
+
+
+	std::unordered_set<const ENGINE*> seen;
+	std::vector<const ENGINE*> cars;
+	auto collect = [&](const ENGINE* first, bool forward) {
+		for (const ENGINE* e = first; e; e = forward ? e->m_nextEngine : e->m_prevEngine) {
+			if (!seen.insert(e).second) {
+				return false;
+			}
+			cars.push_back(e);
+		}
+		return true;
+	};
+	if (!p_engine || !collect(p_engine, true) || !collect(p_engine->m_prevEngine, false)) {
+		m_unk0x18 = 0;
+		m_unk0x08 = 0;
+		m_unk0x3c = 100;
+		if (Map) {
+			Map->m_logic.RuntimeError("invalid cyclic train links while calculating train properties");
+		}
+		else {
+			MYERROR::Log(::Error, "invalid cyclic train links while calculating train properties");
+		}
+		return;
 	}
-	for (e = p_engine->m_prevEngine; e; e = e->m_prevEngine) {
+	for (const ENGINE* e : cars) {
 		AddEngine(e);
 	}
 	if (m_unk0x30) {

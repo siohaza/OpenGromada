@@ -53,8 +53,30 @@ void LOGIC::Release()
 	m_unk0x54 = 0;
 	m_main = -1;
 	m_protoFixups.clear();
+	m_runtimeFault = false;
+	m_runtimeOffset = -1;
 	for (int i = 0; i < 256; ++i) {
 		m_actionN[i] = -1;
+		m_externalArgs[i] = -1;
+	}
+}
+
+void LOGIC::RuntimeError(const char* p_reason, int p_detail)
+{
+	if (!m_runtimeFault) {
+		MYERROR::Log(::Error, "SCRIPT [%s] %s byte %d: %s (%d); script halted",
+			GameDesc->m_profileId, m_name.m_str, m_runtimeOffset, p_reason, p_detail);
+	}
+	m_runtimeFault = true;
+}
+
+void LOGIC::RebuildExternalSignatures()
+{
+	for (int& count : m_externalArgs) count = -1;
+	for (int i = 0; i < m_variables.m_n; ++i) {
+		const LOGICVAR& external = m_variables.m_data[i].m_var;
+		if (external.m_flag == 2 && external.m_a >= 0 && external.m_a < 256)
+			m_externalArgs[external.m_a] = external.m_extra;
 	}
 }
 
@@ -124,27 +146,9 @@ int LOGIC::LoadLGC(const STRING& p_name)
 	m_line = 0;
 	while (!func()) {
 	}
-	if (!m_protoFixups.empty()) {
-		int stub = m_stackPos;
-		m_stackData[m_stackPos++] = 1;
-		LOGIC_BYTECODE::WriteInt32(m_stackData + m_stackPos, 0);
-		m_stackPos += 4;
-		m_stackData[m_stackPos++] = 31;
-		int lastLogged = -1;
-		for (size_t f = 0; f < m_protoFixups.size(); ++f) {
-			if (m_protoFixups[f].second != lastLogged) {
-				lastLogged = m_protoFixups[f].second;
-				MYERROR::Log(
-					::Error,
-					"SCRIPT: forward-declared function '%s' has no definition (stubbed)",
-					m_variables.m_data[lastLogged].m_name.m_str
-				);
-			}
-			LOGIC_BYTECODE::WriteInt32(m_stackData + m_protoFixups[f].first, stub);
-			m_variables.m_data[m_protoFixups[f].second].m_var.m_a = stub;
-		}
-		m_protoFixups.clear();
-	}
+
+
+
 	MYERROR::Log(
 		::Error,
 		// STRING: ALIEN 0x4830ec
@@ -176,60 +180,110 @@ int LOGIC::LoadLGC(const STRING& p_name)
 	delete[] (char*) m_unk0x44;
 	m_unk0x44 = 0;
 	fclose(file);
+	RebuildExternalSignatures();
 	return 0;
 }
 
 // FUNCTION: ALIEN 0x41f7d0
 int LOGIC::Load(const STRING& p_name)
 {
-	int stackCount = m_stack.m_n;
 	FSTREAM stream;
-	FILE* file = *p_name.m_str ? Platform_FOpen(p_name.m_str, "rb") : 0;
-	stream.m_file = file;
+	stream.m_file = *p_name.m_str ? Platform_FOpen(p_name.m_str, "rb") : nullptr;
 	Release();
 	m_name = p_name;
 	if (!stream.m_file) {
 		Error(7, empty_str, 0);
 		return 1;
 	}
-	fread(&stackCount, 1, sizeof(stackCount), stream.m_file);
-	if (stackCount & 0xff000000) {
-		return LoadLGC(m_name);
+	const int fileSize = compat_filelength(stream.m_file);
+	if (fileSize < 4 || fileSize > 64 * 1024 * 1024) {
+		RuntimeError("invalid compiled script size", fileSize);
+		return 1;
 	}
-	if (m_stack.m_max < 128) {
-		LOGICSTACK* oldData = (LOGICSTACK*) m_stack.m_data;
-		LOGICSTACK* newData = new LOGICSTACK[128];
-		m_stack.m_data = (int*) newData;
-		if (!newData) {
-			MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", 128);
-		}
-		if (oldData) {
-			for (int i = 0; i < m_stack.m_max; ++i) {
-				((LOGICSTACK*) m_stack.m_data)[i] = oldData[i];
-			}
-			delete[] oldData;
-		}
-		m_stack.m_max = 128;
+	std::vector<char> bytes(fileSize);
+	if (fread(bytes.data(), 1, bytes.size(), stream.m_file) != bytes.size()) {
+		RuntimeError("truncated compiled script", fileSize);
+		return 1;
 	}
+	const int stackCount = LOGIC_BYTECODE::ReadInt32(bytes.data());
+	if (stackCount & 0xff000000) return LoadLGC(m_name);
+	size_t offset = 4;
+	auto require = [&](size_t count) {
+		if (count <= bytes.size() - offset) return true;
+		m_runtimeOffset = int(offset);
+		RuntimeError("truncated LGD field", int(count));
+		return false;
+	};
+	auto readString = [&](STRING& out) {
+		const char* begin = bytes.data() + offset;
+		const char* end = (const char*) memchr(begin, 0, bytes.size() - offset);
+		if (!end) {
+			m_runtimeOffset = int(offset);
+			RuntimeError("unterminated LGD string");
+			return false;
+		}
+		out = begin;
+		offset += size_t(end - begin) + 1;
+		return true;
+	};
+	if (stackCount < 0 || size_t(stackCount) > bytes.size() - offset) {
+		RuntimeError("invalid LGD stack count", stackCount);
+		return 1;
+	}
+	m_stack.Expand(stackCount);
 	m_stack.m_n = stackCount;
-	if (stackCount > m_stack.m_max) {
-		m_stack.Expand(stackCount);
-	}
-	LoadVar(&stream);
-	fread(&m_stackPos, 1, sizeof(m_stackPos), stream.m_file);
-	m_stackData = new char[m_stackPos];
-	if (!m_stackData) {
-		// STRING: ALIEN 0x483130
-		Error(2, "data2", 0);
-		exit(1);
-	}
-	fread(m_stackData, 1, m_stackPos, stream.m_file);
-	for (int i = 0; i < m_variables.m_n; ++i) {
-		// STRING: ALIEN 0x4822e0
-		if (!strcmp(m_variables.GetName(i), "main")) {
-			m_main = i;
+	for (int i = 0; i < stackCount; ++i) {
+		if (!require(1)) return 1;
+		LOGICSTACK& item = ((LOGICSTACK*) m_stack.m_data)[i];
+		item.m_type = bytes[offset++];
+		if (!(item.m_type & 8)) continue;
+		if (item.m_type & 1) {
+			if (!readString(item.m_str)) return 1;
+			for (size_t j = 0, n = strlen(item.m_str.m_str); j < n; ++j) item.m_str.m_str[j] ^= 0x17;
+		}
+		else {
+			if (!require(4)) return 1;
+			item.m_num = LOGIC_BYTECODE::ReadInt32(bytes.data() + offset);
+			offset += 4;
 		}
 	}
+	if (!require(4)) return 1;
+	const int variableCount = LOGIC_BYTECODE::ReadInt32(bytes.data() + offset);
+	offset += 4;
+	if (variableCount < 0 || size_t(variableCount) > (bytes.size() - offset) / 21) {
+		RuntimeError("invalid LGD symbol count", variableCount);
+		return 1;
+	}
+	m_variables.Expand(variableCount);
+	m_variables.m_n = variableCount;
+	for (int i = 0; i < variableCount; ++i) {
+		auto& symbol = m_variables.m_data[i];
+		if (!readString(symbol.m_name) || !require(20)) return 1;
+		const char* record = bytes.data() + offset;
+		symbol.m_var.m_flag = record[0];
+
+		symbol.m_var.m_a = LOGIC_BYTECODE::ReadInt32(record + 8);
+		symbol.m_var.m_type = LOGIC_BYTECODE::ReadInt32(record + 12);
+		symbol.m_var.m_extra = LOGIC_BYTECODE::ReadInt32(record + 16);
+		offset += 20;
+	}
+	for (int i = 0; i < variableCount; ++i) {
+		if (!readString(m_variables.m_data[i].m_var.m_value)) return 1;
+	}
+	if (!require(4)) return 1;
+	m_stackPos = LOGIC_BYTECODE::ReadInt32(bytes.data() + offset);
+	offset += 4;
+	if (m_stackPos < 0) {
+		RuntimeError("negative bytecode size", m_stackPos);
+		return 1;
+	}
+	if (!require(size_t(m_stackPos))) return 1;
+	m_stackData = new char[m_stackPos];
+	memcpy(m_stackData, bytes.data() + offset, m_stackPos);
+	for (int i = 0; i < m_variables.m_n; ++i) {
+		if (!strcmp(m_variables.GetName(i), "main")) m_main = i;
+	}
+	RebuildExternalSignatures();
 	return 0;
 }
 
@@ -737,7 +791,7 @@ void LOGIC::IntVar()
 			} while (Word(","));
 			WordEnd("}");
 		}
-		else if (Game_IsZS1() && m_inBody && !m_declStatic) {
+		else if (GameDesc->m_scriptDialect == GAME_SCRIPT_ZS1 && m_inBody && !m_declStatic) {
 			int slot = m_stack.m_n - 1;
 			vyrag();
 			m_stackData[m_stackPos++] = 38;
@@ -809,7 +863,7 @@ void LOGIC::StringVar()
 			} while (Word(","));
 			WordEnd("}");
 		}
-		else if (Game_IsZS1() && m_inBody && !m_declStatic && !(flags & 4)) {
+		else if (GameDesc->m_scriptDialect == GAME_SCRIPT_ZS1 && m_inBody && !m_declStatic && !(flags & 4)) {
 			int slot = m_stack.m_n - 1;
 			vyrag();
 			m_stackData[m_stackPos++] = 38;
@@ -1602,7 +1656,7 @@ void LOGIC::vyragCmpAnd()
 
 void LOGIC::vyrag()
 {
-	if (Game_IsZS1()) {
+	if (GameDesc->m_scriptDialect == GAME_SCRIPT_ZS1) {
 		vyragCmpAnd();
 		while (Word("||")) {
 			m_stackData[m_stackPos] = 45;

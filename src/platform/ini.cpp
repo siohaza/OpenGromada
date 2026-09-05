@@ -1,6 +1,7 @@
 #include "platform/ini.h"
 
 #include "platform/paths.h"
+#include "platform/save_file.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,44 +95,54 @@ bool INI_FILE::Load(const char* p_path)
 			continue;
 		}
 
-		m_sections.back().m_entries.push_back(Entry{Trim(p, eq), Trim(eq + 1, end)});
+		m_sections.back().m_entries.push_back(
+			Entry{Trim(p, eq), Trim(eq + 1, end), std::string(eq + 1, (size_t) (end - eq - 1))});
 	}
 
 	fclose(file);
 	return true;
 }
 
-bool INI_FILE::Save()
+bool INI_FILE::Save(const char* p_atomicRelativeName)
 {
 	if (m_path.empty()) {
 		return false;
 	}
 
-	FILE* file = Platform_FOpen(m_path.c_str(), "wb");
-	if (!file) {
-		return false;
-	}
-
+	std::string bytes;
 	bool wroteSection = false;
 	for (const Section& s : m_sections) {
 		if (s.m_entries.empty()) {
 			continue;
 		}
 		if (!s.m_name.empty()) {
-			fprintf(file, "[%s]\n", s.m_name.c_str());
+			bytes += "[" + s.m_name + "]\n";
 		}
 		else if (wroteSection) {
-			fprintf(file, "[]\n");
+			bytes += "[]\n";
 		}
 		wroteSection = true;
 		for (const Entry& e : s.m_entries) {
-			fprintf(file, "%s=%s\n", e.m_key.c_str(), e.m_value.c_str());
+			bytes += e.m_key + "=" + e.m_rawValue + "\n";
 		}
-		fprintf(file, "\n");
+		bytes += '\n';
 	}
 
-	if (fclose(file)) {
-		return false;
+	if (p_atomicRelativeName) {
+		if (!Platform_WriteSaveAtomic(p_atomicRelativeName, bytes)) {
+			return false;
+		}
+	}
+	else {
+		FILE* file = Platform_FOpen(m_path.c_str(), "wb");
+		if (!file) {
+			return false;
+		}
+		const bool wrote = fwrite(bytes.data(), 1, bytes.size(), file) == bytes.size();
+		const bool closed = fclose(file) == 0;
+		if (!wrote || !closed) {
+			return false;
+		}
 	}
 	m_dirty = false;
 	return true;
@@ -175,6 +186,20 @@ const char* INI_FILE::Get(const char* p_section, const char* p_key) const
 	return nullptr;
 }
 
+const char* INI_FILE::GetRaw(const char* p_section, const char* p_key) const
+{
+	const Section* section = Find(p_section ? p_section : "");
+	if (!section) {
+		return nullptr;
+	}
+	for (const Entry& entry : section->m_entries) {
+		if (IEquals(entry.m_key, p_key ? p_key : "")) {
+			return entry.m_rawValue.c_str();
+		}
+	}
+	return nullptr;
+}
+
 int INI_FILE::GetInt(const char* p_section, const char* p_key, int p_default) const
 {
 	const char* value = Get(p_section, p_key);
@@ -192,15 +217,17 @@ void INI_FILE::Set(const char* p_section, const char* p_key, const char* p_value
 
 	for (Entry& e : section->m_entries) {
 		if (IEquals(e.m_key, p_key ? p_key : "")) {
-			if (e.m_value != p_value) {
+			const char* value = p_value ? p_value : "";
+			if (e.m_value != value || e.m_rawValue != value) {
 				m_dirty = true;
 			}
-			e.m_value = p_value ? p_value : "";
+			e.m_value = value;
+			e.m_rawValue = value;
 			return;
 		}
 	}
 
-	section->m_entries.push_back(Entry{p_key ? p_key : "", p_value ? p_value : ""});
+	section->m_entries.push_back(Entry{p_key ? p_key : "", p_value ? p_value : "", p_value ? p_value : ""});
 	m_dirty = true;
 }
 

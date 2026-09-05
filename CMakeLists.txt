@@ -28,6 +28,52 @@ list(REMOVE_ITEM ALIEN_LIB_SOURCES "${ALIEN_MAIN}")
 add_library(alien_core STATIC ${ALIEN_LIB_SOURCES})
 target_link_libraries(alien_core PUBLIC SDL3::SDL3)
 
+set(ALIEN_MOVIES "AUTO" CACHE STRING "Movie playback: AUTO, ON, or OFF (FFmpeg 6+)")
+set_property(CACHE ALIEN_MOVIES PROPERTY STRINGS AUTO ON OFF)
+if(NOT ALIEN_MOVIES MATCHES "^(AUTO|ON|OFF)$")
+    message(FATAL_ERROR "ALIEN_MOVIES must be AUTO, ON, or OFF")
+endif()
+if(NOT ALIEN_MOVIES STREQUAL "OFF")
+    unset(FFMPEG_FOUND CACHE)
+    unset(FFMPEG_FOUND)
+    find_package(FFMPEG QUIET)
+    set(ALIEN_FFMPEG_FOUND FALSE)
+    set(ALIEN_FFMPEG_ERROR "Movie playback requires FFmpeg 6+ development libraries (vcpkg or pkg-config)")
+    if(FFMPEG_FOUND)
+        if(NOT FFMPEG_libavformat_FOUND OR NOT FFMPEG_libavformat_VERSION OR FFMPEG_libavformat_VERSION VERSION_LESS 60
+           OR NOT FFMPEG_libavcodec_FOUND OR NOT FFMPEG_libavcodec_VERSION OR FFMPEG_libavcodec_VERSION VERSION_LESS 60
+           OR NOT FFMPEG_libavutil_FOUND OR NOT FFMPEG_libavutil_VERSION OR FFMPEG_libavutil_VERSION VERSION_LESS 58
+           OR NOT FFMPEG_libswscale_FOUND OR NOT FFMPEG_libswscale_VERSION OR FFMPEG_libswscale_VERSION VERSION_LESS 7
+           OR NOT FFMPEG_libswresample_FOUND OR NOT FFMPEG_libswresample_VERSION OR FFMPEG_libswresample_VERSION VERSION_LESS 4)
+            set(ALIEN_FFMPEG_ERROR "FFMPEG package is incomplete or older than FFmpeg 6: avformat, avcodec, avutil, swscale and swresample are required")
+        else()
+            target_include_directories(alien_core SYSTEM PRIVATE ${FFMPEG_INCLUDE_DIRS})
+            target_link_libraries(alien_core PUBLIC ${FFMPEG_LIBRARIES})
+            set(ALIEN_FFMPEG_FOUND TRUE)
+        endif()
+    else()
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(ALIEN_FFMPEG_PKG QUIET IMPORTED_TARGET
+                libavformat>=60 libavcodec>=60 libavutil>=58 libswscale>=7 libswresample>=4)
+            if(ALIEN_FFMPEG_PKG_FOUND AND TARGET PkgConfig::ALIEN_FFMPEG_PKG)
+                target_link_libraries(alien_core PUBLIC PkgConfig::ALIEN_FFMPEG_PKG)
+                set(ALIEN_FFMPEG_FOUND TRUE)
+            endif()
+        endif()
+    endif()
+    if(ALIEN_FFMPEG_FOUND)
+        target_compile_definitions(alien_core PRIVATE OPENGROMADA_HAVE_FFMPEG=1)
+        message(STATUS "Movie playback: FFmpeg enabled (local ASF/AVI)")
+    elseif(ALIEN_MOVIES STREQUAL "ON")
+        message(FATAL_ERROR "${ALIEN_FFMPEG_ERROR}")
+    else()
+        message(STATUS "Movie playback: unavailable; SDL-only build")
+    endif()
+else()
+    message(STATUS "Movie playback: disabled")
+endif()
+
 target_compile_features(alien_core PUBLIC cxx_std_20)
 set_target_properties(alien_core PROPERTIES CXX_EXTENSIONS OFF)
 
@@ -131,7 +177,10 @@ if(ALIEN_STEAM_RUNTIME)
             BUILD_RPATH "\$ORIGIN"
             INSTALL_RPATH "\$ORIGIN")
     endif()
-    if(NOT APPLE)
+    if(APPLE)
+        install(FILES "${ALIEN_STEAM_RUNTIME}"
+            DESTINATION "OpenGromada.app/Contents/MacOS")
+    else()
         install(FILES "${ALIEN_STEAM_RUNTIME}"
             DESTINATION "${CMAKE_INSTALL_BINDIR}")
     endif()
@@ -161,7 +210,10 @@ if(APPLE)
         MACOSX_BUNDLE_ICON_FILE "OpenGromada.icns"
         MACOSX_BUNDLE_INFO_PLIST
             "${CMAKE_CURRENT_SOURCE_DIR}/resources/Info.plist.in")
+    target_link_options(alien_portable PRIVATE "-Wl,-headerpad_max_install_names")
 elseif(UNIX)
+    set_property(TARGET alien_portable APPEND PROPERTY LINK_DEPENDS
+        "${ALIEN_APP_ICON_PNG}")
     add_custom_command(TARGET alien_portable POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
             "${ALIEN_APP_ICON_PNG}"
@@ -194,6 +246,9 @@ if(UNIX AND NOT APPLE)
     install(FILES "${ALIEN_APP_ICON_PNG}"
         DESTINATION "${CMAKE_INSTALL_BINDIR}")
     install(FILES "${ALIEN_APP_ICON_PNG}"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps"
+        RENAME "io.github.siohaza.OpenGromada.png")
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/resources/OpenGromada-32.png"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/32x32/apps"
         RENAME "io.github.siohaza.OpenGromada.png")
     install(FILES

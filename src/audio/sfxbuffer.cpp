@@ -40,7 +40,7 @@ int SFXBUFFER::Play(int p_pan, int p_volume)
 			int id = m_unk0x0c;
 			m_loop = 0;
 			if (sfx && id >= 0 && id <= Sound->m_noSfx && sfx[id].m_samples[0]) {
-				m_loop = !sfx[id].m_unk0x20;
+				m_loop = Sound->IsLooped(id);
 			}
 			m_running = 1;
 		}

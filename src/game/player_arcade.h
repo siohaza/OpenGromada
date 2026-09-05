@@ -24,8 +24,8 @@ public:
 	MESSAGE m_msg;
 
 	void Control(INPUT_AS* p_input);
-	void RefreshUILayout();
-	unsigned int SetCleverAttack(int p_on);
+	void RefreshUILayout() override;
+	unsigned int SetCleverAttack(int p_on) override;
 	virtual void PutMessage(const STRING& p_msg, float p_x, float p_y); // vtable+0x24
 	void DeletePointerToSprite(SPRITE* p_sprite);
 };

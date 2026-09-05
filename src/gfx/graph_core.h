@@ -6,10 +6,12 @@
 #include "gfx/gamma.h"
 #include "gfx/gfxdefs.h"
 #include "util/decomp.h"
+#include <string>
 
 class TEXTURE;
 class STRING;
 class SETTINGS;
+class MoviePlayer;
 
 STRING GetPixelFormat(D3DFORMAT p_format);
 
@@ -154,6 +156,12 @@ public:
 	// SDL_Window* owned by the platform layer.
 	void* m_window;
 
+	MoviePlayer* m_movie = nullptr;
+	std::string m_movieName;
+	int m_movieX = 0, m_movieY = 0;
+	bool m_movieErrorReported = false;
+	bool m_movieActive = false;
+
 	void* m_screen;
 
 	int m_debugFontHeight;
@@ -185,6 +193,12 @@ public:
 	int PreTact();
 	void Effect(int p_effect, int p_a, int p_b, int p_duration);
 	void PostTact(int p_present);
+	int OpenMovie(const char* p_filename);
+	int IsMoviePlaying();
+	void StopMovie();
+	void PollMovie(bool p_consumeCompletion = true);
+	void PresentIdleMovie();
+	void PresentMovieFrame();
 	void ReloadPalettes();
 	void ClearScreen(COLOR p_color);
 	int Pause();

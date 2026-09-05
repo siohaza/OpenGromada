@@ -3,6 +3,7 @@
 #include "game/gametime.h"
 #include "game/map.h"
 #include "util/stream.h"
+#include "util/resource.h"
 #include "video/vid.h"
 
 extern VID* EmptyVid;
@@ -46,10 +47,19 @@ void TERRAIN::AddHpPerSecond(int p_hp)
 decomp_intptr TERRAIN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
 	switch (p_action) {
-	case 0xc8:
+	case 0xc8: {
 		SPRITE::Action(0xc8, p_a, p_b, p_c);
-		((STREAM*) p_a)->Read(&p_c, (p_b > 7) + 1);
+		STREAM* stream = (STREAM*) p_a;
+		RESOURCE* resource = dynamic_cast<RESOURCE*>(stream);
+		if ((resource && !resource->Good()) || Map->m_logic.m_runtimeFault) return 0;
+
+		unsigned char obsolete[2] = {};
+		if (!stream || stream->Read(obsolete, (p_b > 7) + 1)) {
+			if (resource) resource->Fail("truncated TERRAIN compact record");
+			else Map->m_logic.RuntimeError("truncated TERRAIN compact record");
+		}
 		break;
+	}
 	case 0x56:
 		Repair(1);
 		break;

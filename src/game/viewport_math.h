@@ -1,7 +1,9 @@
 #ifndef VIEWPORT_MATH_H
 #define VIEWPORT_MATH_H
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
 
 namespace VIEWPORT_MATH
 {
@@ -43,6 +45,26 @@ inline unsigned int ResolveShiftFlag(unsigned int p_flag, float p_viewWidth)
 	return p_flag;
 }
 
+inline int LegacyCoordinate(double p_value)
+{
+
+
+
+
+
+	if (!(p_value >= -0x1p63 && p_value < 0x1p63)) {
+		return 0;
+	}
+	return std::bit_cast<std::int32_t>((std::uint32_t) (std::int64_t) p_value);
+}
+
+inline int LegacyCoordinateDifference(int p_value, int p_center)
+{
+
+
+	return std::bit_cast<std::int32_t>((std::uint32_t) p_value - (std::uint32_t) p_center);
+}
+
 inline bool CoarseSpriteVisible(
 	int p_x,
 	int p_yMinusZ,
@@ -62,10 +84,10 @@ inline bool CoarseSpriteVisible(
 		halfHeight = 512;
 	}
 
-	int dx = p_x - p_centerX;
-	int dy = p_yMinusZ - p_centerY;
+	int dx = LegacyCoordinateDifference(p_x, p_centerX);
+	int dy = LegacyCoordinateDifference(p_yMinusZ, p_centerY);
 	return (dx >= -halfWidth && dx < halfWidth && dy >= -halfHeight && dy < halfHeight) ||
-		   p_worldY - p_centerY >= halfHeight;
+		   LegacyCoordinateDifference(p_worldY, p_centerY) >= halfHeight;
 }
 
 inline float RelativeAudioAxis(float p_source, float p_listener)

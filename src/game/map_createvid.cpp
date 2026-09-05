@@ -1,4 +1,5 @@
 #include "game/map.h"
+#include "game/game_descriptor.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture_font.h"
@@ -9,6 +10,7 @@
 #include "video/vid_hardware.h"
 #include "video/vid_hardware_z.h"
 #include "video/vid_light.h"
+#include "video/vid_mesh.h"
 #include "video/vid_software.h"
 #include "video/vid_software16.h"
 
@@ -22,13 +24,24 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 	VID* vid = 0;
 	STRING name;
 	VID scratch;
-	name.Read_res(p_res);
+	if (!p_res->ReadString(name)) {
+		return 0;
+	}
 	scratch.m_dotFrameCount = 32000;
 	long paramsPos = ftell(p_res->m_file);
 	scratch.LoadParameters(p_res);
+	if (!p_res->Good()) {
+		return 0;
+	}
 
 	STRING fname;
-	fname.Read_res(p_res);
+
+
+
+	const bool mapObjTail = GameDesc->m_mapObjTrailingBytes && p_res->m_containerType == 0x2050414d;
+	if (!p_res->ReadString(fname) || (!mapObjTail && !p_res->RequireEnd())) {
+		return 0;
+	}
 	fname = fname.ToLower();
 
 	p_res->m_state = 2;
@@ -169,11 +182,28 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 					"!!!ERROR!!!VID '%s': Load() not HEAD ",
 					fname.m_str
 				);
+				return 0;
 			}
-			vidFile.Read(&scratch.m_pixelFlag16, 2);
+			if (vidFile.Remaining() < 10 || vidFile.ReadWords(&scratch.m_pixelFlag16, 2, 2)) {
+				vidFile.Fail("truncated legacy VID HEAD");
+				return 0;
+			}
 		}
-		// Unused hardware-only VID_MESH assets fall back to ordinary sprites.
-		if (scratch.m_pixelFlag16 & 0x80) {
+
+
+		if (scratch.m_pixelFlag16 & 0x1000) {
+			vid = new VID_MESH;
+		}
+		else if (scratch.m_pixelFlag16 & 0x40) {
+
+
+
+
+			vidFile.Fail("unsupported VID CADR schema (pixel flag 0x40); matching executable evidence required");
+			if (removeTemp) Platform_Remove(fname.m_str);
+			return 0;
+		}
+		else if (scratch.m_pixelFlag16 & 0x80) {
 			vid = new VID_LIGHT;
 		}
 		else if (scratch.m_pixelFlag16 & 0x20) {
@@ -199,12 +229,25 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 	vid->m_idx = p_idx;
 	vid->SetName(name.m_str);
 	vid->SetFileName(fname.m_str);
-	vidFile.Read(&vid->m_defaultAniPeriod, 2);
-	vidFile.Read(&vid->m_dotFrameCount, 2);
-	vidFile.Read(&vid->m_unk0x2f6, 2);
-	vidFile.Read(&vid->m_messageLineHeight, 2);
+	if (!isFont) {
+		vidFile.ReadWords(&vid->m_defaultAniPeriod, 2, 2);
+		vidFile.ReadWords(&vid->m_dotFrameCount, 2, 2);
+		vidFile.ReadWords(&vid->m_unk0x2f6, 2, 2);
+		vidFile.ReadWords(&vid->m_messageLineHeight, 2, 2);
+	}
 	vid->LoadParameters(p_res);
+	if (!p_res->Good()) {
+		vid->ScalarDeletingDestructor(1);
+		return 0;
+	}
 	vid->Load(&vidFile);
+	if (!isFont && !vidFile.Good()) {
+		vid->ScalarDeletingDestructor(1);
+		if (removeTemp) {
+			Platform_Remove(fname.m_str);
+		}
+		return 0;
+	}
 	vidFile.Close();
 	if (removeTemp) {
 		Platform_Remove(fname.m_str);

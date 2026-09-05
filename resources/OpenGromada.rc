@@ -1,10 +1,12 @@
 LANGUAGE 25, 1
 
+// CMake and premake link the checked-in OpenGromada.res. The historical
+// non-icon .bin inputs below are not present in this source checkout; retain
+// those resources when updating its APPICON group from games.ico.
 START_BITMAP 2 "START_BITMAP.bin"
-1            3 "AppIcon.bin"
 AppMenu      4 "AppMenu.bin"
 AppAbout     5 "AppAbout.bin"
 START_DIALOG 5 "START_DIALOG.bin"
 AppAccel     9 "AppAccel.bin"
-AppIcon     14 "AppIconGroup.bin"
+AppIcon   ICON "games.ico"
 1           16 "Version.bin"

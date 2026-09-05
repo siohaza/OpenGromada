@@ -34,6 +34,23 @@ public:
 	FILE* m_file;    // 0x38
 	int m_type;      // 0x3c
 
+
+	bool m_readOnly;
+	bool m_failed;
+	int m_readBegin;
+	int m_readEnd;
+	int m_recordIndex;
+	int m_fileEnd;
+	int m_containerType = 0;
+
+	bool Good() const { return !m_failed; }
+	int Remaining() const;
+	int ReadWords(void* p_buf, int p_size, int p_wordSize = 4);
+	bool ReadString(STRING& p_string);
+	bool Skip(int p_size);
+	bool RequireEnd();
+	bool Fail(const char* p_reason);
+
 	STRING* Close();
 	int Open(FILE* p_file, unsigned int p_type);
 	int OpenForRead(const STRING& p_name, unsigned int p_type);

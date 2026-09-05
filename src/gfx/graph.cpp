@@ -2,6 +2,7 @@
 #include "gfx/graph.h"
 
 #include "game/gametime.h"
+#include "game/game_descriptor.h"
 #include "game/settings.h"
 #include "gfx/color.h"
 #include "gfx/gamma.h"
@@ -13,9 +14,13 @@
 #include "sprite/plane_internal.h"
 #include "util/myerror.h"
 #include "util/registry.h"
+#include "util/resource.h"
 #include "util/string.h"
 
 #include <SDL3/SDL.h>
+#include <bit>
+#include <cmath>
+#include <cstdint>
 #include <string.h>
 
 inline static unsigned short RampPack(int p_r, int p_g, int p_b)
@@ -491,36 +496,81 @@ void GRAPH::DrawLight(float p_x, float p_y, float p_z, int p_a, int p_b, unsigne
 	srcRect.bottom--;
 	GAMMA gamma(COLOR((int) p_color), COLOR((int) 0xff000000));
 	int lightSrc[4] = {srcRect.left, srcRect.top, srcRect.right, srcRect.bottom};
-	tex->Draw_z(z1, 0, dstRect, lightSrc, &gamma);
+
+	tex->Draw_z(
+		z1,
+		GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? std::bit_cast<int>(z1) : 0,
+		dstRect,
+		lightSrc,
+		&gamma
+	);
+}
+
+static bool ReadGraphParameterBytes(STREAM* p_stream, unsigned char* p_bytes, int p_size)
+{
+	RESOURCE* resource = dynamic_cast<RESOURCE*>(p_stream);
+	if (resource && resource->Remaining() < p_size) {
+		return resource->Fail("truncated graphics parameter record");
+	}
+	if (!p_stream || p_stream->Read(p_bytes, p_size)) {
+		if (resource) {
+			resource->Fail("truncated graphics parameter record");
+		}
+		else {
+			MYERROR::Log(::Error, "Truncated graphics parameter stream");
+		}
+		return false;
+	}
+	return true;
+}
+
+static uint32_t GraphParameterWord(const unsigned char* p_bytes)
+{
+	return uint32_t(p_bytes[0]) | (uint32_t(p_bytes[1]) << 8) | (uint32_t(p_bytes[2]) << 16) |
+		   (uint32_t(p_bytes[3]) << 24);
 }
 
 // FUNCTION: ALIEN 0x433bb0
 unsigned char* GRAPH::OldLoadParameters(STREAM* p_stream)
 {
-	STREAM* stream = p_stream;
-	stream->Read(&m_env, 4);
-	unsigned int packed;
-	stream->Read(&packed, 4);
-	GAMMA gamma(GAMMA::DECODE, packed);
+
+
+	unsigned char bytes[11];
+	if (!ReadGraphParameterBytes(p_stream, bytes, sizeof(bytes))) {
+		return nullptr;
+	}
+	const int force = std::bit_cast<int16_t>(uint16_t(uint16_t(bytes[9]) | (uint16_t(bytes[10]) << 8)));
+	GAMMA gamma(GAMMA::DECODE, GraphParameterWord(bytes + 4));
+	m_env = GraphParameterWord(bytes);
 	SetGamma(gamma);
-	unsigned char dir;
-	stream->Read(&dir, 1);
-	short force;
-	stream->Read(&force, 2);
-	return SetWind(force, dir);
+	return SetWind(force, bytes[8]);
 }
 
 // FUNCTION: ALIEN 0x433cd0
 int GRAPH::LoadParameters(STREAM* p_stream)
 {
-	int gamma[2] = {0, 0};
-	p_stream->Read(&m_env, 4);
-	p_stream->Read(gamma, 8);
-	SetGamma(*(GAMMA*) gamma);
-	int wd;
-	p_stream->Read(&wd, 4);
-	m_windDirection = (unsigned char) wd;
-	return p_stream->Read(&m_windForce, 4);
+
+
+	unsigned char bytes[20];
+	if (!ReadGraphParameterBytes(p_stream, bytes, sizeof(bytes))) {
+		return 1;
+	}
+	const float force = std::bit_cast<float>(GraphParameterWord(bytes + 16));
+	if (!std::isfinite(force)) {
+		if (RESOURCE* resource = dynamic_cast<RESOURCE*>(p_stream)) {
+			resource->Fail("non-finite graphics wind force");
+		}
+		else {
+			MYERROR::Log(::Error, "Non-finite graphics wind force");
+		}
+		return 1;
+	}
+	GAMMA gamma(GAMMA::RAW_COPY, GraphParameterWord(bytes + 4), GraphParameterWord(bytes + 8));
+	m_env = GraphParameterWord(bytes);
+	SetGamma(gamma);
+	m_windDirection = (unsigned char) GraphParameterWord(bytes + 12);
+	m_windForce = force;
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x433d40
@@ -536,8 +586,7 @@ int GRAPH::SaveParameters(STREAM* p_stream)
 // FUNCTION: ALIEN 0x4343e0
 int GRAPH::PlayMovie(const char* p_filename)
 {
-	(void) p_filename;
-	return 0;
+	return GameDesc->m_nativeMoviePlayback ? OpenMovie(p_filename) : 0;
 }
 
 // FUNCTION: ALIEN 0x442600

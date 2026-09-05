@@ -1,5 +1,6 @@
 #include "video/vid_light.h"
 
+#include "game/game_descriptor.h"
 #include "gfx/color.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
@@ -71,7 +72,8 @@ void VID_LIGHT::Load(RESOURCE* p_res)
 // FUNCTION: ALIEN 0x414d00
 void VID_LIGHT::SetLayer()
 {
-	m_layer = 0xb;
+
+	m_layer = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? 8 : 11;
 }
 
 inline static unsigned int BlendLightColor(unsigned int color, const GAMMA& sum)
@@ -90,7 +92,8 @@ inline static unsigned int BlendLightColor(unsigned int color, const GAMMA& sum)
 int VID_LIGHT::Draw(SPRITE* p_sprite)
 {
 	unsigned int color = m_unk0x488[p_sprite->m_noCadr];
-	if (!(m_unk0x47c & 0x40) && color && color != 0xff000000) {
+
+	if (!PropHide() && color && color != 0xff000000) {
 		if (m_flag & 0x800000) {
 			Graph->SetTextureStageState(D3DTSS_COLOROP, D3DTOP_MODULATE2X);
 		}

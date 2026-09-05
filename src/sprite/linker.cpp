@@ -10,6 +10,16 @@ LINKER::LINKER(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, SPRITE*
 		m_dx = p_x - p_parent->X();
 		m_dy = p_y - p_parent->Y();
 		m_dz = p_z - p_parent->Z();
+		if (p_parent->HasMenuScriptLayout()) {
+			const float scale = p_parent->UIDrawScale();
+			if (scale != 1.0f) {
+
+
+
+				m_dx /= scale;
+				m_dy = (m_dy - m_dz) / scale + m_dz;
+			}
+		}
 		AngleAssign(&m_ddir, p_dir);
 	}
 	else {
@@ -41,6 +51,14 @@ void LINKER::LinkRotate(ANGLE p_dir)
 	SPRITE* s = m_owner;
 	if (!s) {
 		s = m_parent;
+	}
+	if (HasMenuScriptLayout()) {
+		const float scale = UIDrawScale();
+		if (scale != 1.0f) {
+			const float dz = Z() - s->Z();
+			xoff *= scale;
+			yoff = scale * (yoff - dz) + dz;
+		}
 	}
 	ChangeCoor(s->X() + xoff, s->Y() + yoff, Z());
 }

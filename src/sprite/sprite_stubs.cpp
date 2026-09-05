@@ -20,8 +20,69 @@
 #include "world/hash_map.h"
 
 #include <bit>
+#include <climits>
+#include <cstdint>
 #include <math.h>
 #include <stdlib.h>
+#include <vector>
+
+namespace
+{
+bool SpriteRecordError(STREAM* stream, const char* reason)
+{
+	if (auto* resource = dynamic_cast<RESOURCE*>(stream)) return resource->Fail(reason);
+	if (Map) Map->m_logic.RuntimeError(reason);
+	return false;
+}
+
+bool ReadSpriteWord(STREAM* stream, uint32_t& value, int size = 4)
+{
+	unsigned char bytes[4] = {};
+	if (!stream || stream->Read(bytes, size)) return SpriteRecordError(stream, "truncated SPRITE action record");
+	value = 0;
+	for (int i = 0; i < size; ++i) value |= uint32_t(bytes[i]) << (8 * i);
+	return true;
+}
+
+bool WriteSpriteWord(STREAM* stream, uint32_t value)
+{
+	unsigned char bytes[4];
+	for (int i = 0; i < 4; ++i) bytes[i] = (unsigned char) (value >> (8 * i));
+	return (stream && !stream->Write(bytes, 4)) || SpriteRecordError(stream, "cannot write SPRITE action record");
+}
+
+bool ReadSpriteCount(STREAM* stream, uint32_t& count, int countSize, int itemSize)
+{
+	if (!ReadSpriteWord(stream, count, countSize)) return false;
+	if (count > uint32_t(countSize == 2 ? SHRT_MAX : INT_MAX / itemSize)) {
+		return SpriteRecordError(stream, "invalid SPRITE action/list count");
+	}
+	if (auto* resource = dynamic_cast<RESOURCE*>(stream); resource && count > uint32_t(resource->Remaining() / itemSize)) {
+		return resource->Fail("SPRITE actions/list exceed record boundary");
+	}
+	return true;
+}
+
+bool ReadSpriteActions(STREAM* stream, LIST_ACT& actions, bool compact)
+{
+	uint32_t count = 0;
+	if (!ReadSpriteCount(stream, count, compact ? 2 : 4, compact ? 12 : 16)) return false;
+	std::vector<ACT> staged;
+	staged.reserve(count < 512 ? count : 512);
+	for (uint32_t i = 0; i < count; ++i) {
+		uint32_t words[4] = {};
+		for (int j = 0; j < (compact ? 3 : 4); ++j) {
+			if (!ReadSpriteWord(stream, words[j])) return false;
+		}
+		staged.emplace_back(std::bit_cast<int32_t>(words[0]), std::bit_cast<int32_t>(words[1]),
+			std::bit_cast<int32_t>(words[2]), std::bit_cast<int32_t>(words[3]));
+	}
+	actions.Expand((int) count);
+	for (uint32_t i = 0; i < count; ++i) actions.m_data[i] = staged[i];
+	actions.m_n = (int) count;
+	return true;
+}
+}
 
 // FUNCTION: ALIEN 0x40ec40
 void SPRITE::Draw()
@@ -702,7 +763,7 @@ void SPRITE::Tact()
 			}
 		}
 		unsigned int aging = m_vid->m_exData->m_unk0x40;
-		if (aging != 999999) {
+		if (GameDesc->m_weaponHasKeyframes && aging != 999999) {
 			if (CurrentTime - m_exData->m_time > aging) {
 				m_exData->m_time = CurrentTime;
 			}
@@ -732,6 +793,11 @@ inline static void ActionFloat(float* p_out, int p_value)
 // STUB: ALIEN 0x440830
 decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, decomp_intptr p_c)
 {
+	if ((p_action & 0xff) == 113 && GameDesc->m_scriptDialect == GAME_SCRIPT_CRAZY_LUNCH) {
+		if (!m_exData) m_exData = new EX_SPRITE_DATA(this);
+		m_exData->m_unk0x10 = p_a;
+		return 0;
+	}
 
 	switch (p_action & 0xff) {
 	case 201:
@@ -752,6 +818,12 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		}
 		return 0;
 	case 112:
+		if (GameDesc->m_scriptDialect == GAME_SCRIPT_CRAZY_LUNCH) {
+
+
+			SetCommand((int) p_a, (SPRITE*) p_b);
+			return 0;
+		}
 		if (!m_exData) {
 			m_exData = new EX_SPRITE_DATA(this);
 		}
@@ -1095,7 +1167,7 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 				m_exData = new EX_SPRITE_DATA(this);
 			}
 			else {
-				m_exData->m_unk0x10 = m_vid->m_unk0x6c;
+				m_exData->m_unk0x10 = m_vid->DefaultLifetime();
 			}
 		}
 
@@ -1132,6 +1204,14 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 	case 63:
 		if (HasUIScriptLayout() && Graph && Map) {
 			GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+			if (HasMenuScriptLayout() && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0) {
+				const auto point = UI_SCALING::TransformCenteredMenuPoint(
+					(float) p_a - Map->m_shiftX, (float) p_b - Map->m_shiftY, (float) p_c,
+					0, 0, GameDesc->m_menuScriptWidth, GameDesc->m_menuScriptHeight,
+					graph->m_width, graph->m_height, UIDrawScale());
+				ChangeCoor(point.m_x + Map->m_shiftX, point.m_y + Map->m_shiftY, point.m_z);
+				return 0;
+			}
 			// Preserve the menu root's assigned anchor.
 			UI_SCALING::AXIS_ANCHOR anchorX = UIAnchorX();
 			UI_SCALING::AXIS_ANCHOR anchorY = UIAnchorY();
@@ -1181,6 +1261,10 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 	case 84: // ACT_GET_INVULNERABLE
 		return m_invulnerable;
 	case 99: // ACT_GET_PARENT
+		if (GameDesc->m_scriptDialect == GAME_SCRIPT_CRAZY_LUNCH) {
+			Map->m_logic.RuntimeError("unsupported Crazy Lunch SET_HASH action", p_action);
+			return 0;
+		}
 		return (decomp_intptr) m_parent;
 	case 111:
 		return (m_flag >> 2) & 0x1f;
@@ -1354,19 +1438,8 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		return 0;
 	}
 	case 200: {
-		RESOURCE* res = (RESOURCE*) p_a;
-		short count = 0;
-		res->Read(&count, 2);
-		m_actions.m_n = count;
-		m_actions.Expand(count);
-
-		for (int i = 0; i < m_actions.m_n; ++i) {
-			int rec[3] = {0, 0, 0};
-			res->Read(rec, 12);
-			m_actions.m_data[i].m_cmd = rec[0];
-			m_actions.m_data[i].m_a = rec[1];
-			m_actions.m_data[i].m_b = rec[2];
-		}
+		STREAM* res = (STREAM*) p_a;
+		if (!ReadSpriteActions(res, m_actions, true)) return 0;
 
 		if (p_b < 7) {
 			m_actions.Release();
@@ -1405,74 +1478,53 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 		if (p_b < 7) {
 			return 0;
 		}
-		int army = 0;
-		res->Read(&army, 1);
-		ChangeArmy(army);
+		uint32_t army = 0;
+		if (!ReadSpriteWord(res, army, 1)) return 0;
+		ChangeArmy((int) army);
 		return 0;
 	}
 	case 80: { // ACT_SAVE
-		RESOURCE* res = (RESOURCE*) p_a;
+		STREAM* res = (STREAM*) p_a;
+		if (auto* resource = dynamic_cast<RESOURCE*>(res); resource && !resource->Good()) return 0;
+		if (m_actions.m_n < 0 || m_actions.m_n > INT_MAX / 16 ||
+			(m_actions.m_n && !m_actions.m_data)) {
+			SpriteRecordError(res, "invalid SPRITE action storage");
+			return 0;
+		}
 
 		if (m_actions.m_n == 1 && m_actions.m_data[0].m_cmd == 0x49) {
 			m_actions.Release();
 		}
 
-		res->Write(&m_actions.m_n, 4);
+		if (!WriteSpriteWord(res, (uint32_t) m_actions.m_n)) return 0;
 		for (int i = 0; i < m_actions.m_n; ++i) {
 			const ACT& a = m_actions.m_data[i];
 			int rec[4] = {a.m_cmd, (int) a.m_a, (int) a.m_b, (int) a.m_c};
-			res->Write(rec, 16);
+
+
+			int cmd = a.m_cmd;
+			if (cmd == 0x20 || cmd == 0x22 || cmd == 0x4a || cmd == 0x96 || cmd == 0x97 || cmd == 0x98 || cmd == 0x4b) {
+				rec[1] = (int) Map->m_saveSpriteIds.Encode((const void*) a.m_a);
+			}
+			for (int word : rec) if (!WriteSpriteWord(res, (uint32_t) word)) return 0;
 		}
 
-		LIST_INT list;
-		if (m_exData) {
-			LIST_INT& src = m_exData->m_list;
-			list.m_n = src.m_n;
-			list.m_max = src.m_max;
-			list.m_data = new int[src.m_max];
-			if (!list.m_data) {
-				MYERROR::LogExit(
-					::Error,
-					// STRING: ALIEN 0x48444c
-					"!!!ERROR!!!::LIST: Not enough memory for = %i",
-					src.m_max
-				);
-			}
-			for (int i = 0; i < list.m_n; ++i) {
-				list.m_data[i] = src.m_data[i];
-			}
+
+
+		if (GameDesc->m_unitRecordsHaveShortList) return 0;
+		const LIST_INT* list = m_exData ? &m_exData->m_list : nullptr;
+		const int count = list ? list->m_n : 0;
+		if (count < 0 || count > INT_MAX / 4 || (count && !list->m_data)) {
+			SpriteRecordError(res, "invalid SPRITE list storage");
+			return 0;
 		}
-		res->Write(&list.m_n, 4);
-		res->Write(list.m_data, 4 * list.m_n);
+		if (!WriteSpriteWord(res, (uint32_t) count)) return 0;
+		for (int i = 0; i < count; ++i) if (!WriteSpriteWord(res, (uint32_t) list->m_data[i])) return 0;
 		return 0;
 	}
 	case 81: { // ACT_RESTORE
-		RESOURCE* res = (RESOURCE*) p_a;
-
-		res->Read(&m_actions.m_n, 4);
-		if (m_actions.m_n > m_actions.m_max) {
-			ACT* old = m_actions.m_data;
-			m_actions.m_data = new ACT[m_actions.m_n];
-			if (!m_actions.m_data) {
-				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", m_actions.m_n);
-			}
-			if (old) {
-				for (int i = 0; i < m_actions.m_max; ++i) {
-					m_actions.m_data[i] = old[i];
-				}
-				delete[] old;
-			}
-			m_actions.m_max = m_actions.m_n;
-		}
-		for (int i = 0; i < m_actions.m_n; ++i) {
-			int rec[4] = {0, 0, 0, 0};
-			res->Read(rec, 16);
-			ACT& a = m_actions.m_data[i];
-			a.m_cmd = rec[0];
-			a.m_a = rec[1];
-			a.m_b = rec[2];
-			a.m_c = rec[3];
-		}
+		STREAM* res = (STREAM*) p_a;
+		if (!ReadSpriteActions(res, m_actions, false)) return 0;
 
 		for (int idx = m_actions.m_n - 1; idx >= 0; --idx) {
 			ACT& act = m_actions.m_data[idx];
@@ -1485,42 +1537,29 @@ decomp_intptr SPRITE::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b,
 			}
 		}
 
-		if (p_b < 12) {
+		if (p_b < 12 || GameDesc->m_unitRecordsHaveShortList) {
 			return 0;
 		}
 
-		LIST_INT list;
-		res->Read(&list.m_n, 4);
-		if (list.m_n > list.m_max) {
-			int* old = list.m_data;
-			list.m_data = new int[list.m_n];
-			if (!list.m_data) {
-				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory %i", list.m_n);
-			}
-			if (old) {
-				for (int i = 0; i < list.m_max; ++i) {
-					list.m_data[i] = old[i];
-				}
-				delete[] old;
-			}
-			list.m_max = list.m_n;
+		uint32_t count = 0;
+		if (!ReadSpriteCount(res, count, 4, 4)) return 0;
+		std::vector<int> list;
+		list.reserve(count < 512 ? count : 512);
+		for (uint32_t i = 0; i < count; ++i) {
+			uint32_t word = 0;
+			if (!ReadSpriteWord(res, word)) return 0;
+			list.push_back(std::bit_cast<int32_t>(word));
 		}
-		res->Read(list.m_data, 4 * list.m_n);
-
-		if (list.m_n) {
+		if (count) {
 			if (!m_exData) {
 				m_exData = new EX_SPRITE_DATA(this);
 			}
 			LIST_INT& dst = m_exData->m_list;
 			delete[] dst.m_data;
-			dst.m_n = list.m_n;
-			dst.m_max = list.m_max;
-			dst.m_data = new int[list.m_max];
-			if (!dst.m_data) {
-				MYERROR::LogExit(::Error, "!!!ERROR!!!::LIST: Not enough memory for = %i", dst.m_max);
-			}
+			dst.m_n = dst.m_max = (int) count;
+			dst.m_data = new int[count];
 			for (int j = 0; j < dst.m_n; ++j) {
-				dst.m_data[j] = list.m_data[j];
+				dst.m_data[j] = list[j];
 			}
 		}
 		if (Game_IsZS1() && p_b >= 13) {
@@ -1758,13 +1797,14 @@ int SPRITE::ChangeDirection(ANGLE p_dir)
 						  ANGLE::CosTable2[stepped.m_dir] * m_vid->m_unk0x50 + m_y;
 				float x = ANGLE::CosTable[stepped.m_dir] * m_vid->m_unk0x4c -
 						  -(ANGLE::SinTable[stepped.m_dir] * m_vid->m_unk0x50) + m_x;
-				m_child->ChangeCoor(
-					ANGLE::CosTable[stepped.m_dir] * m_vid->m_unk0x4c -
-						-(ANGLE::SinTable[stepped.m_dir] * m_vid->m_unk0x50) + m_x,
-					ANGLE::SinTable2[stepped.m_dir] * m_vid->m_unk0x4c -
-						ANGLE::CosTable2[stepped.m_dir] * m_vid->m_unk0x50 + m_y,
-					z
-				);
+				if (HasMenuScriptLayout()) {
+					const float scale = UIDrawScale();
+					if (scale != 1.0f) {
+						x = m_x + scale * (x - m_x);
+						y = m_y + scale * (y - m_y - (z - m_z)) + (z - m_z);
+					}
+				}
+				m_child->ChangeCoor(x, y, z);
 			}
 			else if (childVid->m_sprClass == 12 && !(childVid->m_flag & 0x2000000)) {
 				ANGLE stepped = m_vid->SteppedDirection(p_dir);
@@ -2226,6 +2266,13 @@ void SPRITE::CreateChild()
 				by = ANGLE::SinTable2[dir.m_dir] * m_vid->m_unk0x140[m_ani];
 				ox = ANGLE::SinTable[dir.m_dir] * m_vid->m_unk0x184[m_ani] + bx;
 				oy = by - ANGLE::CosTable2[dir.m_dir] * m_vid->m_unk0x184[m_ani];
+			}
+		}
+		if (HasMenuScriptLayout()) {
+			const float scale = UIDrawScale();
+			if (scale != 1.0f) {
+				ox *= scale;
+				oy = scale * (oy - m_vid->m_unk0x1c8[m_ani]) + m_vid->m_unk0x1c8[m_ani];
 			}
 		}
 		if (childVid->m_sprClass == 2 && Hash->CanPlace(childVid, ox + m_x, oy + m_y, m_vid->m_unk0x1c8[m_ani] + m_z)) {

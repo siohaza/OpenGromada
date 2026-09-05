@@ -1,5 +1,6 @@
 
 #include "game/zs1_commands.h"
+#include "game/zs1_save.h"
 
 #include "game/const.h"
 #include "game/map.h"
@@ -11,7 +12,9 @@
 #include "util/string.h"
 #include "video/vid.h"
 
+#include <SDL3/SDL.h>
 #include <math.h>
+#include <algorithm>
 #include <stdio.h>
 #include <string.h>
 #include <string>
@@ -21,38 +24,29 @@
 namespace
 {
 
-struct ZS1_ARG {
-	std::string m_key;
-	bool m_isString = false;
-	int m_int = 0;
-	std::string m_str;
-};
-
-struct ZS1_USER {
-	std::string m_name;
-	std::vector<ZS1_ARG> m_args;
-	std::vector<std::pair<int, std::vector<ZS1_ARG>>> m_levels;
-};
-
-struct ZS1_RECORD {
-	std::string m_name;
-	int m_score = 0;
-	int m_type = 0;
-};
-
-struct ZS1_STORE {
-	bool m_loaded = false;
-	int m_current = -1;
-	std::vector<ZS1_USER> m_users;
-	std::vector<ZS1_ARG> m_global;
-	std::vector<ZS1_ARG> m_level;
-	std::vector<ZS1_RECORD> m_records;
-};
-
 ZS1_STORE g_store;
 
 const char* PROFILE_FILE = "zs1_profiles.dat";
 const char* RECORDS_FILE = "zs1_records.dat";
+
+FILE* OpenLegacyProgress(const char* name)
+{
+	const std::string local = std::string(Platform_PrefPath()) + name;
+	if (FILE* file = Platform_FOpen(local.c_str(), "rb")) return file;
+	if (FILE* file = Platform_FOpen(name, "rb")) return file;
+
+
+
+	const char* overridePath = SDL_getenv("ALIEN_SHOOTER_PREF_PATH");
+	if (overridePath && *overridePath) return nullptr;
+	char* old = SDL_GetPrefPath("SigmaTeam", "AlienShooter");
+	if (!old) return nullptr;
+	const std::string path = std::string(old) + name;
+	SDL_free(old);
+	FILE* file = Platform_FOpen(path.c_str(), "rb");
+	if (file) MYERROR::Log(::Error, "ZS1: importing legacy %s read-only; original retained", path.c_str());
+	return file;
+}
 
 ZS1_ARG* FindArg(std::vector<ZS1_ARG>& p_bank, const char* p_key)
 {
@@ -75,40 +69,31 @@ std::vector<ZS1_ARG>* ScopeBank(int p_scope)
 	return &g_store.m_users[g_store.m_current].m_args;
 }
 
-void WriteBank(FILE* p_file, const char* p_tag, const std::vector<ZS1_ARG>& p_bank)
+bool SaveStore()
 {
-	for (const ZS1_ARG& arg : p_bank) {
-		if (arg.m_isString) {
-			fprintf(p_file, "%ss\t%s\t%s\n", p_tag, arg.m_key.c_str(), arg.m_str.c_str());
-		}
-		else {
-			fprintf(p_file, "%si\t%s\t%d\n", p_tag, arg.m_key.c_str(), arg.m_int);
-		}
+	if (!ZS1_SaveNativeStore(g_store)) {
+		MYERROR::Log(::Error, "ZS1 save failed; recoverable originals retained (check native backups)");
+		return false;
 	}
+	return true;
 }
 
-void SaveStore()
+bool AddUser(const char* name)
 {
-	if (FILE* file = Platform_FOpen(PROFILE_FILE, "wb")) {
-		fprintf(file, "ZS1USERS\t1\ncurrent\t%d\n", g_store.m_current);
-		for (const ZS1_USER& user : g_store.m_users) {
-			fprintf(file, "user\t%s\n", user.m_name.c_str());
-			WriteBank(file, "arg0", user.m_args);
-			for (const auto& level : user.m_levels) {
-				fprintf(file, "level\t%d\n", level.first);
-				WriteBank(file, "larg", level.second);
-			}
-		}
-		fclose(file);
-	}
-	if (FILE* file = Platform_FOpen(RECORDS_FILE, "wb")) {
-		fprintf(file, "ZS1RECORDS\t1\n");
-		for (const ZS1_RECORD& record : g_store.m_records) {
-			fprintf(file, "rec\t%d\t%d\t%s\n", record.m_score, record.m_type, record.m_name.c_str());
-		}
-		fclose(file);
-	}
-	Platform_InvalidatePathCache();
+	if (!*name || g_store.m_users.size() >= 100 || g_store.m_writeBlocked) return false;
+	ZS1_USER user;
+	user.m_name = name;
+	user.m_slot = ZS1_FreeNativeSlot(g_store);
+
+	const auto place = std::lower_bound(g_store.m_users.begin(), g_store.m_users.end(), user.m_slot,
+		[](const ZS1_USER& existing, int slot) { return existing.m_slot < slot; });
+	const int previous = g_store.m_current;
+	g_store.m_current = int(place - g_store.m_users.begin());
+	g_store.m_users.insert(place, std::move(user));
+	if (SaveStore()) return true;
+	g_store.m_users.erase(g_store.m_users.begin() + g_store.m_current);
+	g_store.m_current = previous;
+	return false;
 }
 
 void ParseArgLine(std::vector<ZS1_ARG>* p_bank, bool p_isString, char* p_rest)
@@ -139,11 +124,14 @@ void LoadStore()
 		return;
 	}
 	g_store.m_loaded = true;
-	if (FILE* file = Platform_FOpen(PROFILE_FILE, "rb")) {
+	if (FILE* file = OpenLegacyProgress(PROFILE_FILE)) {
 		char line[1024];
+		const bool header = fgets(line, sizeof(line), file) && !strncmp(line, "ZS1USERS\t1", 10);
+		if (!header) g_store.m_writeBlocked = true;
 		ZS1_USER* user = 0;
 		std::vector<ZS1_ARG>* levelBank = 0;
-		while (fgets(line, sizeof(line), file)) {
+		while (header && fgets(line, sizeof(line), file)) {
+			if (!strchr(line, '\n')) { g_store.m_writeBlocked = true; break; }
 			line[strcspn(line, "\r\n")] = 0;
 			char* rest = strchr(line, '\t');
 			if (!rest) {
@@ -181,14 +169,17 @@ void LoadStore()
 	if (g_store.m_current >= (int) g_store.m_users.size()) {
 		g_store.m_current = -1;
 	}
-	if (FILE* file = Platform_FOpen(RECORDS_FILE, "rb")) {
+	if (FILE* file = OpenLegacyProgress(RECORDS_FILE)) {
 		char line[1024];
-		while (fgets(line, sizeof(line), file)) {
+		const bool header = fgets(line, sizeof(line), file) && !strncmp(line, "ZS1RECORDS\t1", 12);
+		if (!header) g_store.m_writeBlocked = true;
+		while (header && fgets(line, sizeof(line), file)) {
+			if (!strchr(line, '\n')) { g_store.m_writeBlocked = true; break; }
 			line[strcspn(line, "\r\n")] = 0;
 			int score;
 			int type;
-			int offset;
-			if (sscanf(line, "rec\t%d\t%d\t%n", &score, &type, &offset) == 2) {
+			int offset = 0;
+			if (sscanf(line, "rec\t%d\t%d\t%n", &score, &type, &offset) == 2 && offset > 0) {
 				ZS1_RECORD record;
 				record.m_score = score;
 				record.m_type = type;
@@ -197,6 +188,10 @@ void LoadStore()
 			}
 		}
 		fclose(file);
+	}
+	if (ZS1_LoadNativeStore(g_store) < 0) {
+		g_store.m_writeBlocked = true;
+		MYERROR::Log(::Error, "ZS1: invalid native progress; writes disabled to preserve the original files");
 	}
 }
 
@@ -238,13 +233,8 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 				return ZS1_CMD_INT;
 			}
 		}
-		if (*p_str1) {
-			ZS1_USER user;
-			user.m_name = p_str1;
-			g_store.m_users.push_back(user);
-			SaveStore();
-			*p_outInt = 1;
-		}
+
+		*p_outInt = AddUser(p_str1);
 		return ZS1_CMD_INT;
 	case 8:
 	case 10: {
@@ -281,6 +271,7 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 	}
 	case 12:
 		if (p_var1 >= 0 && p_var1 < (int) g_store.m_users.size()) {
+			if (g_store.m_writeBlocked || !ZS1_DeleteNativeUser(g_store.m_users[p_var1].m_slot)) return ZS1_CMD_INT;
 			g_store.m_users.erase(g_store.m_users.begin() + p_var1);
 			if (g_store.m_current == p_var1) {
 				g_store.m_current = -1;
@@ -288,21 +279,24 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 			else if (g_store.m_current > p_var1) {
 				--g_store.m_current;
 			}
-			SaveStore();
-			*p_outInt = 1;
+			*p_outInt = SaveStore();
 		}
 		return ZS1_CMD_INT;
 	case 13:
 		if (p_var1 >= 0 && p_var1 < (int) g_store.m_users.size() && *p_str1) {
+			const std::string previous = g_store.m_users[p_var1].m_name;
 			g_store.m_users[p_var1].m_name = p_str1;
-			SaveStore();
-			*p_outInt = 1;
+			*p_outInt = SaveStore();
+			if (!*p_outInt) g_store.m_users[p_var1].m_name = previous;
 		}
 		return ZS1_CMD_INT;
-	case 14:
+	case 14: {
+		const int previous = g_store.m_current;
 		g_store.m_current = p_var1 >= 0 && p_var1 < (int) g_store.m_users.size() ? p_var1 : -1;
-		SaveStore();
+		*p_outInt = SaveStore();
+		if (!*p_outInt) g_store.m_current = previous;
 		return ZS1_CMD_INT;
+	}
 	case 15:
 		*p_outInt = g_store.m_current;
 		return ZS1_CMD_INT;
@@ -322,8 +316,11 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 			++pos;
 		}
 		g_store.m_records.insert(g_store.m_records.begin() + pos, record);
-		SaveStore();
-		*p_outInt = (int) pos;
+		if (SaveStore()) *p_outInt = (int) pos;
+		else {
+			g_store.m_records.erase(g_store.m_records.begin() + pos);
+			*p_outInt = -1;
+		}
 		return ZS1_CMD_INT;
 	}
 	case 18:
@@ -348,7 +345,7 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 		}
 		return ZS1_CMD_INT;
 	case 22:
-		SaveStore();
+		*p_outInt = SaveStore();
 		return ZS1_CMD_INT;
 	case 29: {
 		VID* vid = p_map->GetVid(p_var1);
@@ -363,27 +360,23 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 	case 31:
 		*p_outInt = Const ? Const->m_debugMode : 0;
 		return ZS1_CMD_INT;
-	case 32:
+	case 32: {
+		auto previous = std::move(g_store.m_records);
 		g_store.m_records.clear();
-		SaveStore();
+		if (!SaveStore()) g_store.m_records = std::move(previous);
 		return ZS1_CMD_INT;
+	}
 	case 33:
 		for (size_t i = 0; i < g_store.m_users.size(); ++i) {
 			if (g_store.m_users[i].m_name == p_str1) {
+				const int previous = g_store.m_current;
 				g_store.m_current = (int) i;
-				SaveStore();
-				*p_outInt = 1;
+				*p_outInt = SaveStore();
+				if (!*p_outInt) g_store.m_current = previous;
 				return ZS1_CMD_INT;
 			}
 		}
-		if (*p_str1) {
-			ZS1_USER user;
-			user.m_name = p_str1;
-			g_store.m_users.push_back(user);
-			g_store.m_current = (int) g_store.m_users.size() - 1;
-			SaveStore();
-			*p_outInt = 1;
-		}
+		*p_outInt = AddUser(p_str1);
 		return ZS1_CMD_INT;
 	case 34:
 		MYERROR::Log(::Error, "ZS1: DBG_1");
@@ -398,9 +391,16 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 			if (level.first == p_var1) {
 				g_store.m_level = level.second;
 				*p_outInt = 1;
-				break;
+				return ZS1_CMD_INT;
 			}
 		}
+		const int loaded = ZS1_LoadNativeLevel(user.m_slot, p_var1, g_store.m_level);
+		if (loaded < 0) {
+			g_store.m_writeBlocked = true;
+			p_map->m_logic.RuntimeError("invalid ZS1 native level save", p_var1);
+			return ZS1_CMD_INT;
+		}
+		*p_outInt = loaded;
 		return ZS1_CMD_INT;
 	}
 	case 48: {
@@ -410,86 +410,23 @@ ZS1_CMD_RESULT ZS1_SendCommand2(
 		ZS1_USER& user = g_store.m_users[g_store.m_current];
 		for (auto& level : user.m_levels) {
 			if (level.first == p_var1) {
+				const auto previous = level.second;
 				level.second = g_store.m_level;
-				SaveStore();
-				*p_outInt = 1;
+				*p_outInt = SaveStore();
+				if (!*p_outInt) level.second = previous;
 				return ZS1_CMD_INT;
 			}
 		}
 		user.m_levels.push_back({p_var1, g_store.m_level});
-		SaveStore();
-		*p_outInt = 1;
+		*p_outInt = SaveStore();
+		if (!*p_outInt) user.m_levels.pop_back();
 		return ZS1_CMD_INT;
 	}
 	case 49:
 		g_store.m_level.clear();
 		return ZS1_CMD_INT;
 	default:
-		MYERROR::Log(::Error, "ZS1: SendCommand2 id %i not implemented (var1=%i var2=%i)", p_id, p_var1, p_var2);
+		p_map->m_logic.RuntimeError("unsupported ZS1 SendCommand2", p_id);
 		return ZS1_CMD_INT;
 	}
-}
-
-static int CountDeathChain(const unsigned char* p_mask, VID* p_vid)
-{
-	if (!p_vid || !p_vid->m_aniChildVid[15]) {
-		return 0;
-	}
-	int count = 0;
-	int direct = p_vid->m_unk0x20c[15];
-	if (MAP::ValidVidIndex(direct) && p_mask[direct]) {
-		++count;
-	}
-	int nested = p_vid->m_aniChildVid[15]->m_unk0x20c[15];
-	if (MAP::ValidVidIndex(nested) && p_mask[nested]) {
-		++count;
-	}
-	return count;
-}
-
-int ZS1_CountUnitsInMap(MAP* p_map)
-{
-	static unsigned char mask[MAP::MAX_VIDS];
-	memset(mask, 0, sizeof(mask));
-
-	LOGIC& logic = p_map->m_logic;
-	int var = logic.m_variables.Location(STRING("MonstersVid"));
-	if (var < 0 || logic.m_variables.m_data[var].m_var.m_flag != 1) {
-		return 0;
-	}
-	const LOGICVAR& monsters = logic.m_variables.m_data[var].m_var;
-	LOGICSTACK* slots = (LOGICSTACK*) logic.m_stack.m_data;
-	for (int i = 0; i < monsters.m_extra && monsters.m_a + i < logic.m_stack.m_n; ++i) {
-		int nvid = slots[monsters.m_a + i].Int();
-		if (MAP::ValidVidIndex(nvid)) {
-			mask[nvid] = 1;
-		}
-	}
-
-	int count = 0;
-	for (int layer = 0; layer < MAP::LayerCount(); ++layer) {
-		for (int i = 0; i < p_map->m_layers[layer].m_n; ++i) {
-			SPRITE* sprite = (SPRITE*) p_map->m_layers[layer].m_data[i];
-			VID* vid = sprite->m_vid;
-			if (vid && MAP::ValidVidIndex(vid->m_idx) && mask[vid->m_idx]) {
-				++count;
-				count += CountDeathChain(mask, vid);
-			}
-			int queued = sprite->m_actions.m_n;
-			if (!queued || sprite->m_actions.m_data[queued - 1].m_cmd == 73) {
-				continue;
-			}
-			for (int a = queued - 1; a >= 0; --a) {
-				const ACT& act = sprite->m_actions.m_data[a];
-				if (act.m_cmd == 73) {
-					break;
-				}
-				if (act.m_cmd == 35 && act.m_a > 0 && MAP::ValidVidIndex((int) act.m_a) && mask[act.m_a]) {
-					++count;
-					count += CountDeathChain(mask, p_map->Vid((int) act.m_a));
-				}
-			}
-		}
-	}
-	return count;
 }

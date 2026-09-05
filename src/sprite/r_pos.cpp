@@ -6,11 +6,32 @@
 #include "sprite/r_map.h"
 
 #include <math.h>
+#include <cstdint>
 
 extern int dots_num;
 extern int dots_finded_for_return[95];
 #include "util/myerror.h"
+#include "util/resource.h"
 #include "util/stream.h"
+
+namespace
+{
+
+int RailRecordError(STREAM* p_stream, const char* p_reason)
+{
+	if (auto* resource = dynamic_cast<RESOURCE*>(p_stream)) {
+		resource->Fail(p_reason);
+	}
+	else if (Map) {
+		Map->m_logic.RuntimeError(p_reason);
+	}
+	else {
+		MYERROR::Log(::Error, "RAIL record: %s", p_reason);
+	}
+	return 1;
+}
+
+}
 
 inline ANGLE PosAngle(const R_POS* p_pos)
 {
@@ -159,42 +180,53 @@ R_DOT* R_POS::GetLinkedDot()
 // FUNCTION: ALIEN 0x43d890
 int R_POS::Write(STREAM* p_stream) const
 {
-	p_stream->Write(&m_dot->m_x, 2);
-	p_stream->Write(&m_dot->m_y, 2);
-	p_stream->Write(&m_dot->m_z, 2);
-	p_stream->Write(&(m_dot ? m_dot->m_links[m_link].m_dot : 0)->m_x, 2);
-	p_stream->Write(&(m_dot ? m_dot->m_links[m_link].m_dot : 0)->m_y, 2);
-	p_stream->Write(&(m_dot ? m_dot->m_links[m_link].m_dot : 0)->m_z, 2);
-	int buf = m_pos << 16;
-	return p_stream->Write(&buf, 4);
+	if (!m_dot || m_dot->m_noLinks < 1 || m_dot->m_noLinks > 6 || m_link < 0 ||
+		m_link >= m_dot->m_noLinks || !m_dot->m_links[m_link].m_dot) {
+		return RailRecordError(p_stream, "cannot save an unresolved railway position");
+	}
+	const R_DOT* next = m_dot->m_links[m_link].m_dot;
+
+
+	const int fields[8] = {m_dot->m_x, m_dot->m_y, m_dot->m_z, next->m_x, next->m_y, next->m_z, 0, m_pos};
+	unsigned char bytes[16];
+	for (int i = 0; i < 8; ++i) {
+		const uint32_t value = (uint32_t) fields[i];
+		bytes[2 * i] = (unsigned char) value;
+		bytes[2 * i + 1] = (unsigned char) (value >> 8);
+	}
+	if (!p_stream || p_stream->Write(bytes, sizeof(bytes))) {
+		return RailRecordError(p_stream, "cannot write railway position");
+	}
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x43d960
 int R_POS::Read(STREAM* p_stream)
 {
-	short x;
-	short y;
-	short z;
-	p_stream->Read(&x, 2);
-	p_stream->Read(&y, 2);
-	p_stream->Read(&z, 2);
-	m_dot = RailMap.GetDot(x, y, z);
-	p_stream->Read(&x, 2);
-	p_stream->Read(&y, 2);
-	p_stream->Read(&z, 2);
-	if (m_dot) {
-		m_link = m_dot->GetLink_idx(RailMap.GetDot(x, y, z));
+	unsigned char bytes[16];
+	if (!p_stream || p_stream->Read(bytes, sizeof(bytes))) {
+		return RailRecordError(p_stream, "truncated railway position");
 	}
-	if (m_link < 0) {
-		MYERROR::Log(
-			::Error,
-			// STRING: ALIEN 0x484324
-			"!!!ERROR!!!RAIL: Read error"
-		);
+	int fields[8];
+	for (int i = 0; i < 8; ++i) {
+		const uint32_t value = uint32_t(bytes[2 * i]) | (uint32_t(bytes[2 * i + 1]) << 8);
+		fields[i] = value >= 0x8000 ? int(value) - 0x10000 : int(value);
 	}
-	int result = p_stream->Read(&m_pos, 4);
-	m_pos >>= 16;
-	return result;
+
+
+	R_DOT* dot = RailMap.GetDot(fields[0], fields[1], fields[2]);
+	R_DOT* next = RailMap.GetDot(fields[3], fields[4], fields[5]);
+	if (!dot || !next || dot->m_noLinks < 1 || dot->m_noLinks > 6) {
+		return RailRecordError(p_stream, "railway position names a missing rail");
+	}
+	const int link = dot->GetLink_idx(next);
+	if (link < 0) {
+		return RailRecordError(p_stream, "railway position names an unconnected rail");
+	}
+	m_dot = dot;
+	m_link = link;
+	m_pos = fields[7];
+	return 0;
 }
 
 // FUNCTION: ALIEN 0x4517d0

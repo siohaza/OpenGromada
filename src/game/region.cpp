@@ -3,6 +3,7 @@
 #include "game/region.h"
 
 #include "game/gametime.h"
+#include "game/game_descriptor.h"
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
@@ -205,7 +206,10 @@ void REGION::Draw()
 VID* REGION::ConvertVid(VID* p_vid, float p_x, float p_y, float p_z)
 {
 	int iter;
-	for (SPRITE* sprite = Map->FirstSprite(10, &iter); sprite; sprite = Map->NextSprite(10, &iter)) {
+
+
+	const int layer = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? 7 : 10;
+	for (SPRITE* sprite = Map->FirstSprite(layer, &iter); sprite; sprite = Map->NextSprite(layer, &iter)) {
 		REGION* region = (REGION*) sprite;
 		if (region->m_vid->m_sprClass == 23 && region->m_z + 25.0f > p_z &&
 			((region->m_flag & 8) || region->IsInsideXY(p_x, p_y))) {

@@ -4,7 +4,7 @@ Reverse engineered engine that is used in variety of games developed by Sigma Ga
 
 ## Features
 
-- Supports Alien Shooter/Zombie Shooter
+- Supports AS1/ZS1, Theseus, Crazy Lunch, Locoland/Steamland.
 - Cross-platform and cross-arch support
 - Widescreen resolution support
 - Gamepad support
@@ -19,6 +19,7 @@ Requirements:
 - C++20 compiler
 - SDL3
 - Steamworks SDK (optional, needed only for Steam's AS1)
+- FFmpeg 6+ (optional, needed for Locoland videos)
 
 ```sh
 cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release
@@ -40,15 +41,17 @@ the game's data directories. Alternatively, point to that directory with
 | `--resolution=WIDTHxHEIGHT` | Sets the resolution. `--resolution=auto` (alias: `desktop`) uses the desktop resolution. You can also give `--width` and `--height`. |
 | `--fullscreen` / `--windowed` | Selects fullscreen or windowed mode. New profiles start in fullscreen at the desktop resolution. Automatic windowed mode fits the window inside 1280x800. |
 | `--native-resolution` | The default. The game renders gameplay at the native resolution, inside a frame with a maximum size of 1280x720 (1152x720 on 16:10 screens). Menus always render at the full native resolution. On maps with small terrain, the game can select a smaller frame to hide unbuilt areas. |
-| `--no-native-resolution` | The game renders gameplay in a retail scale frame that is 480 pixels tall. The frame width follows the screen aspect. |
+| `--no-native-resolution` | Uses the profile's base height frame. The frame width follows the screen aspect. |
 | `--render-width=WIDTH` | Limits the width of the render frame to WIDTH. If you also give `--native-resolution`, the native mode wins. |
 | `--ui-scale=auto\|1\|2\|3` | Sets the size of the HUD and menu art. `auto` selects a scale from the resolution, with a maximum of 2x during gameplay. Explicit values are exact. |
 | `--vsync` / `--no-vsync` | Turns vertical sync on or off. |
 | `--red-blood` | Shows the original red blood effects. |
-| `--data-path=PATH` | Sets the folder that holds the game data. |
-| `--game=as1\|zs1` | Overrides game detection. Without it, the engine identifies the game from `objects.res`. |
+| `--data-path=PATH` / `--data-dir=PATH` | Sets the folder that holds the game data. |
+| `--game=as1\|zs1\|theseus\|crazy-lunch\|locoland` | Selects a title explicitly. |
+| `--probe-game=json` | Prints detection, configuration, resource sections, candidates and runtime/movie availability, without starting the game. |
 | `--pref-path=PATH` | Sets the folder for saves, settings, and logs. |
-| `--config=PATH` / `--script=PATH` | Loads an extra configuration file |
+| `--config=PATH` | Selects the startup configuration before opening resources. |
+| `--script=PATH` | Overrides the startup map/script. Directly starting a later campaign map can skip initialization performed by earlier maps. |
 
 ## File locations
 

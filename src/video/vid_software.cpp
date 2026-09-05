@@ -1,8 +1,10 @@
 #include "video/vid_software.h"
 
 #include "compress/qs1_coder.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
+#include "game/viewport_math.h"
 #include "gfx/asmdraw.h"
 #include "gfx/color.h"
 #include "gfx/graph.h"
@@ -15,10 +17,24 @@
 #include "util/packed.h"
 #include "util/resource.h"
 
+#include <bit>
 #include <cmath>
+#include <cstdint>
+#include <limits.h>
+#include <memory>
 #include <string.h>
 
 extern float FSin[256];
+
+static int SoftwareDepthAdd(int p_depth, int p_delta)
+{
+
+
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+		return std::bit_cast<int32_t>(uint32_t(p_depth) + uint32_t(p_delta));
+	}
+	return p_depth + p_delta;
+}
 
 inline static GAMMA ScreenGamma(const GRAPH_CORE* p_graph)
 {
@@ -127,15 +143,31 @@ static int DrawScaledUIFrame(
 	int targetWidth = ScaledUIBoundary(p_vid->m_unk0x2f6, p_scale) + p_horizontalGap;
 	bool horizontallyUnclipped = p_x0 >= (int) p_graph->m_viewXMin && p_x0 + targetWidth <= (int) p_graph->m_viewXMax;
 	if (!withDepthDelta) {
-		p_z += 1024;
+		p_z = SoftwareDepthAdd(p_z, 1024);
 		if (p_z > 0x7fff) {
 			p_z = 0x7fff;
 		}
 	}
 	bool sloped = !withDepthDelta && p_vid->m_unk0x24 > p_vid->m_footprintHeight;
+	const bool locoland = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND;
+	if (locoland && alpha) {
+		p_z = (unsigned short) p_z;
+	}
+	int firstVisibleRow = 0;
+	if (locoland && alpha && sloped) {
+		while (firstVisibleRow < p_rows &&
+			p_yTop + ScaledUIBoundary(firstVisibleRow + 1, p_scale) <= target.m_clip.m_top) {
+			++firstVisibleRow;
+		}
+	}
 
 	for (int row = 0; row < p_rows; ++row) {
-		int rowZ = p_z + (sloped ? 8 * (p_rows - row) : 0);
+
+
+
+		int rowZ = locoland
+			? p_z - ((alpha && sloped && row > firstVisibleRow) ? 8 * (row - firstVisibleRow) : 0)
+			: p_z + (sloped ? 8 * (p_rows - row) : 0);
 		int rowTop = p_yTop + ScaledUIBoundary(row, p_scale);
 		int rowBottom = p_yTop + ScaledUIBoundary(row + 1, p_scale);
 		int rowHeight = rowBottom - rowTop;
@@ -173,7 +205,7 @@ static int DrawScaledUIFrame(
 					color = (unsigned int) p_palette[indices[i]];
 					short delta;
 					memcpy(&delta, zdelta + 2 * i, sizeof(delta));
-					pixelZ = (short) (p_z + delta);
+					pixelZ = (short) SoftwareDepthAdd(p_z, delta);
 					mode = SCALED_UI_OPAQUE_SIGNED_GT;
 				}
 				else if (directRgb16) {
@@ -187,7 +219,7 @@ static int DrawScaledUIFrame(
 					color = (unsigned int) p_palette[indices[i]];
 					pixelZ = (short) rowZ;
 					mode = alpha ? SCALED_UI_ALPHA_UNSIGNED_GE
-								 : (horizontallyUnclipped ? SCALED_UI_OPAQUE_UNSIGNED_GE : SCALED_UI_OPAQUE_SIGNED_GT);
+						: (horizontallyUnclipped && !locoland ? SCALED_UI_OPAQUE_UNSIGNED_GE : SCALED_UI_OPAQUE_SIGNED_GT);
 				}
 				int sourceX = x + i;
 				if (row < 8 && sourceX >= sourceSplit && sourceX < sourceSplit + sourceTileWidth) {
@@ -418,26 +450,82 @@ void VID_SOFTWARE::SetReColorForArmy(unsigned int p_color)
 	}
 }
 
+
+
+
+static constexpr int kMaxShadowContourPoints = 256;
+
+static bool ValidateSoftwareFrame(const unsigned char* p_data, int p_size, unsigned short p_flags, int p_width)
+{
+	if (p_size < 6 || p_width < 0) {
+		return false;
+	}
+	int contours = PackedRead<short>(p_data);
+	if (contours < 0 || contours > kMaxShadowContourPoints || contours > (p_size - 6) / 6) {
+		return false;
+	}
+	int cursor = 2 + 6 * contours;
+	int rows = PackedRead<short>(p_data + cursor + 2);
+	cursor += 4;
+	if (rows < 0) {
+		return false;
+	}
+	int pixelBytes = 1;
+	if ((p_flags & 0x26) == 0x26) {
+		pixelBytes = 4;
+	}
+	else if (!(p_flags & 8)) {
+		pixelBytes = 2;
+	}
+	else if ((p_flags & 4) && !(p_flags & 2)) {
+		pixelBytes = 3;
+	}
+	for (int row = 0; row < rows; ++row) {
+		int x = 0;
+		for (;;) {
+			if (p_size - cursor < 2) {
+				return false;
+			}
+			int skip = p_data[cursor++];
+			int count = p_data[cursor++];
+			if (!skip && !count) {
+				break;
+			}
+			x += skip + count;
+			if (x > p_width || count * pixelBytes > p_size - cursor) {
+				return false;
+			}
+			cursor += count * pixelBytes;
+		}
+	}
+	return cursor == p_size;
+}
+
 // STUB: ALIEN 0x4154b0
 void VID_SOFTWARE::Load(RESOURCE* p_res)
 {
-	QS1_CODER* coder;
-	if (m_pixelFlag16 & 0x100) {
-		coder = new QS1_CODER(1);
+	if (m_pixelFlag16 & 0x1000) {
+		p_res->Fail("unsupported legacy software VID pixel layout (0x1000)");
+		return;
 	}
-	else {
-		coder = 0;
+	std::unique_ptr<QS1_CODER> coder;
+	if (m_pixelFlag16 & 0x100) {
+		coder.reset(new QS1_CODER(1));
 	}
 
-	COLOR palette[256];
+	COLOR palette[256] = {};
 	if (m_pixelFlag16 & 8) {
 		if (!p_res->GoNext(0x204c4150 /* 'PAL ' */)) {
 			if (m_pixelFlag16 & 0x10) {
-				p_res->Read(palette, 1024);
+				if (p_res->ReadWords(palette, 1024)) {
+					return;
+				}
 			}
 			else {
 				unsigned char rgb[768];
-				p_res->Read(rgb, 768);
+				if (p_res->Read(rgb, 768)) {
+					return;
+				}
 				unsigned int* dst = (unsigned int*) palette;
 				unsigned char* src = rgb;
 				for (int c = 256; c; --c) {
@@ -446,20 +534,26 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 					++dst;
 				}
 			}
-			unsigned int* col = (unsigned int*) palette;
 			for (int c = 0; c < 256; ++c) {
 				palette[c].m_value = COLOR(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd), palette[c]).m_value;
 			}
 		}
 		else {
-			Error(5, "PAL ", 0);
+			p_res->Fail("missing software palette");
+			return;
 		}
 	}
 
 	if (p_res->GoNext(0x41544144 /* 'DATA' */)) {
-		Error(5, "DATA", 0);
+		p_res->Fail("missing software frame data");
+		return;
 	}
-	m_unk0x488 = p_res->m_resSize + (m_dotFrameCount > 0 ? m_dotFrameCount : 0);
+	const int paletteBytes = (m_pixelFlag16 & 8) ? 2 * PaletteSize() : 0;
+	if (m_dotFrameCount <= 0 || p_res->m_resSize < 0 || p_res->m_resSize > INT_MAX - m_dotFrameCount - paletteBytes) {
+		p_res->Fail("invalid software frame count or allocation size");
+		return;
+	}
+	m_unk0x488 = p_res->m_resSize + m_dotFrameCount;
 	if (m_pixelFlag16 & 8) {
 		m_unk0x488 += 2 * PaletteSize();
 	}
@@ -468,6 +562,8 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 		Error(2, "cadr", m_unk0x488);
 		return;
 	}
+
+	VID::MemoryInUse += m_unk0x488;
 	int* frames = (int*) operator new(4 * m_dotFrameCount);
 	m_unk0x484 = frames;
 	if (!frames) {
@@ -510,18 +606,42 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 		// frame start aligned because its fixed header and shadow contour are
 		// arrays of 16-bit values; RLE payloads themselves remain byte streams.
 		offset = (offset + 1) & ~1;
-		int packedSize;
-		p_res->Read(&packedSize, 4);
-		int left = p_res->ReadPacked((char*) m_unk0x48c + offset, packedSize, coder);
+		int packedSize = 0;
+		if (p_res->ReadWords(&packedSize, 4)) {
+			return;
+		}
+		if (packedSize < 2 || offset > m_unk0x488 || packedSize > m_unk0x488 - offset) {
+			p_res->Fail("decoded software frame exceeds its allocation");
+			return;
+		}
+		int left = p_res->ReadPacked((char*) m_unk0x48c + offset, packedSize, coder.get());
 		if (left) {
-			Error(
-				5,
-				// STRING: ALIEN 0x482bc0
-				"Can't decode software",
-				packedSize - left
-			);
+			p_res->Fail("cannot decode software frame");
+			return;
+		}
+		if (GameDesc->m_shortZeroSoftwareFrame && packedSize == 5 &&
+			!memcmp(static_cast<const char*>(m_unk0x48c) + offset, "\0\0\0\0\0", 5)) {
+
+
+
+
+			if (m_unk0x488 - offset < 6) {
+				p_res->Fail("short empty software frame exceeds its allocation");
+				return;
+			}
+			static_cast<unsigned char*>(m_unk0x48c)[offset + 5] = 0;
+			packedSize = 6;
 		}
 		if (packedSize != 2) {
+			if (!ValidateSoftwareFrame(
+					static_cast<const unsigned char*>(m_unk0x48c) + offset,
+					packedSize,
+					m_pixelFlag16,
+					m_unk0x2f6
+				)) {
+				p_res->Fail("invalid software frame contour or scanline");
+				return;
+			}
 			short flag2 = m_pixelFlag16;
 			if (!(flag2 & 8) && ((TEXTURE*) ((GRAPH_CORE*) Graph)->m_texE10)->m_format == 24 && !(flag2 & 2)) {
 
@@ -551,14 +671,18 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			offset += packedSize;
 		}
 		else {
-			frames[frame] = frames[PackedRead<short>((char*) m_unk0x48c + offset)];
+			int previous = PackedRead<short>((char*) m_unk0x48c + offset);
+			if (previous < 0 || previous >= frame) {
+				p_res->Fail("software frame reference is not an earlier frame");
+				return;
+			}
+			frames[frame] = frames[previous];
 		}
-		p_res->GoNextSub(0x41544144 /* 'DATA' */);
+		if (frame + 1 < m_dotFrameCount && p_res->GoNextSub(0x41544144 /* 'DATA' */)) {
+			p_res->Fail("missing software frame record");
+			return;
+		}
 	}
-	if (coder) {
-		delete coder;
-	}
-	VID::MemoryInUse += m_unk0x488;
 	SetLayer();
 
 	if (m_flag & 0x20) {
@@ -685,6 +809,13 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 // FUNCTION: ALIEN 0x415e90
 void VID_SOFTWARE::SetLayer()
 {
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+
+
+
+		m_layer = (m_flag & 0x8000) ? 10 : (m_pixelFlag & 2) ? 4 : m_canMove ? 3 : 2;
+		return;
+	}
 	if (m_unk0x47c & 0x20) {
 		m_layer = (m_pixelFlag & 2) ? 2 : 1;
 		return;
@@ -695,6 +826,17 @@ void VID_SOFTWARE::SetLayer()
 		return;
 	}
 	if (flag & 0x8000) {
+
+		if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
+			if (m_noDir == 255) {
+				m_layer = 18;
+				return;
+			}
+			if (m_unk0x0c == 16) {
+				m_layer = 16;
+				return;
+			}
+		}
 		m_layer = 0xd;
 		return;
 	}
@@ -833,7 +975,10 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 // STUB: ALIEN 0x416860
 int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 {
-	if (m_unk0x47c & 0x40) {
+	const bool locoland = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND;
+
+
+	if (locoland ? (m_flag & 0x400) : (m_unk0x47c & 0x40)) {
 		return 0;
 	}
 	if (!m_unk0x48c || !m_unk0x484) {
@@ -847,19 +992,27 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	int naturalScaledWidth = ScaledUIBoundary(width, uiScale);
 	int scaledWidth = naturalScaledWidth + horizontalGap;
 	int scaledHeight = ScaledUIBoundary(height, uiScale);
-	int x0 = (int) p_sprite->m_x - (int) Map->m_shiftX - naturalScaledWidth / 2;
-	int y0 = (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - scaledHeight / 2;
-	if (x0 + scaledWidth < ViewXMin() || x0 >= ViewXMax() || y0 + scaledHeight < ViewYMin() || y0 >= ViewYMax()) {
+	int x0 = locoland
+		? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_x - Map->m_shiftX - naturalScaledWidth / 2)
+		: (int) p_sprite->m_x - (int) Map->m_shiftX - naturalScaledWidth / 2;
+	int y0 = locoland
+		? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - scaledHeight / 2)
+		: (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - scaledHeight / 2;
+	if ((int64_t) x0 + scaledWidth < ViewXMin() || x0 >= ViewXMax() ||
+		(int64_t) y0 + scaledHeight < ViewYMin() || y0 >= ViewYMax()) {
 		return 0;
 	}
 
-	int z = (int) (p_sprite->m_z * 8.0f);
+	int z = locoland ? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_z * 8.0)
+		: (int) (p_sprite->m_z * 8.0f);
 	if ((m_flag & 0x8000) && z < 0x3fff) {
 		z += 0x3fff;
 	}
 	else if (m_flag & 0x10000) {
-		int bob = (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
-		z += bob;
+		int bob = locoland
+			? VIEWPORT_MATH::LegacyCoordinate((double) FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0)
+			: (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
+		z = SoftwareDepthAdd(z, bob);
 		y0 -= ScaledUIBoundary(bob / 8, uiScale);
 	}
 
@@ -918,9 +1071,12 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	}
 	if ((flag2 & 2) && (flag2 & 1) && (flag2 & 8)) {
 
-		z += 1024;
+		z = SoftwareDepthAdd(z, 1024);
 		if (z > 0x7fff) {
 			z = 0x7fff;
+		}
+		if (locoland) {
+			z = (unsigned short) z;
 		}
 		int rows = nRows;
 		if (yTop < ViewYMin()) {
@@ -935,7 +1091,11 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		}
 		int zstep = 0;
 		if (m_unk0x24 > m_footprintHeight) {
-			z += 8 * rows;
+
+
+			if (!locoland) {
+				z += 8 * rows;
+			}
 			zstep = -8;
 		}
 		for (int y = yTop; y < yEnd; ++y, z += zstep) {
@@ -1005,7 +1165,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 					count = ViewXMax() - xc;
 				}
 				for (int i = 0; i < count; ++i) {
-					short zv = (short) (PackedRead<short>(zdelta + 2 * (sourceOffset + i)) + z);
+					short zv = (short) SoftwareDepthAdd(z, PackedRead<short>(zdelta + 2 * (sourceOffset + i)));
 					if (zv > zrow[xc + i]) {
 						zrow[xc + i] = zv;
 						dst[xc + i] = palette[src[i]];
@@ -1018,7 +1178,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	}
 	if (!(flag2 & 8)) {
 
-		z += 1024;
+		z = SoftwareDepthAdd(z, 1024);
 		if (z > 0x7fff) {
 			z = 0x7fff;
 		}
@@ -1034,7 +1194,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 			yTop = ViewYMin();
 		}
 		int zstep = 0;
-		if (m_unk0x24 > m_footprintHeight) {
+		if (!locoland && m_unk0x24 > m_footprintHeight) {
 			z += 8 * rows;
 			zstep = -8;
 		}
@@ -1074,7 +1234,7 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		return 0;
 	}
 
-	z += 1024;
+	z = SoftwareDepthAdd(z, 1024);
 	if (z > 0x7fff) {
 		z = 0x7fff;
 	}
@@ -1090,12 +1250,14 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		yTop = ViewYMin();
 	}
 	int zstep = 0;
-	if (m_unk0x24 > m_footprintHeight) {
+	if (!locoland && m_unk0x24 > m_footprintHeight) {
 		z += 8 * rows;
 		zstep = -8;
 	}
 
-	int unclipped = x0 >= ViewXMin() && x0 + width <= ViewXMax();
+
+
+	int unclipped = !locoland && x0 >= ViewXMin() && x0 + width <= ViewXMax();
 	for (int y = yTop; y < yEnd; ++y, z += zstep) {
 		int* dst = (int*) (surface + 4 * y * pitch);
 		short* zrow = (short*) (zbase + 2 * y * zpitch);
@@ -1160,17 +1322,24 @@ void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
 	if (!base || !m_unk0x484) {
 		return;
 	}
-	if (m_unk0x47c & 0x40) {
+
+
+	if (PropHide()) {
 		return;
 	}
 
 	int height = m_messageLineHeight;
 	float baseX = p_sprite->m_x - Map->m_shiftX - m_unk0x2f6 / 2;
 	float groundY = p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - height / 2;
-	if ((int) baseX + m_unk0x2f6 + 200 < ViewXMin() || (int) baseX >= ViewXMax()) {
+
+
+
+	const int x = VIEWPORT_MATH::LegacyCoordinate(baseX);
+	const int y = VIEWPORT_MATH::LegacyCoordinate(groundY);
+	if (VIEWPORT_MATH::LegacyCoordinateDifference(x, -m_unk0x2f6 - 200) < ViewXMin() || x >= ViewXMax()) {
 		return;
 	}
-	if ((int) groundY + height + 100 < ViewYMin() || (int) groundY >= ViewYMax()) {
+	if (VIEWPORT_MATH::LegacyCoordinateDifference(y, -height - 100) < ViewYMin() || y >= ViewYMax()) {
 		return;
 	}
 
@@ -1182,11 +1351,11 @@ void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
 	unsigned char* pts = (unsigned char*) base + m_unk0x484[p_sprite->m_noCadr];
 	int count = PackedRead<short>(pts);
 	pts += 2;
-	if (!count) {
+	if (count <= 0 || count > kMaxShadowContourPoints) {
 		return;
 	}
 
-	SHADOWVERTEX verts[514];
+	SHADOWVERTEX verts[2 * kMaxShadowContourPoints + 2];
 	int i;
 	for (i = 0; i < 2 * count; i += 2) {
 		verts[i].x = PackedRead<short>(pts) + baseX;

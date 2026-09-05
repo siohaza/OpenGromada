@@ -5,11 +5,161 @@
 #include "sprite/ex_sprite_data.h"
 #include "util/game_random.h"
 #include "util/myerror.h"
+#include "util/resource.h"
 #include "util/stream.h"
 #include "video/vid.h"
 #include "video/vid_exdata.h"
 
 #include <stdlib.h>
+#include <climits>
+#include <cstdint>
+#include <cstring>
+#include <vector>
+
+namespace
+{
+
+bool UnitRecordError(STREAM* p_stream, const char* p_reason)
+{
+	if (auto* resource = dynamic_cast<RESOURCE*>(p_stream)) {
+		return resource->Fail(p_reason);
+	}
+	if (Map) {
+		Map->m_logic.RuntimeError(p_reason);
+	}
+	else {
+		MYERROR::Log(::Error, "UNIT record: %s", p_reason);
+	}
+	return false;
+}
+
+bool ReadUnitWord(STREAM* p_stream, uint32_t& p_value, int p_bytes)
+{
+	unsigned char bytes[4] = {};
+	if (!p_stream || p_stream->Read(bytes, p_bytes)) {
+		return UnitRecordError(p_stream, "truncated native UNIT record");
+	}
+	p_value = 0;
+	for (int i = 0; i < p_bytes; ++i) {
+		p_value |= uint32_t(bytes[i]) << (8 * i);
+	}
+	return true;
+}
+
+bool WriteUnitWord(STREAM* p_stream, uint32_t p_value, int p_bytes)
+{
+	unsigned char bytes[4];
+	for (int i = 0; i < p_bytes; ++i) {
+		bytes[i] = (unsigned char) (p_value >> (8 * i));
+	}
+	return (p_stream && !p_stream->Write(bytes, p_bytes)) ||
+		UnitRecordError(p_stream, "cannot write native UNIT record");
+}
+
+
+
+
+
+bool ReadLegacyUnitTail(UNIT* p_unit, STREAM* p_stream, int p_version, bool p_compact)
+{
+	if (Map && Map->m_logic.m_runtimeFault) {
+		return false;
+	}
+	if (auto* resource = dynamic_cast<RESOURCE*>(p_stream); resource && !resource->Good()) {
+		return false;
+	}
+	if (p_compact && p_version < 0) {
+		return UnitRecordError(p_stream, "invalid native UNIT map version");
+	}
+	uint32_t army = 0;
+	uint32_t behavior = 0;
+	if (p_compact && p_version < 7 && !ReadUnitWord(p_stream, army, 1)) {
+		return false;
+	}
+	if (!ReadUnitWord(p_stream, behavior, p_compact ? 1 : 4)) {
+		return false;
+	}
+	uint32_t count = 0;
+	if ((!p_compact || p_version >= 6) && !ReadUnitWord(p_stream, count, p_compact ? 2 : 4)) {
+		return false;
+	}
+	if (count > uint32_t(p_compact ? SHRT_MAX : INT_MAX / 2)) {
+		return UnitRecordError(p_stream, "invalid native UNIT item count");
+	}
+	if (auto* resource = dynamic_cast<RESOURCE*>(p_stream); resource && count > uint32_t(resource->Remaining() / 2)) {
+		return UnitRecordError(p_stream, "native UNIT items exceed record boundary");
+	}
+	std::vector<int> items;
+	items.reserve(count < 512 ? count : 512);
+	for (uint32_t i = 0; i < count; ++i) {
+		uint32_t value = 0;
+		if (!ReadUnitWord(p_stream, value, 2)) {
+			return false;
+		}
+		items.push_back(value >= 0x8000 ? int(value) - 0x10000 : int(value));
+	}
+	if (p_compact && p_version == 6) {
+		uint32_t obsolete = 0;
+		if (!ReadUnitWord(p_stream, obsolete, 1)) {
+			return false;
+		}
+	}
+	if (p_compact && p_version < 7) {
+		items.clear();
+	}
+	if (!items.empty() && !p_unit->m_exData) {
+		p_unit->m_exData = new EX_SPRITE_DATA(p_unit);
+	}
+	if (p_unit->m_exData) {
+		LIST_INT& list = p_unit->m_exData->m_list;
+		int* data = items.empty() ? nullptr : new int[items.size()];
+		for (size_t i = 0; i < items.size(); ++i) {
+			data[i] = items[i];
+		}
+		delete[] list.m_data;
+		list.m_data = data;
+		list.m_n = list.m_max = (int) items.size();
+	}
+	if (p_compact) {
+
+		p_unit->m_unk0x8c = (p_unit->m_unk0x8c & ~0xff) | int(behavior);
+		if (p_version < 7) {
+			p_unit->ChangeArmy((int) army);
+		}
+	}
+	else {
+		static_assert(sizeof(p_unit->m_unk0x8c) == sizeof(behavior));
+		memcpy(&p_unit->m_unk0x8c, &behavior, sizeof(behavior));
+	}
+	return true;
+}
+
+bool WriteLegacyUnitTail(UNIT* p_unit, STREAM* p_stream)
+{
+	if (Map && Map->m_logic.m_runtimeFault) {
+		return false;
+	}
+	if (auto* resource = dynamic_cast<RESOURCE*>(p_stream); resource && !resource->Good()) {
+		return false;
+	}
+	const LIST_INT* list = p_unit->m_exData ? &p_unit->m_exData->m_list : nullptr;
+	const int count = list ? list->m_n : 0;
+	if (count < 0 || count > INT_MAX / 2 || (count && !list->m_data)) {
+		return UnitRecordError(p_stream, "invalid native UNIT item storage");
+	}
+	if (!WriteUnitWord(p_stream, (uint32_t) p_unit->m_unk0x8c, 4) ||
+		!WriteUnitWord(p_stream, (uint32_t) count, 4)) {
+		return false;
+	}
+	for (int i = 0; i < count; ++i) {
+		if (!WriteUnitWord(p_stream, (uint32_t) list->m_data[i], 2)) {
+			return false;
+		}
+	}
+	return true;
+}
+
+}
 
 void LIST_INT::Expand(int p_max)
 {
@@ -343,12 +493,20 @@ decomp_intptr UNIT::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	}
 	case 80: { // ACT_SAVE
 		TERRAIN::Action(p_action, p_a, p_b, p_c);
+		if (GameDesc->m_unitRecordsHaveShortList) {
+			WriteLegacyUnitTail(this, (STREAM*) p_a);
+			return 0;
+		}
 		((STREAM*) p_a)->Write(&m_unk0x8c, 4);
 		break;
 	}
 	case 81: { // ACT_RESTORE
 		TERRAIN::Action(p_action, p_a, p_b, p_c);
 		STREAM* stream = (STREAM*) p_a;
+		if (GameDesc->m_unitRecordsHaveShortList) {
+			ReadLegacyUnitTail(this, stream, (int) p_b, false);
+			return 0;
+		}
 		stream->Read(&m_unk0x8c, 4);
 		if (p_b == 11) {
 			LIST_INT list;
@@ -369,6 +527,10 @@ decomp_intptr UNIT::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	case 200: {
 		TERRAIN::Action(p_action, p_a, p_b, p_c);
 		STREAM* stream = (STREAM*) p_a;
+		if (GameDesc->m_unitRecordsHaveShortList) {
+			ReadLegacyUnitTail(this, stream, (int) p_b, true);
+			return 0;
+		}
 		if (p_b < 7) {
 			state = 0;
 			stream->Read(&state, 1);

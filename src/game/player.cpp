@@ -74,13 +74,17 @@ void PLAYER::Release()
 // FUNCTION: ALIEN 0x413420
 int PLAYER::Save(STREAM* p_stream) const
 {
-	return p_stream->Write(&m_flagman, 4);
+	return Map->m_saveSpriteIds.Write(p_stream, m_flagman.m_ptr);
 }
 
 // FUNCTION: ALIEN 0x413440
 void PLAYER::Load(STREAM* p_stream)
 {
 	MAN* man = (MAN*) Map->ReadPointer(p_stream);
+	if (man == (MAN*) -1) {
+		Map->m_logic.RuntimeError("invalid or truncated PLAY sprite reference");
+		return;
+	}
 	if (man) {
 		++man->m_noRef;
 	}

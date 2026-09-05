@@ -1,4 +1,5 @@
 #include "game/map.h"
+#include "game/legacy_statistics.h"
 
 #include "audio/sound.h"
 #include "game/const.h"
@@ -19,10 +20,12 @@
 #include "gfx/graph_core.h"
 #include "gfx/picture_font.h"
 #include "gfx/picture_makevid.h"
+#include "logic/script_commands.h"
 #include "platform/gamepad.h"
 #include "platform/paths.h"
 #include "platform/portable_config.h"
 #include "platform/render.h"
+#include "platform/save_file.h"
 #include "platform/store.h"
 #include "platform/timing.h"
 #include "sprite/ex_sprite_data.h"
@@ -36,8 +39,11 @@
 #include "util/registry.h"
 #include "util/string.h"
 #include "video/vid.h"
+#include "video/movie_player.h"
 
 #include <string>
+#include <climits>
+#include <filesystem>
 #include "video/vid_exdata.h"
 #include "video/vid_font.h"
 #include "video/vid_hardware.h"
@@ -59,16 +65,23 @@ FILE* FOpen(char** p_name, const char* p_mode);
 enum {
 	SCRIPT_FILE_MAX = 16
 };
-static FILE* s_scriptFiles[SCRIPT_FILE_MAX];
+struct SCRIPT_FILE {
+	FILE* file = nullptr;
+	std::string target;
+	bool nativeText = false;
+	bool dirty = false;
+	bool failed = false;
+};
+static SCRIPT_FILE s_scriptFiles[SCRIPT_FILE_MAX];
 
-static int ScriptFileOpen(FILE* p_file)
+static int ScriptFileOpen(FILE* p_file, const std::string& p_target = {}, bool p_nativeText = false, bool p_dirty = false)
 {
 	if (!p_file) {
 		return 0;
 	}
 	for (int i = 0; i < SCRIPT_FILE_MAX; ++i) {
-		if (!s_scriptFiles[i]) {
-			s_scriptFiles[i] = p_file;
+		if (!s_scriptFiles[i].file) {
+			s_scriptFiles[i] = {p_file, p_target, p_nativeText, p_dirty, false};
 			return i + 1;
 		}
 	}
@@ -76,22 +89,100 @@ static int ScriptFileOpen(FILE* p_file)
 	return 0;
 }
 
-static FILE* ScriptFile(int p_handle)
+static SCRIPT_FILE* ScriptFileEntry(int p_handle)
 {
 	if (p_handle < 1 || p_handle > SCRIPT_FILE_MAX) {
 		return 0;
 	}
-	return s_scriptFiles[p_handle - 1];
+	return &s_scriptFiles[p_handle - 1];
 }
 
-static void ScriptFileClose(int p_handle)
+static FILE* ScriptFile(int p_handle)
 {
-	FILE* file = ScriptFile(p_handle);
-	if (!file) {
-		return;
+	SCRIPT_FILE* entry = ScriptFileEntry(p_handle);
+	return entry ? entry->file : nullptr;
+}
+
+static bool ScriptTextPath(const char* p_name, std::string& p_path)
+{
+	p_path = p_name;
+	for (char& c : p_path) {
+		if (c == '\\') c = '/';
+		else if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
 	}
-	fclose(file);
-	s_scriptFiles[p_handle - 1] = 0;
+
+
+	if (p_path.empty() || Platform_IsAbsolutePath(p_path.c_str()) || p_path.find(':') != std::string::npos) return false;
+	try {
+		std::filesystem::path relative = std::filesystem::u8path(p_path);
+		for (const auto& part : relative) if (part == "..") return false;
+		p_path = relative.lexically_normal().generic_string();
+	}
+	catch (const std::filesystem::filesystem_error&) { return false; }
+	return !p_path.empty() && p_path != "." && p_path.back() != '/';
+}
+
+static bool ScriptMutableScore(const std::string& p_path)
+{
+	if (p_path == "maps/hiscores") return true;
+	if (p_path.size() != strlen("maps/l01/hiscores") || p_path.compare(0, 6, "maps/l") ||
+		p_path.compare(8, 9, "/hiscores") || p_path[6] < '0' || p_path[6] > '9' ||
+		p_path[7] < '0' || p_path[7] > '9') return false;
+	const int level = (p_path[6] - '0') * 10 + p_path[7] - '0';
+	return level >= 1 && level <= 20;
+}
+
+static int ScriptFileStage(const std::string& p_path, FILE* p_source, bool p_create)
+{
+	FILE* staged = tmpfile();
+	bool ok = staged != nullptr;
+	if (ok && p_source) {
+		unsigned char buffer[4096];
+		size_t count;
+		while ((count = fread(buffer, 1, sizeof(buffer), p_source)) != 0) {
+			if (fwrite(buffer, 1, count, staged) != count) { ok = false; break; }
+		}
+		ok = ok && !ferror(p_source) && fseek(staged, 0, SEEK_SET) == 0;
+	}
+	if (p_source && fclose(p_source)) ok = false;
+	if (!ok) {
+		if (staged) fclose(staged);
+		Map->m_logic.RuntimeError("cannot stage native script text file");
+		return 0;
+	}
+	return ScriptFileOpen(staged, p_path, true, p_create);
+}
+
+static void ScriptFileClose(int p_handle, bool p_commit = true)
+{
+	SCRIPT_FILE* entry = ScriptFileEntry(p_handle);
+	if (!entry || !entry->file) return;
+	FILE* file = entry->file;
+	std::string bytes;
+	bool commit = p_commit && !entry->target.empty() && entry->dirty && !entry->failed && !Map->m_logic.m_runtimeFault;
+	bool ok = !ferror(file);
+	if (commit && ok) {
+		ok = fflush(file) == 0 && fseek(file, 0, SEEK_END) == 0;
+		long size = ok ? ftell(file) : -1;
+		ok = ok && size >= 0 && size <= INT_MAX && fseek(file, 0, SEEK_SET) == 0;
+		if (ok) {
+			try { bytes.resize((size_t) size); }
+			catch (const std::exception&) { ok = false; }
+		}
+		if (ok && !bytes.empty()) ok = fread(bytes.data(), 1, bytes.size(), file) == bytes.size();
+	}
+	if (fclose(file)) ok = false;
+	if (commit && ok) ok = Platform_WriteSaveAtomic(entry->target, bytes);
+	if (!commit && !entry->target.empty() && entry->dirty) {
+		MYERROR::Log(::Error, "Uncommitted script text file '%s' discarded; original preserved", entry->target.c_str());
+	}
+	if (entry->nativeText && !ok) Map->m_logic.RuntimeError("native script text file close/save failed; original preserved");
+	*entry = {};
+}
+
+void MAP::DiscardScriptFiles()
+{
+	for (int i = 1; i <= SCRIPT_FILE_MAX; ++i) ScriptFileClose(i, false);
 }
 
 static void SynchronizeGrantedWeaponHud(MAP* p_map, SPRITE* p_sprite, decomp_intptr p_item)
@@ -1112,6 +1203,7 @@ float MAP::GetGroundZScr(float p_x, float p_y)
 void MAP::LoadVid(RESOURCE* p_res)
 {
 	int idx = 0;
+	const int hadVids = m_noVid != 0;
 	unsigned int start = Platform_Ticks();
 	if (!m_weapon) {
 		LoadWeapon(p_res);
@@ -1127,7 +1219,8 @@ void MAP::LoadVid(RESOURCE* p_res)
 		}
 	}
 	if (p_res->GoBegin(0x204a424f)) {
-		if (::Error) {
+
+		if (!hadVids && ::Error) {
 			MYERROR::Error(
 				::Error,
 				// STRING: ALIEN 0x4824d8
@@ -1140,10 +1233,9 @@ void MAP::LoadVid(RESOURCE* p_res)
 		}
 		return;
 	}
-	int hadVids = m_noVid != 0;
 	do {
 		idx = -1;
-		int readError = p_res->m_subSize < (int) sizeof(idx) ? 1 : p_res->Read(&idx, sizeof(idx));
+		int readError = p_res->ReadWords(&idx, sizeof(idx));
 		if (readError || !ValidVidIndex(idx)) {
 			if (::Error) {
 				MYERROR::Error(
@@ -1182,7 +1274,7 @@ void MAP::LoadVid(RESOURCE* p_res)
 			}
 			VID* vid = m_vids[idx];
 			int weapon = vid->m_weaponIdx;
-			if (weapon < m_noWeapon) {
+			if (weapon >= 0 && weapon < m_noWeapon) {
 				vid->m_exData = (VID_EXDATA*) m_weapon + weapon;
 			}
 			else {
@@ -1279,62 +1371,83 @@ void MAP::ExchangeVid(VID* p_vid1, VID* p_vid2)
 // FUNCTION: ALIEN 0x411880
 int MAP::LoadWeapon(RESOURCE* p_res)
 {
-	if (m_weapon) {
-		operator delete(m_weapon);
-	}
-	m_weapon = 0;
 	int count = p_res->GetNoSubRes(0x50414557);
-	if (count <= 0) {
-		return p_res->Load(0x50414557, &m_weapon, sizeof(VID_EXDATA));
+	const int diskBytes = GameDesc->m_weapRecordBytes;
+	if (count <= 0 || (diskBytes != 68 && diskBytes != 612 && diskBytes != 632 && diskBytes != 640) ||
+		(size_t) count > (size_t) p_res->m_end / (diskBytes + 4) || p_res->GoBegin(0x50414557)) {
+		p_res->Fail("missing, unsupported or invalid WEAP table");
+		return 0;
 	}
-	m_noWeapon = count;
-	VID_EXDATA* weapons = (VID_EXDATA*) operator new(sizeof(VID_EXDATA) * count);
-	memset(weapons, 0, sizeof(VID_EXDATA) * count);
-	m_weapon = weapons;
-	p_res->GoBegin(0x50414557);
+	VID_EXDATA* weapons = static_cast<VID_EXDATA*>(operator new(sizeof(VID_EXDATA) * (size_t) count));
+	memset(weapons, 0, sizeof(VID_EXDATA) * (size_t) count);
 
-	if (p_res->m_subSize != GameDesc->m_weapRecordBytes) {
-		MYERROR::LogExit(
-			::Error,
-			"LoadWeapon: WEAP record is %i bytes, expected %i for %s data",
-			p_res->m_subSize,
-			GameDesc->m_weapRecordBytes,
-			GameDesc->m_className
-		);
-	}
+
 
 	for (int i = 0; i < count; ++i) {
+		if (p_res->m_subSize != diskBytes) {
+			p_res->Fail("WEAP record length does not match selected schema");
+			operator delete(weapons);
+			return 0;
+		}
 		VID_EXDATA* w = &weapons[i];
-		if (Game_IsZS1()) {
-			p_res->Read(&w->m_unk0x00, 4);
-			p_res->Read(&w->m_unk0x04, 4);
-			p_res->Read(&w->m_unk0x08, 4);
-			p_res->Read(&w->m_unk0x0c, 4);
-			p_res->Read(&w->m_unk0x10, 4);
-			p_res->Read(&w->m_detectPeriod, 4);
-			p_res->Read(&w->m_unk0x14, 4);
-			p_res->Read(&w->m_unk0x18, 4);
-			p_res->Read(&w->m_unk0x1c, 4);
-			p_res->Read(&w->m_fireInVolley, 4);
-			p_res->Read(&w->m_maxAmmo, 4);
-			p_res->Read(&w->m_unk0x20, 4);
-			p_res->Read(&w->m_reloadTimeInVolley, 4);
-			p_res->Read(&w->m_buildTime, 4);
-			p_res->Read(&w->m_army, 4);
-			p_res->Read(&w->m_defaultBehavior, 4);
-			p_res->Read(w->m_unk0x34, 4);
-			FILE* file = p_res->m_file;
-			p_res->m_state = 2;
-			fseek(file, 16, SEEK_CUR);
-			p_res->Read(&w->m_unk0x38, 4);
-			p_res->Read(&w->m_unk0x3c, 4);
-			p_res->Read(&w->m_unk0x40, 4);
-			p_res->Read(w->m_unk0x44, 0x220);
+		const bool classicFields = diskBytes == 68 || diskBytes == 612;
+		void* common[] = {&w->m_unk0x00, &w->m_unk0x04, &w->m_unk0x08, &w->m_unk0x0c, &w->m_unk0x10};
+		for (void* field : common) {
+			p_res->ReadWords(field, 4);
+		}
+		if (!classicFields) {
+			p_res->ReadWords(&w->m_detectPeriod, 4);
+		}
+		p_res->ReadWords(&w->m_unk0x14, 4);
+		p_res->ReadWords(&w->m_unk0x18, 4);
+		p_res->ReadWords(&w->m_unk0x1c, 4);
+		if (!classicFields) {
+			p_res->ReadWords(&w->m_fireInVolley, 4);
+			p_res->ReadWords(&w->m_maxAmmo, 4);
+			p_res->ReadWords(&w->m_unk0x20, 4);
+			p_res->ReadWords(&w->m_reloadTimeInVolley, 4);
+			p_res->ReadWords(&w->m_buildTime, 4);
 		}
 		else {
-			p_res->Read(w, 0x264);
+			p_res->ReadWords(&w->m_unk0x20, 4);
+			p_res->ReadWords(&w->m_buildTime, 4);
+			if (diskBytes == 68) {
+
+
+
+
+
+				p_res->ReadWords(&w->m_legacyLifeTime, 4);
+			}
+			p_res->ReadWords(&w->m_maxAmmo, 4);
 		}
-		p_res->GoNextSub(0x50414557);
+		p_res->ReadWords(&w->m_army, 4);
+		p_res->ReadWords(&w->m_defaultBehavior, 4);
+		p_res->ReadWords(w->m_unk0x34, 4);
+		if (!classicFields) {
+			p_res->Skip(diskBytes == 640 ? 16 : 8);
+		}
+		p_res->ReadWords(&w->m_unk0x38, 4);
+
+
+
+		p_res->ReadWords(&w->m_unk0x3c, 4);
+		if (diskBytes != 68) {
+			p_res->ReadWords(&w->m_unk0x40, 4);
+			p_res->ReadWords(w->m_unk0x44, 28);
+			p_res->ReadWords(w->m_unk0x60, 4);
+			void* arrays[] = {w->m_unk0x64, w->m_unk0x84, w->m_unk0xa4, w->m_unk0xc4,
+				w->m_unk0xe4, w->m_unk0x104, w->m_unk0x124, w->m_unk0x144, w->m_unk0x164,
+				w->m_unk0x184, w->m_unk0x1a4, w->m_unk0x1c4, w->m_unk0x1e4,
+				w->m_frameSpeed, w->m_speed, w->m_zSpeed};
+			for (void* field : arrays) {
+				p_res->ReadWords(field, 32);
+			}
+		}
+		if (!p_res->RequireEnd() || (i + 1 < count && p_res->GoNextSub(0x50414557))) {
+			operator delete(weapons);
+			return 0;
+		}
 	}
 
 	for (int i = 0; i < count; ++i) {
@@ -1349,6 +1462,9 @@ int MAP::LoadWeapon(RESOURCE* p_res)
 			}
 		}
 	}
+	operator delete(m_weapon);
+	m_weapon = weapons;
+	m_noWeapon = count;
 	return count;
 }
 
@@ -1387,7 +1503,7 @@ void MAP::ReloadVid()
 	}
 	do {
 		i = -1;
-		int readError = res.m_subSize < (int) sizeof(i) ? 1 : res.Read(&i, sizeof(i));
+		int readError = res.ReadWords(&i, sizeof(i));
 		if (readError || !ValidVidIndex(i)) {
 			if (::Error) {
 				MYERROR::Error(::Error, "MAP", 4, "nvid > MAX_VID", i);
@@ -1404,11 +1520,17 @@ void MAP::ReloadVid()
 				continue;
 			}
 			i = mirrorIdx;
-			((STRING*) &m_vids[i]->m_name)->Read_res(&res);
+			if (!res.ReadString(*(STRING*) &m_vids[i]->m_name)) {
+				return;
+			}
 			m_vids[i]->LoadParameters(&res);
+			STRING filename;
+			if (!res.ReadString(filename) || !res.RequireEnd()) {
+				return;
+			}
 			VID* vid = m_vids[i];
 			int weapon = vid->m_weaponIdx;
-			if (weapon < m_noWeapon) {
+			if (weapon >= 0 && weapon < m_noWeapon) {
 				vid->m_exData = (VID_EXDATA*) m_weapon + weapon;
 			}
 			else {
@@ -1553,9 +1675,38 @@ static __forceinline int InlineLogicStackInt(LOGICSTACK* p_value)
 	return p_value->Int();
 }
 
+
+
+
+
+static bool AdaptScriptSpriteQuery(LOGIC& p_logic, int& p_query)
+{
+	if (GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH) return true;
+	const unsigned query = (unsigned) p_query;
+	if (query & 0xf0000u) {
+		p_logic.RuntimeError("sprite query requests an unsupported army (4..7)", p_query);
+		return false;
+	}
+	unsigned adapted = query & ((0x67fu << 20) | 0x80000000u);
+	adapted |= (query & 0xf000u) << 4;
+	if (query & 0x10000000u) adapted |= 0x8000u;
+	if (query & 0x800u) adapted |= 0x1000u | (query & 0x7ffu);
+	else if (query & 0x7ffu) adapted |= MAP::MakeVidQuery(query & 0x7ffu);
+	p_query = (int) adapted;
+	return true;
+}
+
 // STUB: ALIEN 0x435690
 VID** MAP::ExecFunc(int p_cmd)
 {
+	const bool locoland = GameDesc->m_scriptDialect == GAME_SCRIPT_LOCOLAND;
+	const bool steamAS1 = GameDesc->m_scriptDialect == GAME_SCRIPT_AS1 && GameData_IsSteam();
+	const int rawCommand = p_cmd;
+	p_cmd = ScriptCommandCanonical((unsigned) p_cmd);
+	if (p_cmd < 0) {
+		m_logic.RuntimeError("unsupported external command for script dialect", rawCommand);
+		return 0;
+	}
 	static int unitType;
 	static int unitIterator;
 	static int spriteLayer;
@@ -1579,6 +1730,28 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 		bool uiCoordinates = Graph && (vid->m_sprClass == 10 || vid->m_sprClass == 19);
+		const bool menuChild = parent && parent->HasMenuScriptLayout();
+		const bool menuCanvas = Graph && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0 &&
+			(menuChild || (m_menu.HasScriptCanvas() && (uiCoordinates || !m_gameplayMap)));
+		if (menuCanvas) {
+
+
+
+			GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+			const int scale = menuChild ? parent->UIScale() : graph->m_uiScale;
+			const float drawScale = menuChild ? parent->UIDrawScale() : scale * graph->m_uiPresentationScale;
+			const float shiftX = uiCoordinates ? 0.0f : m_shiftX;
+			const float shiftY = uiCoordinates ? 0.0f : m_shiftY;
+			const auto menuPoint = UI_SCALING::TransformCenteredMenuPoint(
+				(float) x - shiftX, (float) y - shiftY, (float) z, 0, 0,
+				GameDesc->m_menuScriptWidth, GameDesc->m_menuScriptHeight,
+				graph->m_width, graph->m_height, drawScale);
+			sprite = CreateSprite(vid, menuPoint.m_x + shiftX, menuPoint.m_y + shiftY,
+				menuPoint.m_z, ANGLE((char) direction), parent);
+			if (sprite) sprite->SetMenuScriptLayout(scale);
+			m_logic.PushObject(sprite);
+			return 0;
+		}
 		UI_SCALING::MENU_POINT point = {};
 		int uiScale = 0;
 		if (uiCoordinates) {
@@ -1640,10 +1813,12 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 70: { // script: GetSprite(type, x, y, previous)
-		SPRITE* previous = (SPRITE*) m_logic.m_stack.PopObject();
+
+		SPRITE* previous = locoland ? nullptr : (SPRITE*) m_logic.m_stack.PopObject();
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
 		SPRITE* sprite = GetSprite(type, (float) x, (float) y, previous);
 		m_logic.PushObject(sprite);
 		return 0;
@@ -1652,15 +1827,17 @@ VID** MAP::ExecFunc(int p_cmd)
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
 		m_logic.PushObject(GetSpriteScr(type, (float) x, (float) y));
 		return 0;
 	}
 	case 72: { // script: FindNearestSprite(type, x, y, radius, previous)
-		SPRITE* previous = (SPRITE*) m_logic.m_stack.PopObject();
+		SPRITE* previous = locoland ? nullptr : (SPRITE*) m_logic.m_stack.PopObject();
 		int radius = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
 		SPRITE* sprite = FindNearestSprite(type, (float) x, (float) y, (float) radius, previous);
 		m_logic.PushObject(sprite);
 		return 0;
@@ -1732,7 +1909,8 @@ VID** MAP::ExecFunc(int p_cmd)
 					return 0;
 				}
 				if (action == 0x5a || action == 0x9c || action == 0x9b || action == 0x9a || action == 0x65 ||
-					action == 0x67 || (action == 0x63 && !Game_IsZS1())) {
+					action == 0x67 || (action == 0x63 && !Game_IsZS1() &&
+					GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH)) {
 					decomp_intptr result = sprite->Action(action, var1, var2, var3);
 					m_logic.PushObject(reinterpret_cast<const void*>(result));
 					return 0;
@@ -1870,7 +2048,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 99: // script: SaveMap(name) - write the map to the named file
-		SaveMap(STRING(PopStr()->m_str));
+		if (SaveMap(STRING(PopStr()->m_str))) {
+			m_logic.RuntimeError("SaveMap failed; previous file preserved");
+		}
 		return 0;
 	case 100: // script: StartDemoRecord(filename) - open the demo stream for writing
 		if (m_resource.m_file) {
@@ -1910,11 +2090,16 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 102: { // script: MenuLoad(filename, opt=1)
-		int opt = GameData_IsSteam() ? PopInt() : 0;
+		int opt = steamAS1 ? PopInt() : 0;
 		m_menu.Load(*PopStr(), opt);
 		return 0;
 	}
 	case 103: { // script: MenuRelease(filename="")
+		if (locoland) {
+			m_menu.DeleteAll();
+			LeaveFullscreenMenuFrame();
+			return 0;
+		}
 		STRING name(*PopStr());
 		if (!strcmp(name.m_str, empty_str)) {
 			m_menu.DeleteAll();
@@ -1989,7 +2174,11 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 		GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-		UI_SCALING::MENU_POINT point = UI_SCALING::TransformScriptPoint(
+		const bool menuCanvas = m_menu.HasScriptCanvas();
+		UI_SCALING::MENU_POINT point = menuCanvas ? UI_SCALING::TransformCenteredMenuPoint(
+			(float) x, (float) y, (float) z, 0, 0, m_menu.ScriptCanvasWidth(), m_menu.ScriptCanvasHeight(),
+			graph->m_width, graph->m_height, graph->m_uiScale * graph->m_uiPresentationScale
+		) : UI_SCALING::TransformScriptPoint(
 			(float) x,
 			(float) y,
 			(float) z,
@@ -2000,7 +2189,8 @@ VID** MAP::ExecFunc(int p_cmd)
 		SPRITE* sprite =
 			CreateSprite(vid, point.m_x, point.m_y, point.m_z, ANGLE((char) ((ndir << 8) / (int) vid->m_noDir)), 0);
 		if (sprite) {
-			sprite->SetUIScriptLayout(graph->m_uiScale, point.m_anchorX, point.m_anchorY);
+			if (menuCanvas) sprite->SetMenuScriptLayout(graph->m_uiScale);
+			else sprite->SetUIScriptLayout(graph->m_uiScale, point.m_anchorX, point.m_anchorY);
 		}
 		PushObject(sprite);
 		return 0;
@@ -2009,10 +2199,10 @@ VID** MAP::ExecFunc(int p_cmd)
 		m_logic.PushObject((m_menu.m_state & 1) ? m_menu.m_underCursor : 0);
 		return 0;
 	case 109: // script: WorldX() - cursor position in world coordinates
-		PushInt((int) m_input.m_worldX);
+		PushInt((int) (m_menu.ScriptScreenX(m_input.m_worldX - m_shiftX) + m_shiftX));
 		return 0;
 	case 110: // script: WorldY()
-		PushInt((int) m_input.m_worldY);
+		PushInt((int) (m_menu.ScriptScreenY(m_input.m_worldY - m_shiftY) + m_shiftY));
 		return 0;
 	case 111: // script: GetKey()
 		m_logic.PushInt(m_input.m_key);
@@ -2086,10 +2276,10 @@ VID** MAP::ExecFunc(int p_cmd)
 		m_logic.PushInt(m_shiftFlag);
 		return 0;
 	case 119: // script: ScreenX()
-		m_logic.PushInt((int) ((GRAPH_CORE*) Graph)->m_width);
+		m_logic.PushInt(m_menu.HasScriptCanvas() ? m_menu.ScriptCanvasWidth() : (int) Graph->m_width);
 		return 0;
 	case 120: // script: ScreenY()
-		m_logic.PushInt((int) ((GRAPH_CORE*) Graph)->m_height);
+		m_logic.PushInt(m_menu.HasScriptCanvas() ? m_menu.ScriptCanvasHeight() : (int) Graph->m_height);
 		return 0;
 	case 121: { // script: SetPlayerControl(flag) | SetSelectUnit(flag)
 		int on = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
@@ -2247,13 +2437,17 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 142: // script: PlayMovie(filename)
+		if (GameDesc->m_nativeMoviePlayback && !MoviePlayer::Available()) {
+			m_logic.RuntimeError("movie playback requires an FFmpeg-enabled build", rawCommand);
+			return 0;
+		}
 		Graph->PlayMovie(PopStr()->m_str);
 		return 0;
 	case 143: // script: IsMoviePlaying()
-		// No video files ship with the game, so a movie is never playing.
-		m_logic.PushInt(0);
+		m_logic.PushInt(GameDesc->m_nativeMoviePlayback ? Graph->IsMoviePlaying() : 0);
 		return 0;
 	case 144: // script: StopMovie()
+		if (GameDesc->m_nativeMoviePlayback) Graph->StopMovie();
 		return 0;
 	case 145: { // script: IsMusicPlaying()
 		MUSIC* music = Sound->m_music;
@@ -2295,7 +2489,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushStr(m_prevMap);
 		return 0;
 	case 150: { // script: GetRegistrationInfo() | SetGraphScreen(sx, sy, fullscreen)
-		if (GameData_IsSteam()) {
+		if (steamAS1) {
 			int fullscreen = PopInt();
 			int sizeY = PopInt();
 			int sizeX = PopInt();
@@ -2353,6 +2547,12 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 153: { // script: CharAt(str, idx) - signed character code at a position
 		int idx = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
 		commands = *PopStr();
+
+
+		if (idx < 0 || size_t(idx) > strlen(commands.m_str)) {
+			m_logic.RuntimeError("CharAt index outside string storage", idx);
+			return 0;
+		}
 		m_logic.PushInt((signed char) commands.m_str[idx]);
 		return 0;
 	}
@@ -2424,6 +2624,12 @@ VID** MAP::ExecFunc(int p_cmd)
 	}
 	case 162: {
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
+		const int rawType = type;
+		type = ScriptVidFieldCanonical(type);
+		if (type < 0) {
+			m_logic.RuntimeError("unsupported GetVidData field for script dialect", rawType);
+			return 0;
+		}
 		if (Game_IsZS1() && type == 245) {
 			PushInt(VidExists(PopInt()) ? 1 : 0);
 			return 0;
@@ -2540,7 +2746,7 @@ VID** MAP::ExecFunc(int p_cmd)
 			}
 			return 0;
 		case 49: // script: VID_LIFETIME
-			PushInt(vid->m_unk0x6c);
+			PushInt(vid->DefaultLifetime());
 			return 0;
 		case 50: // script: VID_DETECTRANGE
 
@@ -2604,10 +2810,18 @@ VID** MAP::ExecFunc(int p_cmd)
 			}
 			return 0;
 		}
+		m_logic.RuntimeError("unsupported GetVidData field for script dialect", rawType);
+		return 0;
 	}
 	case 163: {
 		int value = PopInt();
 		int type = PopInt();
+		const int rawType = type;
+		type = ScriptVidFieldCanonical(type);
+		if (type < 0) {
+			m_logic.RuntimeError("unsupported SetVidData field for script dialect", rawType);
+			return 0;
+		}
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x4840ac
 			"for SetVid"
@@ -2708,6 +2922,19 @@ VID** MAP::ExecFunc(int p_cmd)
 			return 0;
 		}
 		case 49: // script: VID_LIFETIME (vid 0 is the reserved empty vid)
+			if (GameDesc->m_lifetimeInWeapon) {
+
+
+				if (vid->m_idx && vid->m_exData && vid->m_exData != (VID_EXDATA*) m_weapon) {
+					vid->m_exData->m_legacyLifeTime = value;
+					for (int nvid = 0; nvid < m_noVid; ++nvid) {
+						if (m_vids[nvid] && m_vids[nvid]->m_exData == vid->m_exData) {
+							m_vids[nvid]->m_unk0x478 = 1;
+						}
+					}
+				}
+				return 0;
+			}
 			if (vid->m_idx) {
 				vid->m_unk0x6c = value;
 
@@ -2803,6 +3030,8 @@ VID** MAP::ExecFunc(int p_cmd)
 			);
 			return 0;
 		}
+		m_logic.RuntimeError("unsupported SetVidData field for script dialect", rawType);
+		return 0;
 	}
 	case 164: // script: itoa(value)
 		m_logic.PushStr(Int2Str(PopInt()));
@@ -2879,8 +3108,30 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	case 174: { // script: WriteLine(text, stream) - append a string and newline to a file
 		commands = *PopStr();
-		FILE* stream = ScriptFile(PopInt());
+		SCRIPT_FILE* entry = ScriptFileEntry(PopInt());
+		FILE* stream = entry ? entry->file : nullptr;
 		if (!stream) {
+			return 0;
+		}
+		if (entry->nativeText) {
+			if (entry->target.empty()) {
+				entry->failed = true;
+				m_logic.RuntimeError("script write to an installed read-only asset is unsupported");
+				return 0;
+			}
+			if (entry->failed || m_logic.m_runtimeFault) return 0;
+
+
+
+			bool ok = fseek(stream, 0, SEEK_CUR) == 0;
+			for (const unsigned char* c = (const unsigned char*) commands.m_str; ok && *c; ++c) {
+				if (*c == '\n') ok = fputc('\r', stream) != EOF;
+				if (ok) ok = fputc(*c, stream) != EOF;
+			}
+			if (ok) ok = fputs("\r\n", stream) >= 0;
+			entry->dirty = true;
+			entry->failed = !ok;
+			if (!ok) m_logic.RuntimeError("native script text write failed; original preserved");
 			return 0;
 		}
 		commands.Write_file(stream);
@@ -2889,12 +3140,23 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 175: { // script: ReadLine(stream) - read a string, honoring demo record/playback
-		FILE* stream = ScriptFile(PopInt());
+		SCRIPT_FILE* entry = ScriptFileEntry(PopInt());
+		FILE* stream = entry ? entry->file : nullptr;
 		if (m_flag & 0x200) {
 			commands.Read_res(&m_resource);
 		}
 		else if (stream) {
+			if (entry->nativeText && !entry->target.empty() && fseek(stream, 0, SEEK_CUR)) {
+				entry->failed = true;
+				m_logic.RuntimeError("native script text read positioning failed");
+				PushStr(commands);
+				return 0;
+			}
 			commands.Read_file(stream);
+			if (entry->nativeText && ferror(stream)) {
+				entry->failed = true;
+				m_logic.RuntimeError("native script text read failed");
+			}
 		}
 		if (m_flag & 0x100) {
 			commands.Write(&m_resource);
@@ -2908,15 +3170,15 @@ VID** MAP::ExecFunc(int p_cmd)
 			PushInt(0);
 			return 0;
 		}
-		FILE* stream = FOpen(
-			&commands.m_str,
-			// STRING: ALIEN 0x484040
-			"r+t"
-		);
+		std::string path;
+		const bool nativeText = GameDesc->m_nativeScriptTextFiles;
+		const bool mutableScoreFile = nativeText && ScriptTextPath(commands.m_str, path) && ScriptMutableScore(path);
+		FILE* stream = mutableScoreFile ? Platform_FOpenMutableRead(commands.m_str) :
+			FOpen(&commands.m_str, nativeText ? "rb" : "r+t");
 		if (!stream) {
 			Error(7, commands.m_str, 0);
 		}
-		PushInt(ScriptFileOpen(stream));
+		PushInt(stream && mutableScoreFile ? ScriptFileStage(path, stream, false) : ScriptFileOpen(stream, {}, nativeText));
 		return 0;
 	}
 	case 177: // script: CloseFile(stream)
@@ -2926,6 +3188,16 @@ VID** MAP::ExecFunc(int p_cmd)
 		commands = *PopStr();
 		if (m_flag & 0x200) {
 			PushInt(0);
+			return 0;
+		}
+		if (GameDesc->m_nativeScriptTextFiles) {
+			std::string path;
+			if (!ScriptTextPath(commands.m_str, path)) {
+				m_logic.RuntimeError("native script text filename must stay inside preferences");
+				PushInt(0);
+				return 0;
+			}
+			PushInt(ScriptFileStage(path, nullptr, true));
 			return 0;
 		}
 		PushInt(ScriptFileOpen(FOpen(
@@ -2938,7 +3210,7 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 179: { // script: IsEOF(stream) - true at end of file or for a null stream
 		FILE* stream = ScriptFile(PopInt());
 		// The original read the MSVC FILE struct's _IOEOF bit directly.
-		PushInt(!stream || feof(stream));
+		PushInt(GameDesc->m_nativeScriptTextFiles ? (!stream ? 1 : (feof(stream) ? 0x10 : 0)) : (!stream || feof(stream)));
 		return 0;
 	}
 	case 182: { // script: GetReg(path, name, def)
@@ -3016,8 +3288,8 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushInt(Platform_StoreGetAchievement(PopStr()->m_str));
 		return 0;
 	case 213: // script: StoreResetAllStats()
-		if (Game_IsZS1()) {
-			PushInt(ZS1_CountUnitsInMap(this));
+		if (GameDesc->m_unitCountLayers > 0) {
+			PushInt(Legacy_CountUnitsInMap(this, GameDesc->m_unitCountLayers));
 			return 0;
 		}
 		Platform_StoreResetAllStats();
@@ -3069,7 +3341,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		PushInt(Platform_StoreLastUploadRank());
 		return 0;
 	case 212: { // script: TrainInfo(engine, query) | StoreClearAchievement(achievement_id)
-		if (GameData_IsSteam()) {
+		if (steamAS1) {
 			Platform_StoreClearAchievement(PopStr()->m_str);
 			return 0;
 		}
@@ -3146,14 +3418,14 @@ VID** MAP::ExecFunc(int p_cmd)
 	}
 	case 232:
 		if (!Game_IsZS1()) {
-			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			m_logic.RuntimeError("unsupported external command", p_cmd);
 			return 0;
 		}
 		m_logic.PushObject(m_menu.m_underCursor);
 		return 0;
 	case 255: {
 		if (!Game_IsZS1()) {
-			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			m_logic.RuntimeError("unsupported external command", p_cmd);
 			return 0;
 		}
 		STRING str2(*PopStr());
@@ -3179,7 +3451,7 @@ VID** MAP::ExecFunc(int p_cmd)
 	}
 	case 78: {
 		if (!Game_IsZS1()) {
-			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: Unknown extern Function %i", p_cmd);
+			m_logic.RuntimeError("unsupported external command", p_cmd);
 			return 0;
 		}
 		decomp_intptr var3 = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Value();
@@ -3194,6 +3466,11 @@ VID** MAP::ExecFunc(int p_cmd)
 					continue;
 				}
 				SPRITE* sprite = (SPRITE*) m_layers[layer].m_data[i];
+
+
+				if (!sprite) {
+					continue;
+				}
 				const char* spriteName = sprite->m_exData ? sprite->m_exData->m_spriteName.m_str : "";
 				if (!strcmp(spriteName, name.m_str)) {
 					sprite->Action(act, var1, var2, var3);
@@ -3245,15 +3522,17 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	}
 	case 244: // script: CursorScreenX()
-		PushInt((int) m_input.m_x);
+		PushInt((int) m_menu.ScriptScreenX(m_input.m_x));
 		return 0;
 	case 245: // script: CursorScreenY()
-		PushInt((int) m_input.m_y);
+		PushInt((int) m_menu.ScriptScreenY(m_input.m_y));
 		return 0;
-	case 246: // script: SetCleverAttack(on) for the arcade player
-		((PLAYER_ARCADE*) Player(1))->SetCleverAttack(PopInt());
+	case 246:
+		Player(1)->SetCleverAttack(PopInt());
 		return 0;
 	case 247:
+
+
 		PopInt();
 		return 0;
 	case 249: { // script: AddUnitLimit(limit, vid, index) - set a per-vid unit cap
@@ -3264,6 +3543,10 @@ VID** MAP::ExecFunc(int p_cmd)
 		);
 		int limit = PopInt();
 		if (vid == EmptyVid) {
+			return 0;
+		}
+		if (locoland && index != 0xff && (index < 0 || index >= 4)) {
+			m_logic.RuntimeError("AddUnitLimit army index is outside the native four-army range", index);
 			return 0;
 		}
 		if (index == 0xff) {
@@ -3297,12 +3580,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		PopObject();
 		return 0;
 	default:
-		MYERROR::Log(
-			::Error,
-			// STRING: ALIEN 0x483fc8
-			"!!!ERROR!!!LOGIC: Unknown extern Function %i",
-			p_cmd
-		);
+		m_logic.RuntimeError("unsupported external command", p_cmd);
 		return 0;
 	}
 }

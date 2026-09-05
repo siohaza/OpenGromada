@@ -60,20 +60,34 @@ jobs:
           # v1.65a
           git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
           git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
+      - name: Build movie decoder libraries
+        uses: ./.github/actions/setup-movies
+        with:
+          triplet: ${{ matrix.arch }}-gromada-linux
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_INSTALL_BINDIR=.
           -DALIEN_STEAMWORKS_SDK="${{ github.workspace }}/SteamworksSDK"
+          -DALIEN_MOVIES=ON
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-linux
+          -DVCPKG_MANIFEST_MODE=OFF
           -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
       - name: Build
         run: cmake --build build --parallel
+      - name: Install and bundle movie libraries
+        run: |
+          cmake --install build --prefix package/OpenGromada
+          cmake -DFFMPEG_VCPKG_ROOT=dependencies/vcpkg \
+            -DFFMPEG_TRIPLET="${{ matrix.arch }}-gromada-linux" \
+            -DFFMPEG_PACKAGE_DIR=package/OpenGromada -DFFMPEG_SOURCE_DIR=. \
+            -P cmake/PackageFFmpeg.cmake
+          cp README.md LICENSE.md package/OpenGromada/
       - name: Package
         if: matrix.package
         run: |
-          cmake --install build --prefix package/OpenGromada
-          cp README.md LICENSE.md package/OpenGromada/
           tar -C package -czf "$ARCHIVE" OpenGromada
       - name: Upload release package
         if: matrix.package
@@ -119,12 +133,20 @@ jobs:
           # v1.65a
           git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
           git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
+      - name: Build movie decoder libraries
+        uses: ./.github/actions/setup-movies
+        with:
+          triplet: ${{ matrix.arch }}-gromada-osx
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
           -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+          -DALIEN_MOVIES=ON
+          -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-osx
+          -DVCPKG_MANIFEST_MODE=OFF
           -DALIEN_STEAMWORKS_SDK="${{ github.workspace }}/SteamworksSDK"
           -DCMAKE_PREFIX_PATH="${{ steps.sdl.outputs.prefix }}"
       - name: Build
@@ -132,6 +154,10 @@ jobs:
       - name: Package
         run: |
           cmake --install build --prefix package/OpenGromada
+          cmake -DFFMPEG_VCPKG_ROOT=dependencies/vcpkg \
+            -DFFMPEG_TRIPLET="${{ matrix.arch }}-gromada-osx" \
+            -DFFMPEG_PACKAGE_DIR=package/OpenGromada -DFFMPEG_SOURCE_DIR=. \
+            -P cmake/PackageFFmpeg.cmake
           cp README.md LICENSE.md package/OpenGromada/
           ditto -c -k --sequesterRsrc --keepParent package/OpenGromada "$ARCHIVE"
       - name: Upload release package
@@ -180,6 +206,10 @@ jobs:
           # v1.65a
           git clone --filter=blob:none --no-checkout https://github.com/rlabrecque/SteamworksSDK SteamworksSDK
           git -C SteamworksSDK checkout df2baabf574a738ef1ea90a7e89339107fc0a279
+      - name: Build movie decoder libraries
+        uses: ./.github/actions/setup-movies
+        with:
+          triplet: ${{ matrix.arch }}-gromada-windows
       - name: Configure
         shell: pwsh
         run: >
@@ -187,6 +217,10 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           "-DCMAKE_INSTALL_BINDIR=."
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DALIEN_MOVIES=ON
+          "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-windows
+          -DVCPKG_MANIFEST_MODE=OFF
           "-DALIEN_STEAMWORKS_SDK=${{ github.workspace }}/SteamworksSDK"
           "-DCMAKE_PREFIX_PATH=${{ steps.sdl.outputs.prefix }}"
       - name: Build
@@ -195,6 +229,12 @@ jobs:
         shell: pwsh
         run: |
           cmake --install build --prefix package/OpenGromada
+          if ($LASTEXITCODE -ne 0) { throw 'Installation failed' }
+          cmake -DFFMPEG_VCPKG_ROOT=dependencies/vcpkg `
+            -DFFMPEG_TRIPLET="${{ matrix.arch }}-gromada-windows" `
+            -DFFMPEG_PACKAGE_DIR=package/OpenGromada -DFFMPEG_SOURCE_DIR=. `
+            -P cmake/PackageFFmpeg.cmake
+          if ($LASTEXITCODE -ne 0) { throw 'Movie packaging failed' }
           Copy-Item README.md, LICENSE.md package/OpenGromada/
           Compress-Archive -Path package/OpenGromada -DestinationPath $env:ARCHIVE
       - name: Upload release package

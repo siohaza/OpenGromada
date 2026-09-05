@@ -72,13 +72,16 @@ std::string LegacySection(const std::string& p_section, int p_kind)
 
 const char* GetWithLegacyFallback(const std::string& p_section, const char* p_name)
 {
-	if (const char* value = PortableConfig_GetString(p_section.c_str(), p_name)) {
+
+
+
+	if (const char* value = PortableConfig_GetRegistryString(p_section.c_str(), p_name)) {
 		return value;
 	}
 	for (int kind = 0; kind < 2; ++kind) {
 		const std::string legacy = LegacySection(p_section, kind);
 		if (!legacy.empty()) {
-			if (const char* value = PortableConfig_GetString(legacy.c_str(), p_name)) {
+			if (const char* value = PortableConfig_GetRegistryString(legacy.c_str(), p_name)) {
 				return value;
 			}
 		}

@@ -55,11 +55,7 @@ void SOUND::ReleaseDS()
 // FUNCTION: ALIEN 0x41d110
 void SOUND::LoadSFX(RESOURCE* p_res)
 {
-	STRING names[8];
 	unsigned int start = Platform_Ticks();
-	if (m_disabled) {
-		return;
-	}
 	if (!p_res->m_file) {
 		MYERROR::Error(
 			::Error,
@@ -72,10 +68,8 @@ void SOUND::LoadSFX(RESOURCE* p_res)
 		return;
 	}
 
-	delete[] m_sfx;
-	m_sfx = 0;
-	m_noSfx = p_res->GetNoSubRes(0x20584653);
-	if (!m_noSfx) {
+	const int count = p_res->GetNoSubRes(0x20584653);
+	if (count <= 0) {
 		MYERROR::Error(
 			::Error,
 			"SOUND",
@@ -86,46 +80,54 @@ void SOUND::LoadSFX(RESOURCE* p_res)
 		);
 		return;
 	}
-	m_sfx = new SFX[m_noSfx + 1];
-	if (!m_sfx) {
-		MYERROR::Error(
-			::Error,
-			"SOUND",
-			2,
-			// STRING: ALIEN 0x482ebc
-			"LoadSfx",
-			m_noSfx
-		);
+	const bool hasProperty = GameDesc->m_sfxSchema != GAME_SFX_AS1;
+	const bool hasVolume = GameDesc->m_sfxSchema == GAME_SFX_ZS1;
+	const int minimumBytes = hasVolume ? 25 : hasProperty ? 21 : 9;
+	if ((size_t) count > (size_t) p_res->m_end / (minimumBytes + 4)) {
+		p_res->Fail("SFX count exceeds selected schema bounds");
 		return;
 	}
 	if (p_res->GoBegin(0x20584653)) {
 		return;
 	}
+	SFX* records = new SFX[(size_t) count + 1];
 
-	int i = 0;
 
-	do {
-
-		unsigned int property = 0;
-		int volume = 0;
-		if (Game_IsZS1()) {
-			p_res->Read(&property, 4);
+	for (int i = 0; i < count; ++i) {
+		SFX& sfx = records[i];
+		if (hasProperty) {
+			p_res->ReadWords(&sfx.m_property, 4);
 		}
-		int quality = 0;
-		p_res->Read(&quality, 1);
-		if (Game_IsZS1()) {
-			p_res->Read(&volume, 4);
-			volume *= 10;
+		p_res->Read(&sfx.m_unk0x20, 1);
+		if (hasVolume) {
+			p_res->ReadWords(&sfx.m_volume, 4);
+			if (sfx.m_volume < -1000 || sfx.m_volume > 1000) {
+				p_res->Fail("SFX volume is outside its documented range");
+				sfx.m_volume = 0;
+			}
+			sfx.m_volume *= 10;
 		}
 		for (int j = 0; j != 8; ++j) {
-			names[j].Read_res(p_res);
+			p_res->ReadString(sfx.m_names[j]);
 		}
-		SFX* sfx = &m_sfx[i];
-		++i;
-		sfx->Load(names, quality, this);
-		sfx->m_property = property;
-		sfx->m_volume = volume;
-	} while (!p_res->GoNextSub(0x20584653));
+		if (hasProperty) {
+			for (int j = 0; j != 8; ++j) {
+				p_res->ReadString(sfx.m_forceFeedbackNames[j]);
+			}
+		}
+		if (!p_res->RequireEnd() || (i + 1 < count && p_res->GoNextSub(0x20584653))) {
+			delete[] records;
+			return;
+		}
+	}
+	delete[] m_sfx;
+	m_sfx = records;
+	m_noSfx = count;
+	if (!m_disabled) {
+		for (int i = 0; i < count; ++i) {
+			m_sfx[i].Load(m_sfx[i].m_names, m_sfx[i].m_unk0x20, this);
+		}
+	}
 
 	MYERROR::Log(
 		::Error,

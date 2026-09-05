@@ -145,7 +145,9 @@ void VID_SOFTWARE16::SetGammaToPalette(unsigned char* p_palette, const GAMMA& p_
 // STUB: ALIEN 0x417780
 int VID_SOFTWARE16::Draw(SPRITE* p_sprite)
 {
-	if (m_unk0x47c & 0x40) {
+
+
+	if (PropHide()) {
 		return 0;
 	}
 	return DrawFrame(
@@ -173,7 +175,7 @@ int VID_SOFTWARE16::DrawFrame(
 	SPRITE* p_gammaSprite
 )
 {
-	if (m_unk0x47c & 0x40) {
+	if (PropHide()) {
 		return 0;
 	}
 

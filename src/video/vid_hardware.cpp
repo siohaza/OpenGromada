@@ -1,6 +1,7 @@
 #include "video/vid_hardware.h"
 
 #include "compress/qs1_coder.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/terrain_camera.h"
@@ -324,7 +325,10 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 			m_unk0x48c[i] = new TEXTURE(w, h, 26, 0); // A4R4G4B4
 		}
 		else {
-			m_unk0x48c[i] = new TEXTURE(w, h, 23, 0); // R5G6B5
+
+
+			int format = GameDesc->m_layerRules == GAME_LAYERS_ZS1 ? D3DFMT_A1R5G5B5 : D3DFMT_R5G6B5;
+			m_unk0x48c[i] = new TEXTURE(w, h, format, 0);
 		}
 		if (!m_unk0x48c[i]->m_data) {
 			Error(
@@ -418,6 +422,9 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 						for (int x = 0; x < w; ++x) {
 							unsigned short v = s[x];
 							row[x] = (unsigned short) ((v & 0x1f) | ((v >> 1) & 0x7fe0));
+							if (m_unk0x48c[i]->m_format == D3DFMT_A1R5G5B5 && v) {
+								row[x] |= 0x8000;
+							}
 						}
 					}
 					else {
@@ -557,6 +564,29 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 // FUNCTION: ALIEN 0x41a730
 void VID_HARDWARE::SetLayer()
 {
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+
+
+		if (m_flag & 0x40000000) {
+			m_layer = 1;
+		}
+		else if (m_unk0x0c == 64) {
+			m_layer = 7;
+		}
+		else if (!m_unk0x488) {
+			m_layer = 12;
+		}
+		else if (m_pixelFlag16 & 4) {
+			m_layer = (m_pixelFlag16 & 2) ? 6 : 0;
+		}
+		else if (m_pixelFlag16 & 2) {
+			m_layer = (m_flag & 0x10000) ? 6 : 9;
+		}
+		else {
+			m_layer = 5;
+		}
+		return;
+	}
 	unsigned int flag = m_flag;
 	if (flag & 0x40000000) {
 		m_layer = 4;
@@ -567,7 +597,7 @@ void VID_HARDWARE::SetLayer()
 		return;
 	}
 	if (!m_unk0x488) {
-		m_layer = 15;
+		m_layer = GameDesc->m_layerRules == GAME_LAYERS_ZS1 ? 19 : 15;
 		return;
 	}
 	unsigned short pixelFlag = m_pixelFlag16;
@@ -579,7 +609,23 @@ void VID_HARDWARE::SetLayer()
 		m_layer = 0;
 		return;
 	}
-	if (m_idx == 1) {
+	if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
+
+
+		if ((flag & 0x8000) && m_noDir == 255) {
+			m_layer = 18;
+			return;
+		}
+		if (flag & 0x8000) {
+			m_layer = m_unk0x0c == 16 ? 17 : 14;
+			return;
+		}
+		if (m_unk0x0c == 16) {
+			m_layer = 15;
+			return;
+		}
+	}
+	if (GameDesc->m_layerRules == GAME_LAYERS_AS1 && m_idx == 1) {
 		m_layer = 14;
 		return;
 	}
@@ -676,8 +722,16 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 		VID_CHILD* frameChild = &m_unk0x484[p_sprite->m_noCadr];
 		if (frameChild->m_h) {
 			int needEx = m_unk0x47c;
-			if (!(needEx & 0x40)) {
+
+
+			if (!PropHide()) {
 				GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+				if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
+
+					graph->SetRenderState(D3DRS_ALPHATESTENABLE, 1);
+					graph->SetRenderState(D3DRS_ALPHAREF, 0);
+					graph->SetRenderState(D3DRS_ALPHAFUNC, D3DCMP_GREATER);
+				}
 				bool uiSprite = p_sprite->m_uiScale != 0;
 				int savedMinFilter = graph->m_state.m_minFilter;
 				int savedMagFilter = graph->m_state.m_magFilter;
@@ -688,6 +742,9 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 				int baseX = (int) (p_sprite->m_x - Map->m_shiftX);
 				int baseY = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY);
 				int zval = (int) p_sprite->m_z;
+				if (GameDesc->m_layerRules == GAME_LAYERS_ZS1 && (m_flag & 0x200)) {
+					zval = 3;
+				}
 				int segments = 1;
 				float scaleX = m_gammaR * p_sprite->UIDrawScale();
 				float scaleY = m_gammaG * p_sprite->UIDrawScale();
@@ -727,7 +784,17 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 					}
 					bool alphaDepthGate = false;
 					bool alphaAnchorVisible = false;
-					if (!(flag & 0x8000) && !(m_pixelFlag16 & 4)) {
+
+
+
+
+
+
+
+					const bool independentQuad = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ||
+												 (GameDesc->m_layerRules == GAME_LAYERS_ZS1 &&
+												  (m_unk0x0c == 16 || (m_unk0x0c == 1 && !(m_pixelFlag16 & 2))));
+					if (!(flag & 0x8000) && !(m_pixelFlag16 & 4) && !independentQuad) {
 						GRAPH_CORE* g = (GRAPH_CORE*) Graph;
 						int threshold = 8 * zval + 1024;
 						if ((m_pixelFlag16 & 2) && !uiSprite) {
@@ -864,6 +931,10 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 								float d = clipH * 0.00012207031f;
 								z2 = z1 - d;
 								z1 = d + z1;
+								if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
+
+									z2 = z1;
+								}
 								((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_ZFUNC, 7);
 							}
 							else {

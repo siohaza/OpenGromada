@@ -19,7 +19,7 @@ public:
 	virtual int Read(void* p_dest, int p_size);
 	virtual int Write(const void* p_src, int p_size);
 
-	FILE* m_file; // 0x04
+	FILE* m_file = nullptr; // 0x04
 };
 
 // SYNTHETIC: ALIEN 0x4083f0

@@ -18,6 +18,7 @@
 // FUNCTION: ALIEN 0x40b180
 MAP::~MAP()
 {
+	DiscardScriptFiles();
 	ClearTerrainCamera();
 	for (int i = 0; i < 17; ++i) {
 		m_layers[i].DeleteAll();

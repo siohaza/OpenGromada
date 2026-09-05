@@ -32,6 +32,11 @@ int Platform_Remove(const char* p_path);
 // and create parent directories. Absolute paths remain absolute.
 FILE* Platform_FOpen(const char* p_path, const char* p_mode);
 
+
+
+
+FILE* Platform_FOpenMutableRead(const char* p_path);
+
 // Drops cached directory listings after writes.
 void Platform_InvalidatePathCache();
 

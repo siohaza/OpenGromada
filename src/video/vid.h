@@ -167,6 +167,8 @@ public:
 
 	float m_randomSpeed;
 	float m_randomZSpeed;
+	unsigned int m_ext1Property = 0;
+	unsigned int m_ext2Property = 0;
 
 	const char* GetFileName() const { return m_fname; }
 	void SetName(const char* p_name);
@@ -186,6 +188,7 @@ public:
 	int HaveWeapon();
 	int GetFireDamage();
 	int GetMaxAmmo();
+	int DefaultLifetime() const;
 	int GetMaxHp(int army);
 	unsigned int GetEntitiesNumber(int a2);
 	unsigned int GetEntitiesNumberTotal();

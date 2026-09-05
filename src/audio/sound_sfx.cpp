@@ -95,7 +95,8 @@ void SOUND::PlaySFXFromCoor(int p_sfx, float p_x, float p_y)
 		volY = volX;
 	}
 	int pan = x * 4;
-	if (Game_IsZS1() && ValidateSFX(p_sfx)) {
+
+	if (GameDesc->m_sfxSchema != GAME_SFX_AS1 && ValidateSFX(p_sfx)) {
 		unsigned int property = m_sfx[p_sfx].m_property;
 		if (property & 2) {
 			volY = 0;
@@ -125,9 +126,6 @@ void SOUND::PlaySFX(int p_sfx, int p_pan, int p_volume)
 		return;
 	}
 	int sfxBase = m_sfx[p_sfx].m_volume;
-	if (Game_IsZS1() && (m_sfx[p_sfx].m_property & 8)) {
-		p_volume = 0;
-	}
 	p_volume += sfxBase + 32 * (m_volume - 100);
 	if (p_volume < -3000) {
 		return;
@@ -138,8 +136,15 @@ void SOUND::PlaySFX(int p_sfx, int p_pan, int p_volume)
 	else if (p_pan < -10000) {
 		p_pan = -10000;
 	}
-	if (m_sfx[p_sfx].m_unk0x20 == 100) {
+	const bool vip = GameDesc->m_sfxSchema == GAME_SFX_AS1 ? m_sfx[p_sfx].m_unk0x20 == 100 :
+		(m_sfx[p_sfx].m_property & 8) != 0;
+
+	if (vip) {
 		p_volume = sfxBase + 32 * (m_volume - 100);
+	}
+	if (GameDesc->m_sfxSchema == GAME_SFX_ZS1) {
+		if (p_volume > 10000) p_volume = 10000;
+		if (p_volume < -10000) p_volume = -10000;
 	}
 	int i;
 	for (i = 0; i < 32; i++) {

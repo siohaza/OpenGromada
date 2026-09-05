@@ -93,11 +93,13 @@ public:
 		return scale >= 1 && scale <= 3 ? scale : 1;
 	}
 	bool HasUIScriptLayout() const { return (m_uiScale & 0x40) != 0; }
+	bool HasMenuScriptLayout() const { return (m_uiScale & 0x80) != 0; }
 	int UIHorizontalGap() const { return (int) ((unsigned int) m_uiScale >> 8); }
 	UI_SCALING::AXIS_ANCHOR UIAnchorX() const { return (UI_SCALING::AXIS_ANCHOR) ((m_uiScale >> 2) & 3); }
 	UI_SCALING::AXIS_ANCHOR UIAnchorY() const { return (UI_SCALING::AXIS_ANCHOR) ((m_uiScale >> 4) & 3); }
 	void SetUIScale(int p_scale);
 	void SetUIScriptLayout(int p_scale, UI_SCALING::AXIS_ANCHOR p_anchorX, UI_SCALING::AXIS_ANCHOR p_anchorY);
+	void SetMenuScriptLayout(int p_scale);
 	void SetUIHorizontalGap(int p_width);
 	void CopyUIScalingFrom(const SPRITE* p_sprite);
 	float ScriptX() const;

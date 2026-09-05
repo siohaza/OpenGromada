@@ -8,6 +8,7 @@
 #include "util/string.h"
 
 #include <cstring>
+#include <cstdint>
 #include <utility>
 #include <vector>
 
@@ -16,14 +17,18 @@ namespace LOGIC_BYTECODE
 
 inline int ReadInt32(const char* p_data)
 {
-	int value;
-	std::memcpy(&value, p_data, sizeof(value));
-	return value;
+	const auto* bytes = reinterpret_cast<const unsigned char*>(p_data);
+	uint32_t value = uint32_t(bytes[0]) | (uint32_t(bytes[1]) << 8) |
+		(uint32_t(bytes[2]) << 16) | (uint32_t(bytes[3]) << 24);
+	int32_t result;
+	std::memcpy(&result, &value, sizeof(result));
+	return result;
 }
 
 inline void WriteInt32(char* p_data, int p_value)
 {
-	std::memcpy(p_data, &p_value, sizeof(p_value));
+	uint32_t value = uint32_t(p_value);
+	for (int i = 0; i < 4; ++i) p_data[i] = char(value >> (8 * i));
 }
 
 } // namespace LOGIC_BYTECODE
@@ -59,11 +64,17 @@ public:
 	int m_inBody = 0;
 	int m_declStatic = 0;
 	int m_actionN[256];
+	int m_externalArgs[256];
+
+
+	bool m_runtimeFault = false;
+	int m_runtimeOffset = -1;
 
 	LOGIC()
 	{
 		for (int i = 0; i < 256; ++i) {
 			m_actionN[i] = -1;
+			m_externalArgs[i] = -1;
 		}
 		m_stackData = 0;
 		m_stackPos = 0;
@@ -79,6 +90,8 @@ public:
 	~LOGIC() { Release(); }
 
 	void Release();
+	void RuntimeError(const char* p_reason, int p_detail = -1);
+	void RebuildExternalSignatures();
 	int LoadLGC(const STRING& p_name);
 	int Load(const STRING& p_name);
 	int LoadVar(STREAM* p_stream);

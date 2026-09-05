@@ -1,6 +1,8 @@
 #include "gfx/texture.h"
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -13,6 +15,7 @@
 #define ALIEN_TEXTURE_NEON 1
 #endif
 
+#include "game/game_descriptor.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
@@ -1114,10 +1117,21 @@ static void Argb4444AlphaBlendRow(
 	}
 }
 
-static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const GAMMA* p_gamma)
+static void BlitQuad(
+	TEXTURE* p_tex,
+	const int* p_dst,
+	const int* p_src,
+	const GAMMA* p_gamma,
+	bool p_depthTest = false,
+	double p_depthTop = 0,
+	double p_depthBottom = 0
+)
 {
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	if (!p_tex->m_data || !graph->m_color) {
+		return;
+	}
+	if (p_depthTest && (!graph->m_zbuffer || graph->m_zpitch < (int) graph->m_width)) {
 		return;
 	}
 
@@ -1150,6 +1164,13 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 	int clipT = dstT < (int) graph->m_viewYMin ? (int) graph->m_viewYMin : dstT;
 	int clipR = dstR > (int) graph->m_viewXMax ? (int) graph->m_viewXMax : dstR;
 	int clipB = dstB > (int) graph->m_viewYMax ? (int) graph->m_viewYMax : dstB;
+
+
+
+	if (clipL < 0) clipL = 0;
+	if (clipT < 0) clipT = 0;
+	if (clipR > (int) graph->m_width) clipR = (int) graph->m_width;
+	if (clipB > (int) graph->m_height) clipB = (int) graph->m_height;
 	if (clipL >= clipR || clipT >= clipB) {
 		return;
 	}
@@ -1169,12 +1190,14 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 	int blend = graph->m_state.m_alphaBlend;
 	int srcBlend = graph->m_state.m_srcBlend;
 	int dstBlend = graph->m_state.m_dstBlend;
+	bool alphaTest = GameDesc->m_layerRules == GAME_LAYERS_ZS1 && graph->m_state.m_alphaTest &&
+					 graph->m_state.m_alphaFunc == D3DCMP_GREATER;
 
 	// Specialize opaque unscaled RGB565 terrain with exact scalar/SIMD paths.
 	int directSrcX = srcL + clipL - dstL;
 	int directSrcY = srcT + clipT - dstT;
-	if (p_tex->m_format == D3DFMT_R5G6B5 && !bilinear && !blend && dstW == srcW && dstH == srcH && directSrcX >= 0 &&
-		directSrcY >= 0 && directSrcX + clipR - clipL <= p_tex->m_width &&
+	if (!p_depthTest && p_tex->m_format == D3DFMT_R5G6B5 && !bilinear && !blend && dstW == srcW && dstH == srcH &&
+		directSrcX >= 0 && directSrcY >= 0 && directSrcX + clipR - clipL <= p_tex->m_width &&
 		directSrcY + clipB - clipT <= p_tex->m_height) {
 		for (int y = clipT; y < clipB; ++y) {
 			const unsigned short* src = (const unsigned short*) ((const unsigned char*) p_tex->m_data +
@@ -1187,8 +1210,8 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 	}
 
 	// Specialize bilinear P8/RGB565 DrawLight while preserving blend order.
-	if (bilinear && blend && srcBlend == D3DBLEND_DESTCOLOR && dstBlend == D3DBLEND_ONE && sr == 0 && sg == 0 &&
-		sb == 0) {
+	if (!p_depthTest && bilinear && blend && srcBlend == D3DBLEND_DESTCOLOR && dstBlend == D3DBLEND_ONE && sr == 0 &&
+		sg == 0 && sb == 0) {
 		if (p_tex->m_format == D3DFMT_P8) {
 			DispatchLightDestColorOne<D3DFMT_P8>(
 				p_tex,
@@ -1233,8 +1256,8 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 		}
 	}
 
-	if (p_tex->m_format == D3DFMT_A4R4G4B4 && !bilinear && !useSpecular && blend && srcBlend == D3DBLEND_SRCALPHA &&
-		dstBlend == D3DBLEND_INVSRCALPHA) {
+	if (!p_depthTest && !alphaTest && p_tex->m_format == D3DFMT_A4R4G4B4 && !bilinear && !useSpecular && blend &&
+		srcBlend == D3DBLEND_SRCALPHA && dstBlend == D3DBLEND_INVSRCALPHA) {
 		int count = clipR - clipL;
 		int u0 = (int) (((long long) (clipL - dstL) * 2 + 1) * stepU / 2) + (srcL << 16);
 		int uLast = u0 + (count - 1) * stepU;
@@ -1257,6 +1280,12 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 	}
 
 	for (int y = clipT; y < clipB; ++y) {
+
+
+
+		const double rowDepth = p_depthTop + (p_depthBottom - p_depthTop) *
+			((double) y - dstT) / dstH;
+		const unsigned short fixedDepth = (unsigned short) std::lround(std::clamp(rowDepth, 0.0, 65535.0));
 		int v = (int) (((long long) (y - dstT) * 2 + 1) * stepV / 2) + (srcT << 16) - (bilinear ? 0x8000 : 0);
 		int u0 = (int) (((long long) (clipL - dstL) * 2 + 1) * stepU / 2) + (srcL << 16) - (bilinear ? 0x8000 : 0);
 
@@ -1264,6 +1293,12 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 		int u = u0;
 
 		for (int x = clipL; x < clipR; ++x, u += stepU) {
+			unsigned short* depth =
+				p_depthTest ? static_cast<unsigned short*>(graph->m_zbuffer) + (size_t) y * graph->m_zpitch + x
+							: nullptr;
+			if (depth && fixedDepth < *depth) {
+				continue;
+			}
 			unsigned int texel;
 			if (bilinear) {
 				texel = SampleBilinear(p_tex, u, v);
@@ -1287,8 +1322,14 @@ static void BlitQuad(TEXTURE* p_tex, const int* p_dst, const int* p_src, const G
 			}
 
 			unsigned int ta = ((texel >> 24) * (da + 1)) >> 8;
+			if (alphaTest && ta <= (unsigned int) graph->m_state.m_alphaRef) {
+				continue;
+			}
 			if (ta == 0 && blend && srcBlend == D3DBLEND_SRCALPHA && dstBlend == D3DBLEND_INVSRCALPHA) {
 				continue;
+			}
+			if (depth && graph->m_state.m_zWrite) {
+				*depth = fixedDepth;
 			}
 
 			unsigned int r = ((((texel >> 16) & 0xff) * (dr + 1)) >> modulateShift);
@@ -1357,10 +1398,27 @@ int TEXTURE::Draw(const RECT* p_dst, const RECT* p_src, const GAMMA* p_gamma)
 // FUNCTION: ALIEN 0x403dd0
 char* TEXTURE::Draw_z(float p_z1, int p_z2, const int* p_dst, const int* p_src, const GAMMA* p_gamma)
 {
-	(void) p_z1;
-	(void) p_z2;
-	((GRAPH_CORE*) Graph)->SetRenderState(D3DRS_SPECULARENABLE, p_gamma->m_b != 0);
-	BlitQuad(this, p_dst, p_src, p_gamma);
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+	graph->SetRenderState(D3DRS_SPECULARENABLE, p_gamma->m_b != 0);
+
+
+
+
+
+	const bool locoland = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND;
+	bool depthTest =
+		(GameDesc->m_layerRules == GAME_LAYERS_ZS1 || locoland) && graph->m_state.m_zFunc == D3DCMP_GREATEREQUAL;
+	double depthTop = 0;
+	double depthBottom = 0;
+	if (depthTest) {
+		float zBottom = locoland ? std::bit_cast<float>(p_z2) : p_z1;
+		if (!std::isfinite(p_z1) || !std::isfinite(zBottom)) {
+			return 0;
+		}
+		depthTop = (double) p_z1 * 65536.0;
+		depthBottom = (double) zBottom * 65536.0;
+	}
+	BlitQuad(this, p_dst, p_src, p_gamma, depthTest, depthTop, depthBottom);
 	return 0;
 }
 

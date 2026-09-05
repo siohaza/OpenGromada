@@ -2,9 +2,11 @@
 #include "game/map.h"
 
 #include "game/gametime.h"
+#include "game/game_descriptor.h"
 #include "game/player.h"
 #include "gfx/graph.h"
 #include "platform/paths.h"
+#include "platform/save_file.h"
 #include "sprite/sprite.h"
 #include "util/myerror.h"
 #include "util/resource.h"
@@ -18,33 +20,29 @@
 // STUB: ALIEN 0x40ded0
 int MAP::SaveMap(STRING p_name)
 {
-	int version = 12;
+
+
+	int version = GameDesc->m_nativeMapVersion;
+
+
+
+	Platform_StagedSave staged;
 	RESOURCE out;
 	if (!strcmp(p_name.m_str, empty_str)) {
 		return 0;
 	}
-	if (!strcmp(p_name.m_str, m_mapName)) {
-		// Read from the temporary only when the writable source map was renamed;
-		// shipped maps remain readable in place.
-		STRING temp(
-			// STRING: ALIEN 0x4828a0
-			"tmp_del!.map"
-		);
-		if (Platform_Rename(m_mapName, temp.m_str) == 0) {
-			m_mapName = temp.m_str;
-		}
-	}
-	if (out.OpenForWrite(p_name, 0x2050414d /* 'MAP ' */)) {
+	m_saveSpriteIds.Clear();
+	if (!staged.Begin(p_name.m_str) || out.OpenForWrite(STRING(staged.Path().c_str()), 0x2050414d /* 'MAP ' */)) {
 		MYERROR::Window(
 			::Error,
 			// STRING: ALIEN 0x48288c
 			"Can't open file %s",
 			p_name.m_str
 		);
-		return 0;
+		return 1;
 	}
 	int needData = 0;
-	for (int v = 0; needData < m_noVid; ++needData) {
+	for (; needData < m_noVid; ++needData) {
 		if (m_vids[needData] && (m_vids[needData]->m_pixelFlag16 & 0x200)) {
 			break;
 		}
@@ -52,8 +50,11 @@ int MAP::SaveMap(STRING p_name)
 	if (needData < m_noVid) {
 		RESOURCE src;
 		if (!src.OpenForRead(m_mapName, 0x2050414d)) {
-			out.Append(&src, 0x50414557 /* 'WEAP' */);
-			out.Append(&src, 0x204a424f /* 'OBJ ' */);
+			if (out.Append(&src, 0x50414557 /* 'WEAP' */) ||
+				out.Append(&src, 0x204a424f /* 'OBJ ' */)) {
+				out.Fail("cannot preserve embedded MAP resources");
+				return 1;
+			}
 			src.Close();
 		}
 		else {
@@ -63,6 +64,8 @@ int MAP::SaveMap(STRING p_name)
 				"Can't open file '%s', needed for save map",
 				m_mapName.m_str
 			);
+			out.Fail("cannot open source for embedded MAP resources");
+			return 1;
 		}
 	}
 	out.PreAppend(0x48505247 /* 'GRPH' */, 0);
@@ -137,8 +140,7 @@ int MAP::SaveMap(STRING p_name)
 			}
 			int mark = ftell(out.m_file);
 			out.PreAppend(0x44525053 /* 'SPRD' */, 0);
-			token = (int) (decomp_intptr) buffer;
-			out.Write(&token, 4);
+			m_saveSpriteIds.Write(&out, buffer);
 			buffer->Action(80, (decomp_intptr) &out, 0, 0);
 			if (ftell(out.m_file) > mark + 5) {
 				out.PostAppend();
@@ -158,12 +160,9 @@ int MAP::SaveMap(STRING p_name)
 	m_groups.Save(&out);
 	out.PostAppend();
 	out.Close();
-	if (!strcmp(m_mapName, "tmp_del!.map")) {
-		{
-			STRING temp("tmp_del!.map");
-			Platform_Remove(temp.m_str);
-		}
-		m_mapName = p_name;
+	if (!out.Good()) {
+		MYERROR::Log(::Error, "MAP save failed for '%s'; see resource diagnostic", p_name.m_str);
+		return 1;
 	}
-	return 0;
+	return staged.Commit() ? 0 : 1;
 }

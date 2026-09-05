@@ -28,6 +28,10 @@ int Platform_RenderResizeLogical(int p_width, int p_height);
 
 void Platform_RenderPresent();
 
+
+bool Platform_RenderPresentMovie(const unsigned int* p_pixels, int p_width, int p_height, int p_x, int p_y);
+void Platform_RenderCloseMovie();
+
 int Platform_RenderHandleDeviceReset();
 
 void Platform_RenderSetFullscreen(int p_fullscreen);

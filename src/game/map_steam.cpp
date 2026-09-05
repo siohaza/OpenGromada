@@ -46,7 +46,7 @@ void MAP_STEAM::DeletePointerToSprite(SPRITE* p_sprite)
 // STUB: ALIEN 0x405190
 int MAP_STEAM::Tact()
 {
-	if (StartTact()) {
+	if (m_logic.m_runtimeFault || StartTact() || m_logic.m_runtimeFault) {
 		return 1;
 	}
 	if (Const->m_debugMode) {
@@ -78,12 +78,14 @@ int MAP_STEAM::Tact()
 		if ((!(m_flag & 8) && !(m_unk0x22c0_d & 2)) || (((GRAPH_CORE*) Graph)->m_flags & 1) ||
 			((m_unk0x22c0_d & 1) && m_input.m_key != 'p')) {
 			CurrentTime = PrevCurrentTime;
+			Graph->PresentIdleMovie();
 			Platform_Sleep(10);
 			return m_quit;
 		}
 	}
 	else if ((!(m_flag & 8) && !(m_unk0x22c0_d & 2)) || (((GRAPH_CORE*) Graph)->m_flags & 1)) {
 		CurrentTime = PrevCurrentTime;
+		Graph->PresentIdleMovie();
 		Platform_Sleep(10);
 		return m_quit;
 	}
@@ -101,6 +103,10 @@ int MAP_STEAM::Tact()
 		PLANE_INTERNAL::RetailExactEmptyCheck(this);
 		m_menu.Control(&m_input);
 		ScriptRun(-1, 0, 0, 0);
+		if (m_logic.m_runtimeFault) {
+			if (draw) ((GRAPH_CORE*) Graph)->PostTact(1);
+			return 1;
+		}
 		if (Flagman(m_curArmy) && !(Flagman(m_curArmy)->m_flag & 0x1800) && Const->m_unk0x50) {
 			{
 				GAMMA gamma(GAMMA::DECODE, Const->m_unk0x50);

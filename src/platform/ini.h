@@ -7,10 +7,14 @@
 class INI_FILE {
 public:
 	bool Load(const char* p_path);
-	bool Save();
+
+
+	bool Save(const char* p_atomicRelativeName = nullptr);
 	void MergeMissing(const INI_FILE& p_source);
 
 	const char* Get(const char* p_section, const char* p_key) const;
+
+	const char* GetRaw(const char* p_section, const char* p_key) const;
 	int GetInt(const char* p_section, const char* p_key, int p_default) const;
 
 	void Set(const char* p_section, const char* p_key, const char* p_value);
@@ -26,6 +30,7 @@ private:
 	struct Entry {
 		std::string m_key;
 		std::string m_value;
+		std::string m_rawValue;
 	};
 	struct Section {
 		std::string m_name;

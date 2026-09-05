@@ -11,7 +11,9 @@
 EX_SPRITE_DATA::EX_SPRITE_DATA(SPRITE* p_sprite) : m_unk0x24(0), m_unk0x28(0)
 {
 	m_unk0x14 = 1;
-	m_unk0x10 = p_sprite->m_vid->m_unk0x6c;
+
+
+	m_unk0x10 = p_sprite->m_vid->DefaultLifetime();
 	m_unk0x1c = 0;
 	m_time = CurrentTime;
 	m_unk0x20 = p_sprite->m_vid->m_unk0x2c;

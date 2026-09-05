@@ -8,7 +8,9 @@
 #include "game/gametime.h"
 #include "game/man.h"
 #include "game/map.h"
+#include "game/map_format.h"
 #include "game/player_arcade.h"
+#include "game/player_game.h"
 #include "game/region.h"
 #include "game/settings.h"
 #include "game/unit.h"
@@ -41,6 +43,7 @@
 
 #include <SDL3/SDL.h>
 #include <bit>
+#include <cmath>
 #include <ctype.h>
 #include <stdlib.h>
 #include <string.h>
@@ -114,6 +117,12 @@ static bool IsGameplayMapName(const STRING& p_name, float p_width, float p_heigh
 			leaf = p + 1;
 		}
 	}
+	if (GameDesc->m_rtsControls) {
+
+		return (leaf[0] == 'l' || leaf[0] == 'L') && leaf[1] >= '0' && leaf[1] <= '2' &&
+			leaf[2] >= '0' && leaf[2] <= '9' && (leaf[3] == 0 || SDL_strcasecmp(leaf + 3, ".map") == 0) &&
+			(leaf[1] != '0' || leaf[2] != '0') && (leaf[1] != '2' || leaf[2] == '0');
+	}
 	if (SDL_strncasecmp(leaf, "Level_", 6) != 0) {
 		return SDL_strncasecmp(leaf, "survive_", 8) == 0;
 	}
@@ -147,6 +156,28 @@ static void RefreshPointerAfterFrameResize(MAP* p_map)
 	event.motion.x = x;
 	event.motion.y = y;
 	p_map->m_input.ProcessEvent(event);
+}
+
+static bool ValidateMapHashStorage(RESOURCE& resource, const LEGACY_MAP_HEADER& header, VID** vids, int count)
+{
+	float maxHeight = 0;
+	for (int i = 0; i < count; ++i) {
+		const VID* vid = vids[i];
+		if (!vid || !(vid->m_flag & 0x40)) continue;
+		if (!std::isfinite(vid->m_footprintWidth) || !std::isfinite(vid->m_footprintHeight) ||
+			vid->m_footprintWidth < 0 || vid->m_footprintHeight < 0 ||
+			vid->m_footprintWidth > 65536 || vid->m_footprintHeight > 65536) {
+			return resource.Fail("MAP hash footprint exceeds supported bounds");
+		}
+		maxHeight = std::fmax(maxHeight, vid->m_footprintHeight);
+	}
+
+	unsigned cellHeight = 1;
+	while (cellHeight < maxHeight * 0.5f) cellHeight *= 2;
+	unsigned columns = 1;
+	while (columns < (header.width - 1) / cellHeight + 1) columns *= 2;
+	const unsigned rows = (unsigned) ((header.height - 1) / cellHeight + 3);
+	return uint64_t(columns) * rows <= 8388608 || resource.Fail("MAP spatial hash is too large");
 }
 
 // STUB: ALIEN 0x408ff0
@@ -197,13 +228,8 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 
 	STRING base(Platform_BasePath());
 	PROFILE profile;
-	profile.Load(
-		base + className +
-		// STRING: ALIEN 0x4824e0
-		".cfg"
-	);
-	if (IsConfigArgument(p_argv)) {
-		STRING configPath = Platform_IsAbsolutePath(p_argv.m_str) ? p_argv : base + p_argv;
+	if (*Game_ConfigName()) {
+		STRING configPath = Platform_IsAbsolutePath(Game_ConfigName()) ? STRING(Game_ConfigName()) : base + Game_ConfigName();
 		profile.Load(configPath);
 	}
 
@@ -378,13 +404,7 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	);
 
 	RESOURCE resource;
-	m_resName = profile.GetString(
-		STRING("game"),
-		// STRING: ALIEN 0x4823b0
-		STRING("Resource"),
-		// STRING: ALIEN 0x4823bc
-		STRING("objects.res")
-	);
+	m_resName = Game_ResourceName();
 	if (resource.OpenForRead(m_resName, 0x41544144 /* 'DATA' */)) {
 		if (::Error) {
 			MYERROR::Error(::Error, "MAP", 7, "resource file", 0);
@@ -400,8 +420,14 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 			0
 		)
 	);
+	if (!resource.Good()) {
+		return;
+	}
 
 	Const = new CONSTANT(&resource);
+	if (!resource.Good()) {
+		return;
+	}
 	Const->m_debugMode = profile.GetInt(
 		STRING("game"),
 		// STRING: ALIEN 0x482394
@@ -426,6 +452,9 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 									  << 18);
 
 	LoadVid(&resource);
+	if (!resource.Good() || !EmptyVid) {
+		return;
+	}
 
 	EmptyVid->m_exData = (VID_EXDATA*) m_weapon;
 	Hash = new HASH_MAP(m_w, m_h, m_vids, m_noVid);
@@ -448,10 +477,20 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	INPUT_AS::prevKey1 = controlKey("Prev", "Q");
 	INPUT_AS::nextKey1 = controlKey("Next", "E");
 
-	m_player[0] = new PLAYER_ARCADE(1, 0);
-	m_player[2] = new PLAYER_ARCADE(0, 2);
-	m_player[1] = new PLAYER_ARCADE(2, 1);
-	m_player[3] = new PLAYER_ARCADE(0, 3);
+	if (GameDesc->m_rtsControls) {
+
+
+		m_player[0] = new PLAYER_GAME(1, 0);
+		m_player[2] = new PLAYER_GAME(0, 2);
+		m_player[1] = new PLAYER_GAME(2, 1);
+		m_player[3] = new PLAYER_GAME(0, 3);
+	}
+	else {
+		m_player[0] = new PLAYER_ARCADE(1, 0);
+		m_player[2] = new PLAYER_ARCADE(0, 2);
+		m_player[1] = new PLAYER_ARCADE(2, 1);
+		m_player[3] = new PLAYER_ARCADE(0, 3);
+	}
 
 	m_shiftX2 = m_w;
 	m_shiftX1 = 0.0f;
@@ -459,13 +498,7 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 	m_shiftY2 = m_h;
 
 	if (!strcmp(p_argv, empty_str) || IsConfigArgument(p_argv)) {
-		m_scriptName = profile.GetString(
-			STRING("game"),
-			// STRING: ALIEN 0x4822e8
-			STRING("StartMap"),
-			// STRING: ALIEN 0x4822f4
-			STRING("maps\\logo.map")
-		);
+		m_scriptName = Game_StartMap();
 	}
 	else {
 		m_scriptName = p_argv;
@@ -613,7 +646,11 @@ void MAP::DrawSecondaryInfo()
 // FUNCTION: ALIEN 0x40c570
 void MAP::Release()
 {
+
+	if (Graph && GameDesc->m_nativeMoviePlayback) Graph->StopMovie();
 	ClearTerrainCamera();
+	m_menu.ClearScriptCanvas();
+	m_gameplayMap = false;
 	for (int i = 0; i < m_noVid; ++i) {
 		if (VidExists(i) && m_vids[i]->GetEntitiesNumberTotal() != 0) {
 			MYERROR::Log(
@@ -752,6 +789,18 @@ void MAP::Release()
 int MAP::Load(STRING p_name)
 {
 	RESOURCE res;
+	struct LoadFailure {
+		RESOURCE& resource;
+		LOGIC& logic;
+		~LoadFailure() {
+			if (!resource.Good()) logic.RuntimeError("MAP load failed; see resource diagnostic");
+		}
+	} failure{res, m_logic};
+	auto section = [&](int type) {
+		if (!res.GoBegin(type)) return true;
+		res.Fail("missing required MAP section");
+		return false;
+	};
 	m_flag |= 0x20;
 	if (!strcmp(p_name, empty_str)) {
 		return 0;
@@ -774,6 +823,7 @@ int MAP::Load(STRING p_name)
 	}
 
 	if (res.OpenForRead(p_name, 0x2050414d /* 'MAP ' */)) {
+		res.Fail("cannot open MAP container");
 		MYERROR::Window(
 			::Error,
 			// STRING: ALIEN 0x482820 (approx; the invalid-map message)
@@ -788,7 +838,10 @@ int MAP::Load(STRING p_name)
 	m_mapName = p_name;
 	unsigned int seed;
 	if (m_flag & 0x200) {
-		m_resource.Read(&seed, 4);
+		if (m_resource.ReadWords(&seed, 4)) {
+			res.Fail("truncated MAP replay seed");
+			return 0;
+		}
 	}
 	else {
 		seed = Platform_Ticks();
@@ -803,32 +856,30 @@ int MAP::Load(STRING p_name)
 			);
 	}
 	LoadVid(&res);
+	if (!res.Good()) return 0;
 
 	int buf = 0;
 	bool loaded = false;
+	LEGACY_MAP_HEADER header;
 	if (res.GoBegin(0x48505247 /* 'GRPH' */)) {
+		if (!res.Good()) return 0;
 
-		if (res.GoBegin(0x44414548 /* 'HEAD' */)) {
+		if (!section(0x44414548 /* 'HEAD' */)) {
 			if (::Error) {
 				MYERROR::Error(::Error, "MAP", 11, "HEAD", 0);
 			}
 			return 0;
 		}
-		int dim;
-		res.Read(&dim, 4);
-		m_w = (float) dim;
-		res.Read(&dim, 4);
-		m_h = (float) dim;
-		short s;
-		res.Read(&s, 2);
-		m_shiftX = s;
-		res.Read(&s, 2);
-		m_shiftY = s;
-		res.Read(&CurrentTime, 4);
+		if (!header.Read(res, true) || !ValidateMapHashStorage(res, header, m_vids, m_noVid)) return 0;
+		if (!((GRAPH*) Graph)->OldLoadParameters(&res) || !res.Good()) return 0;
+		m_w = header.width;
+		m_h = header.height;
+		m_shiftX = header.shiftX;
+		m_shiftY = header.shiftY;
+		CurrentTime = header.time;
 		m_unk0x30 = CurrentTime;
 		PrevCurrentTime = CurrentTime;
-		res.Read(&buf, 4);
-		((GRAPH*) Graph)->OldLoadParameters(&res);
+		buf = header.version;
 		if (Hash) {
 			Hash->~HASH_MAP();
 			operator delete(Hash);
@@ -839,10 +890,11 @@ int MAP::Load(STRING p_name)
 		m_shiftY2 = m_h;
 		m_shiftY1 = 0.0f;
 		m_menuFrameActive = 0;
-		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
+		m_gameplayMap = IsGameplayMapName(p_name, m_w, m_h);
+		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, m_gameplayMap);
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {
-				((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
+				m_player[player]->RefreshUILayout();
 			}
 		}
 		if (frameChanged > 0) {
@@ -850,10 +902,7 @@ int MAP::Load(STRING p_name)
 			RefreshPointerAfterFrameResize(this);
 		}
 		ResetGroundZ();
-		if (res.GoNext(0x44495247 /* 'GRID' */)) {
-			res.GoBegin(0x20594e41 /* 'ANY ' */);
-		}
-		else {
+		if (!res.GoBegin(0x44495247 /* 'GRID' */)) {
 			if (m_groundz) {
 				operator delete(m_groundz);
 			}
@@ -874,16 +923,22 @@ int MAP::Load(STRING p_name)
 				ResetGroundZ();
 			}
 		}
-		if (!res.GoNext(0x20525053 /* 'SPR ' */)) {
-			while (OldLoadSprite(&res) != (SPRITE*) -1)
+		if (!res.Good()) return 0;
+		if (section(0x20525053 /* 'SPR ' */)) {
+			while (res.Good() && OldLoadSprite(&res) != (SPRITE*) -1)
 				;
+			if (!res.Good()) return 0;
 			RailMap.CreateAdditionalDots();
-			if (!res.GoNext(0x44525053 /* 'SPRD' */)) {
-				for (SPRITE* s2 = ReadPointer(&res); s2 != (SPRITE*) -1; s2 = ReadPointer(&res)) {
+			if (section(0x44525053 /* 'SPRD' */)) {
+				for (SPRITE* s2 = ReadPointer(&res); res.Good() && s2 != (SPRITE*) -1; s2 = ReadPointer(&res)) {
 					if (s2) {
 						s2->Action(200, (decomp_intptr) &res, buf, 0);
 					}
-					res.GoNextSub(0x44525053 /* 'SPRD' */);
+					if (!res.Good()) return 0;
+					if (res.GoNextSub(0x44525053 /* 'SPRD' */)) {
+						res.Fail("missing SPRD terminator");
+						return 0;
+					}
 				}
 				loaded = true;
 			}
@@ -918,8 +973,8 @@ int MAP::Load(STRING p_name)
 					"Load graph parameters"
 				);
 		}
-		((GRAPH*) Graph)->LoadParameters(&res);
-		if (res.GoNext(0x44414548 /* 'HEAD' */)) {
+		if (((GRAPH*) Graph)->LoadParameters(&res) || !res.Good()) return 0;
+		if (!section(0x44414548 /* 'HEAD' */)) {
 			if (::Error) {
 				MYERROR::Error(
 					::Error,
@@ -932,11 +987,13 @@ int MAP::Load(STRING p_name)
 			}
 			return 0;
 		}
-		res.Read(&m_w, 4);
-		res.Read(&m_h, 4);
-		res.Read(&m_shiftX, 4);
-		res.Read(&m_shiftY, 4);
-		res.Read(&CurrentTime, 4);
+		if (!header.Read(res, false) || !ValidateMapHashStorage(res, header, m_vids, m_noVid)) return 0;
+		m_w = header.width;
+		m_h = header.height;
+		m_shiftX = header.shiftX;
+		m_shiftY = header.shiftY;
+		CurrentTime = header.time;
+		buf = header.version;
 		PrevCurrentTime = 1;
 		CurrentTime = 10;
 		if (!(m_flag & 0x200) && m_resource.m_file) {
@@ -947,16 +1004,12 @@ int MAP::Load(STRING p_name)
 			m_resource.Write(&CurrentTime, 4);
 		}
 		if (m_flag & 0x200) {
-			m_resource.Read(&CurrentTime, 4);
+			if (m_resource.ReadWords(&CurrentTime, 4)) {
+				res.Fail("truncated MAP replay clock");
+				return 0;
+			}
 		}
 		m_unk0x30 = CurrentTime;
-		res.Read(&buf, 4);
-		if (buf <= 9) {
-			m_w = (float) std::bit_cast<int>(m_w);
-			m_h = (float) std::bit_cast<int>(m_h);
-			m_shiftX = (float) std::bit_cast<int>(m_shiftX);
-			m_shiftY = (float) std::bit_cast<int>(m_shiftY);
-		}
 		MYERROR::Log(
 			::Error,
 			// STRING: ALIEN 0x4827a8
@@ -983,10 +1036,11 @@ int MAP::Load(STRING p_name)
 		m_shiftY1 = 0.0f;
 		m_shiftY2 = m_h;
 		m_menuFrameActive = 0;
-		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, IsGameplayMapName(p_name, m_w, m_h));
+		m_gameplayMap = IsGameplayMapName(p_name, m_w, m_h);
+		int frameChanged = ((GRAPH_CORE*) Graph)->ConfigureFrameForMap(m_w, m_h, m_gameplayMap);
 		for (int player = 0; player < 4; ++player) {
 			if (m_player[player]) {
-				((PLAYER_ARCADE*) m_player[player])->RefreshUILayout();
+				m_player[player]->RefreshUILayout();
 			}
 		}
 		SetShiftCoor(Graph->m_width * 0.5f + m_shiftX, Graph->m_height * 0.5f + m_shiftY, 0);
@@ -1002,10 +1056,7 @@ int MAP::Load(STRING p_name)
 				);
 		}
 		ResetGroundZ();
-		if (res.GoNext(0x44495247 /* 'GRID' */)) {
-			res.GoBegin(0x20594e41 /* 'ANY ' */);
-		}
-		else {
+		if (!res.GoBegin(0x44495247 /* 'GRID' */)) {
 			if (m_groundz) {
 				operator delete(m_groundz);
 			}
@@ -1019,7 +1070,8 @@ int MAP::Load(STRING p_name)
 			}
 		}
 
-		if (res.GoNext(0x20525053 /* 'SPR ' */)) {
+		if (!res.Good()) return 0;
+		if (!section(0x20525053 /* 'SPR ' */)) {
 			if (::Error) {
 				MYERROR::Error(::Error, "MAP", 11, "SPR ", 0);
 			}
@@ -1034,8 +1086,8 @@ int MAP::Load(STRING p_name)
 		}
 		int loadedLayer = 0;
 		SPRITE* s2 = LoadSprite(&res, buf);
-		while (s2 != (SPRITE*) -1) {
-			if (Const->m_debugMode && loadedLayer != s2->m_vid->m_layer) {
+		while (res.Good() && s2 != (SPRITE*) -1) {
+			if (s2 && Const->m_debugMode && loadedLayer != s2->m_vid->m_layer) {
 				loadedLayer = s2->m_vid->m_layer;
 				if (!loadedLayer) {
 					((GRAPH*) Graph)->DrawDebugText("Load hardware terrain");
@@ -1065,6 +1117,7 @@ int MAP::Load(STRING p_name)
 			((GRAPH*) Graph)->DrawLoadBar(m_vids[0]);
 			s2 = LoadSprite(&res, buf);
 		}
+		if (!res.Good()) return 0;
 		RailMap.CreateAdditionalDots();
 
 		if (Const->m_debugMode) {
@@ -1074,19 +1127,24 @@ int MAP::Load(STRING p_name)
 					"Load data for sprite"
 				);
 		}
-		if (res.GoNext(0x44525053 /* 'SPRD' */)) {
+		if (!section(0x44525053 /* 'SPRD' */)) {
 			if (::Error) {
 				MYERROR::Error(::Error, "MAP", 11, "SPRD", 0);
 			}
 			return 0;
 		}
-		for (SPRITE* sd = ReadPointer(&res); sd != (SPRITE*) -1; sd = ReadPointer(&res)) {
+		for (SPRITE* sd = ReadPointer(&res); res.Good() && sd != (SPRITE*) -1; sd = ReadPointer(&res)) {
 			((GRAPH*) Graph)->DrawLoadBar(m_vids[0]);
 			if (sd) {
 				sd->Action(81, (decomp_intptr) &res, buf, 0);
 			}
-			res.GoNextSub(0x44525053 /* 'SPRD' */);
+			if (!res.Good()) return 0;
+			if (res.GoNextSub(0x44525053 /* 'SPRD' */)) {
+				res.Fail("missing SPRD terminator");
+				return 0;
+			}
 		}
+		if (!res.Good()) return 0;
 
 		if (Const->m_debugMode) {
 			((GRAPH*) Graph)
@@ -1095,7 +1153,7 @@ int MAP::Load(STRING p_name)
 					"Load players info"
 				);
 		}
-		if (res.GoNext(0x59414c50 /* 'PLAY' */)) {
+		if (!section(0x59414c50 /* 'PLAY' */)) {
 			if (::Error) {
 				MYERROR::Error(
 					::Error,
@@ -1110,6 +1168,7 @@ int MAP::Load(STRING p_name)
 		}
 		for (int i = 0; i < 4; ++i) {
 			m_player[i]->Load(&res);
+			if (!res.Good()) return 0;
 		}
 
 		if (Const->m_debugMode) {
@@ -1119,7 +1178,7 @@ int MAP::Load(STRING p_name)
 					"Load groups info"
 				);
 		}
-		if (res.GoNext(0x554f5247 /* 'GROU' */)) {
+		if (!section(0x554f5247 /* 'GROU' */)) {
 			if (::Error) {
 				MYERROR::Error(
 					::Error,
@@ -1136,7 +1195,7 @@ int MAP::Load(STRING p_name)
 		loaded = true;
 	}
 
-	if (!loaded) {
+	if (!res.Good() || !loaded) {
 		return 0;
 	}
 
@@ -1441,35 +1500,35 @@ SPRITE* MAP::ReadPointer(STREAM* p_stream)
 {
 	// The stream holds a 32-bit identity token, not a live pointer. Reading it
 	// straight into a pointer variable left the top four bytes uninitialised.
-	int token = 0;
-	p_stream->Read(&token, 4);
-	if (token == -1) {
+	unsigned char bytes[4] = {};
+	if (!p_stream || p_stream->Read(bytes, 4)) {
+		if (auto* resource = dynamic_cast<RESOURCE*>(p_stream)) resource->Fail("truncated sprite identity");
+		else m_logic.RuntimeError("truncated sprite identity");
 		return (SPRITE*) -1;
 	}
-	return (SPRITE*) m_relation.Decode((const void*) (decomp_intptr) token);
+	uint32_t token = uint32_t(bytes[0]) | uint32_t(bytes[1]) << 8 |
+		uint32_t(bytes[2]) << 16 | uint32_t(bytes[3]) << 24;
+	if (token == UINT32_MAX) {
+		return (SPRITE*) -1;
+	}
+
+	return (SPRITE*) m_relation.Decode((const void*) (decomp_intptr) std::bit_cast<int32_t>(token));
 }
 
 // FUNCTION: ALIEN 0x40ef70
 SPRITE* MAP::OldLoadSprite(RESOURCE* p_resource)
 {
 	SPRITE* sprite = 0;
-	int token;
-	p_resource->Read(&token, 4);
+	int token = -1;
+	if (p_resource->ReadWords(&token, 4)) return (SPRITE*) -1;
 	if (token == -1) {
 		return (SPRITE*) -1;
 	}
-	short nvid;
-	short x;
-	short y;
-	short z;
-	unsigned char direction;
-	unsigned char unused;
-	p_resource->Read(&nvid, 2);
-	p_resource->Read(&x, 2);
-	p_resource->Read(&y, 2);
-	p_resource->Read(&z, 2);
-	p_resource->Read(&direction, 1);
-	p_resource->Read(&unused, 1);
+	short nvid = 0, x = 0, y = 0, z = 0;
+	unsigned char direction = 0, unused = 0;
+	if (p_resource->ReadWords(&nvid, 2, 2) || p_resource->ReadWords(&x, 2, 2) ||
+		p_resource->ReadWords(&y, 2, 2) || p_resource->ReadWords(&z, 2, 2) ||
+		p_resource->Read(&direction, 1) || p_resource->Read(&unused, 1)) return (SPRITE*) -1;
 	if (VidExists(nvid)) {
 		sprite = CreateSprite(m_vids[nvid], (float) x, (float) y, (float) z, ANGLE((char) direction), 0);
 	}
@@ -1491,18 +1550,21 @@ SPRITE* MAP::OldLoadSprite(RESOURCE* p_resource)
 void MAP::DrawLayer(int p_layer)
 {
 	int iter;
-	if (p_layer && p_layer != 10) {
+
+
+	const int uncullableLayer = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? 7 : 10;
+	if (p_layer && p_layer != uncullableLayer) {
 		float viewWidth = Graph->m_viewXMax - Graph->m_viewXMin;
 		float viewHeight = Graph->m_viewYMax - Graph->m_viewYMin;
-		int cx = (int) ((Graph->m_viewXMin + Graph->m_viewXMax) * 0.5f + m_shiftX);
-		int cy = (int) ((Graph->m_viewYMin + Graph->m_viewYMax) * 0.5f + m_shiftY);
+		int cx = VIEWPORT_MATH::LegacyCoordinate(((double) Graph->m_viewXMin + Graph->m_viewXMax) * 0.5 + m_shiftX);
+		int cy = VIEWPORT_MATH::LegacyCoordinate(((double) Graph->m_viewYMin + Graph->m_viewYMax) * 0.5 + m_shiftY);
 		iter = m_layers[p_layer].m_n;
 		SPRITE* sprite = NextSprite(p_layer, &iter);
 		while (sprite) {
 			if (!(sprite->m_flag & 0x10000) && VIEWPORT_MATH::CoarseSpriteVisible(
-												   (int) sprite->m_x,
-												   (int) (sprite->m_y - sprite->m_z),
-												   (int) sprite->m_y,
+													   VIEWPORT_MATH::LegacyCoordinate(sprite->m_x),
+													   VIEWPORT_MATH::LegacyCoordinate((double) sprite->m_y - sprite->m_z),
+													   VIEWPORT_MATH::LegacyCoordinate(sprite->m_y),
 												   cx,
 												   cy,
 												   viewWidth,
@@ -1535,7 +1597,8 @@ void MAP::DrawLayer(int p_layer)
 		}
 	}
 	MOUSE* child = Mouse;
-	if (!Mouse->m_unk0x70 && !(Mouse->m_vid->m_flag & 0x8000) && Mouse) {
+	if (Mouse && !Mouse->m_unk0x70 &&
+		(GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND || !(Mouse->m_vid->m_flag & 0x8000))) {
 		do {
 			if (child->m_vid->m_layer == p_layer && !(child->m_flag & 0x10000)) {
 				child->Draw();

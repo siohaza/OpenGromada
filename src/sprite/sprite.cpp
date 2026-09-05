@@ -3,6 +3,7 @@
 #include "audio/sound.h"
 #include "game/data_version.h"
 #include "game/engine.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/viewport_math.h"
@@ -21,6 +22,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
 
 inline void GammaAssign(GAMMA* p_dst, const GAMMA& p_src)
 {
@@ -158,9 +160,7 @@ unsigned int SPRITE::Write(STREAM* p_stream)
 	if (!(result & 0x100)) {
 		STREAM* stream = p_stream;
 		unsigned int army = (result >> 11) & 3;
-		// Save the low 32-bit identity token; RELATION resolves it on load.
-		int id = (int) (decomp_intptr) this;
-		stream->Write(&id, 4);
+		Map->m_saveSpriteIds.Write(stream, this);
 		stream->Write(&m_vid->m_idx, 4);
 		stream->Write(&m_x, 4);
 		stream->Write(&m_y, 4);
@@ -602,7 +602,7 @@ float SPRITE::UIDrawScale() const
 	// controls do not expose live gameplay in strips around its 1024x768
 	// canvas. The 1.22 data reuses the nvid as 500x360 frame tiles placed as a
 	// grid, which must draw at the same scale their placement used.
-	if (!GameData_IsSteam() && m_vid && m_vid->m_idx == 746) {
+	if (!HasMenuScriptLayout() && !GameData_IsSteam() && m_vid && m_vid->m_idx == 746) {
 		return (float) UIScale();
 	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
@@ -620,6 +620,34 @@ void SPRITE::SetUIScriptLayout(int p_scale, UI_SCALING::AXIS_ANCHOR p_anchorX, U
 		unsigned int composition = (unsigned int) sprite->m_uiScale & ~0xffu;
 		sprite->m_uiScale = (int) (composition | (unsigned int) state);
 	}
+}
+
+void SPRITE::SetMenuScriptLayout(int p_scale)
+{
+	if (p_scale < 1 || p_scale > 3) {
+		SetUIScale(p_scale);
+		return;
+	}
+
+
+
+	if (!HasMenuScriptLayout() && m_child) {
+		GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+		const float scale = graph ? p_scale * graph->m_uiPresentationScale : (float) p_scale;
+		if (scale != 1.0f) {
+			struct POSITION { SPRITE* sprite; float x, y, z; };
+			std::vector<POSITION> children;
+			for (SPRITE* child = m_child; child; child = child->m_child) {
+				if (child->HasMenuScriptLayout()) continue;
+				const float dz = child->m_z - m_z;
+				children.push_back({child, m_x + scale * (child->m_x - m_x),
+					m_y + scale * (child->m_y - m_y - dz) + dz, child->m_z});
+			}
+			for (const auto& child : children) child.sprite->ChangeCoor(child.x, child.y, child.z);
+		}
+	}
+	SetUIScriptLayout(p_scale, UI_SCALING::ANCHOR_CENTER, UI_SCALING::ANCHOR_CENTER);
+	for (SPRITE* sprite = this; sprite; sprite = sprite->m_child) sprite->m_uiScale |= 0x80;
 }
 
 void SPRITE::SetUIHorizontalGap(int p_width)
@@ -648,6 +676,10 @@ float SPRITE::ScriptX() const
 	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	float screenX = m_x - Map->m_shiftX;
+	if (HasMenuScriptLayout() && GameDesc->m_menuScriptWidth > 0) {
+		return UI_SCALING::UntransformCanvasAxis(screenX, graph->m_width,
+			GameDesc->m_menuScriptWidth, UIDrawScale()) + Map->m_shiftX;
+	}
 	return UI_SCALING::UntransformScriptAxis(screenX, graph->m_width, UIDrawScale(), UIAnchorX()) + Map->m_shiftX;
 }
 
@@ -658,6 +690,10 @@ float SPRITE::ScriptY() const
 	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	float projectedY = m_y - m_z - Map->m_shiftY;
+	if (HasMenuScriptLayout() && GameDesc->m_menuScriptHeight > 0) {
+		return UI_SCALING::UntransformCanvasAxis(projectedY, graph->m_height,
+			GameDesc->m_menuScriptHeight, UIDrawScale()) + m_z + Map->m_shiftY;
+	}
 	return UI_SCALING::UntransformScriptAxis(projectedY, graph->m_height, UIDrawScale(), UIAnchorY()) + m_z +
 		   Map->m_shiftY;
 }
@@ -752,8 +788,13 @@ SPRITE* SPRITE::SeekEnemy()
 		return 0;
 	}
 	float bestDist = range + 1.0f;
+
+
+
+	const bool flagmanOnly = GameDesc->m_enemySearchRules == GAME_ENEMY_SEARCH_FLAGMAN &&
+		(s->m_flag & 0x1800) == 0x800;
 	SPRITE* c;
-	if ((s->m_flag & 0x1800) == 0x800) {
+	if (flagmanOnly) {
 		c = Map->Flagman(0);
 	}
 	else {
@@ -819,7 +860,7 @@ SPRITE* SPRITE::SeekEnemy()
 				}
 			}
 		}
-		if ((s->m_flag & 0x1800) == 0x800) {
+		if (flagmanOnly) {
 			break;
 		}
 		c = (SPRITE*) Hash->m_list.NextIterate((int*) &Hash->m_iter);
@@ -930,7 +971,19 @@ void SPRITE::CreateLink()
 		xoff = CreateLinkXOffset(m_dir, m_vid);
 		yoff = CreateLinkYOffset(m_dir, m_vid);
 	}
-	AddLink(Map->CreateSprite(m_vid->m_unk0x5c, xoff + m_x, yoff + m_y, m_vid->m_unk0x54 + m_z, ANGLE(m_dir), 0));
+	if (HasMenuScriptLayout()) {
+		const float scale = UIDrawScale();
+		if (scale != 1.0f) {
+			xoff *= scale;
+			yoff = scale * (yoff - m_vid->m_unk0x54) + m_vid->m_unk0x54;
+		}
+	}
+	SPRITE* newLink = Map->CreateSprite(m_vid->m_unk0x5c, xoff + m_x, yoff + m_y,
+		m_vid->m_unk0x54 + m_z, ANGLE(m_dir), 0);
+
+
+	if (newLink && HasMenuScriptLayout()) newLink->SetMenuScriptLayout(UIScale());
+	AddLink(newLink);
 	if (m_child) {
 		m_child->ChangeArmy((m_flag >> 11) & 3);
 	}

@@ -6,6 +6,8 @@ enum {
 };
 
 const char* PortableConfig_GetString(const char* p_section, const char* p_key);
+
+const char* PortableConfig_GetRegistryString(const char* p_section, const char* p_key);
 int PortableConfig_GetInt(const char* p_section, const char* p_key, int p_default);
 void PortableConfig_SetString(const char* p_section, const char* p_key, const char* p_value);
 void PortableConfig_SetInt(const char* p_section, const char* p_key, int p_value);

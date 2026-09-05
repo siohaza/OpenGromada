@@ -18,6 +18,8 @@ public:
 	unsigned int m_property;
 	int m_volume;
 
+	STRING m_forceFeedbackNames[8];
+
 	int MaxVoices() const
 	{
 		if (m_unk0x20 == 100) {

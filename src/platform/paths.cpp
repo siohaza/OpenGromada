@@ -39,20 +39,23 @@ bool Exists(const std::string& p_path)
 	return SDL_GetPathInfo(p_path.c_str(), &info);
 }
 
+SDL_EnumerationResult SDLCALL CacheDirectoryEntry(void* p_entries, const char*, const char* p_name)
+{
+	auto& entries = *static_cast<std::map<std::string, std::string>*>(p_entries);
+	entries.emplace(Lower(p_name), p_name);
+	return SDL_ENUM_CONTINUE;
+}
+
 const std::string* MatchInDirectory(const std::string& p_dir, const std::string& p_name)
 {
 	auto cached = g_dirCache.find(p_dir);
 	if (cached == g_dirCache.end()) {
 		std::map<std::string, std::string> entries;
 
-		int count = 0;
-		char** names = SDL_GlobDirectory(p_dir.empty() ? "." : p_dir.c_str(), nullptr, 0, &count);
-		if (names) {
-			for (int i = 0; i < count; ++i) {
-				entries.emplace(Lower(names[i]), names[i]);
-			}
-			SDL_free(names);
-		}
+
+
+
+		SDL_EnumerateDirectory(p_dir.empty() ? "." : p_dir.c_str(), CacheDirectoryEntry, &entries);
 		cached = g_dirCache.emplace(p_dir, std::move(entries)).first;
 	}
 
@@ -149,7 +152,10 @@ static std::string g_prefApp = "AlienShooter";
 void Platform_SetPrefApp(const char* p_app)
 {
 	if (p_app && *p_app) {
-		g_prefApp = p_app;
+		if (g_prefApp != p_app) {
+			g_prefApp = p_app;
+			g_prefPath.clear();
+		}
 	}
 }
 
@@ -291,6 +297,17 @@ FILE* Platform_FOpen(const char* p_path, const char* p_mode)
 		return file;
 	}
 	return OpenUnder(Platform_PrefPath(), p_path, p_mode);
+}
+
+FILE* Platform_FOpenMutableRead(const char* p_path)
+{
+	if (!p_path || !*p_path || Platform_IsAbsolutePath(p_path)) {
+		return nullptr;
+	}
+	if (FILE* file = OpenUnder(Platform_PrefPath(), p_path, "rb")) {
+		return file;
+	}
+	return OpenUnder(Platform_BasePath(), p_path, "rb");
 }
 
 int Platform_Rename(const char* p_from, const char* p_to)

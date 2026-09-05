@@ -1,6 +1,7 @@
 #include "audio/sound.h"
 
 #include "audio/music_ogg.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "platform/paths.h"
 #include "util/game_random.h"
@@ -13,6 +14,17 @@
 
 // GLOBAL: ALIEN 0x491750
 SOUND* Sound;
+
+int SOUND::IsLooped(int p_sfx) const
+{
+	if (!m_sfx || !ValidateSFX(p_sfx)) {
+		return 0;
+	}
+
+
+	return GameDesc->m_sfxSchema == GAME_SFX_AS1 ? m_sfx[p_sfx].m_unk0x20 == 0 :
+		(m_sfx[p_sfx].m_property & 1) != 0;
+}
 
 // FUNCTION: ALIEN 0x41cba0
 SOUND::SOUND(RESOURCE* p_res, int p_highQuality)
@@ -374,6 +386,12 @@ static FILE* OpenWavAsset(const char* p_name)
 	// Retry the add-on-era nested sound beside other Wav assets, without a
 	// global basename search.
 	const char* first = strpbrk(p_name, "/\\");
+	if (!first && !strchr(p_name, ':')) {
+
+
+		const std::string inWav = std::string("wav/") + p_name;
+		return Platform_FOpen(inWav.c_str(), "rb");
+	}
 	const char* slash = strrchr(p_name, '/');
 	const char* backslash = strrchr(p_name, '\\');
 	const char* last = !slash || (backslash && backslash > slash) ? backslash : slash;

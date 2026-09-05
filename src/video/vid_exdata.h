@@ -48,6 +48,9 @@ public:
 	int m_fireInVolley;
 	int m_reloadTimeInVolley;
 	int m_pad;
+
+
+	int m_legacyLifeTime;
 };
 
 static_assert(offsetof(VID_EXDATA, m_army) == 0x2c);

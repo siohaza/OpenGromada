@@ -31,6 +31,9 @@ public:
 	virtual void AddPointerToSprite(SPRITE* p_sprite) {} // vtable+0x28
 	virtual STRING GetMouseTipsString() const;           // vtable+0x2c
 
+	virtual void RefreshUILayout() {}
+	virtual unsigned int SetCleverAttack(int p_on) { return 0; }
+
 	int m_money;              // 0x04
 	undefined4 m_control;     // 0x08
 	undefined4 m_army;        // 0x0c

@@ -2,6 +2,9 @@
 #include "logic/logic.h"
 #include "logic/logicstack.h"
 #include "logic/logicvar.h"
+#include "logic/script_commands.h"
+#include "game/data_version.h"
+#include "game/game_descriptor.h"
 #include "util/myerror.h"
 #include "util/named_list_struct_logicvar.h"
 #include "util/string.h"
@@ -12,6 +15,70 @@
 class VID;
 VID** ScriptExecFunc(int p_cmd);
 
+namespace {
+
+
+
+
+
+int NativeMinimumArgs(unsigned int p_operation)
+{
+	const int dialectMinimum = ScriptCommandMinimumArgs(p_operation);
+	if (dialectMinimum != -2) return dialectMinimum;
+	const bool steamAS1 = GameDesc->m_scriptDialect == GAME_SCRIPT_AS1 && GameData_IsSteam();
+	switch (p_operation) {
+	case 102: return steamAS1 ? 2 : 1;
+	case 134: return Game_IsZS1() ? 1 : 0;
+	case 136: return Game_IsZS1() ? 3 : 2;
+	case 150: return steamAS1 ? 3 : 0;
+	case 212: return steamAS1 ? 1 : 2;
+	case 231: return Game_IsZS1() ? 1 : 4;
+	case 232: return Game_IsZS1() ? 0 : -1;
+	case 78: case 255: return Game_IsZS1() ? 5 : -1;
+
+
+
+	case 210: case 211: case 215: case 217: case 218: case 221: case 222:
+		return steamAS1 ? 1 : -1;
+	case 214: case 219: return steamAS1 ? 2 : -1;
+	case 220: return steamAS1 ? 3 : -1;
+	case 216: case 223: return steamAS1 ? 0 : -1;
+	case 213: return steamAS1 || GameDesc->m_unitCountLayers > 0 ? 0 : -1;
+	case 69: case 75: case 76: case 77: case 91: case 92:
+	case 104: case 105: case 108: case 109: case 110: case 111:
+	case 115: case 118: case 119: case 120: case 127:
+	case 143: case 144: case 145: case 147: case 149: case 151: case 157:
+	case 167: case 168: case 173: case 185: case 189: case 241: case 244: case 245:
+		return 0;
+	case 66: case 68: case 83: case 84: case 85: case 86: case 87: case 88: case 89:
+	case 96: case 98: case 99: case 100: case 103: case 112: case 113:
+	case 117: case 121: case 122: case 124: case 125:
+	case 130: case 131: case 132: case 133: case 138: case 139: case 140: case 142:
+	case 148: case 152: case 154: case 155: case 159: case 164: case 165: case 166:
+	case 169: case 171: case 175: case 176: case 177: case 178: case 179:
+	case 188: case 205: case 206: case 207: case 240: case 246: case 247:
+	case 250: case 252:
+		return 1;
+	case 97: case 101: case 116: case 123: case 126: case 128: case 129:
+	case 141: case 153: case 156: case 158: case 160: case 162: case 170:
+	case 172: case 174: case 184: case 186: case 187: case 208: case 251: case 254:
+		return 2;
+	case 71: case 80: case 90: case 114: case 135: case 146: case 163:
+	case 182: case 183: case 239: case 242: case 249: case 253:
+		return 3;
+	case 70: case 74: case 137: case 161:
+		return 4;
+	case 72: case 79: case 82: case 107: case 243:
+		return 5;
+	case 65: case 106:
+		return 6;
+	default:
+		return -1;
+	}
+}
+
+}
+
 // STUB: ALIEN 0x423430
 int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 {
@@ -19,7 +86,7 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 	int indexActive = 0;
 	int arrayIndex = 0;
 
-	if (!m_stackData) {
+	if (!m_stackData || m_runtimeFault) {
 		return 0;
 	}
 
@@ -34,6 +101,16 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 			"!!!ERROR!!!LOGIC: Call unexisted function %s()",
 			m_variables.m_data[function].m_name.m_str
 		);
+		return 0;
+	}
+	const LOGICVAR& entry = m_variables.m_data[function].m_var;
+	if (entry.m_a < 0 || entry.m_a >= m_stackPos) {
+		RuntimeError(m_variables.m_data[function].m_name.m_str, entry.m_a);
+		return 0;
+	}
+	if (entry.m_extra < 0 || entry.m_type < 0 ||
+		entry.m_type > m_stack.m_n || entry.m_extra > m_stack.m_n - entry.m_type) {
+		RuntimeError("invalid function parameter slots", function);
 		return 0;
 	}
 
@@ -54,14 +131,36 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 		((LOGICSTACK*) m_stack.m_data)[m_variables.m_data[function].m_var.m_type + 2] = LOGICSTACK(p_c);
 	}
 
-	while (instruction < m_stackPos) {
-		if (m_stack.m_n < frameBase) {
-			MYERROR::Log(::Error, "!!!ERROR!!!LOGIC: '%s' stack error %i", "pop, but not push", instruction);
-			exit(1);
+	while (instruction != m_stackPos && !m_runtimeFault) {
+		m_runtimeOffset = instruction;
+		if (instruction < 0 || instruction >= m_stackPos) {
+			RuntimeError("invalid instruction address", instruction);
+			break;
+		}
+		if (m_stack.m_n < frameBase || frameBase < initialStack + 2) {
+			RuntimeError("stack underflow", instruction);
+			break;
 		}
 
 		int stackCount = m_stack.m_n;
 		unsigned int operation = (unsigned char) m_stackData[instruction];
+		int operandBytes = operation == 39 ? 5 :
+			(operation == 1 || operation == 24 || operation == 25 || operation == 28 ||
+			 operation == 29 || operation == 30 || (operation >= 32 && operation <= 38) ||
+			 operation == 44 || operation == 45) ? 4 : 0;
+		if (operandBytes > m_stackPos - instruction - 1 ||
+			(operation == 2 && !memchr(m_stackData + instruction + 1, 0, m_stackPos - instruction - 1))) {
+			RuntimeError("truncated bytecode operand", operation);
+			break;
+		}
+		int needed = operation >= 6 && operation <= 23 ? 2 :
+			(operation == 3 || operation == 4 || operation == 5 || operation == 24 ||
+			 operation == 26 || operation == 29 || operation == 38 || operation == 39 ||
+			 operation == 40 || operation == 44 || operation == 45) ? 1 : 0;
+		if (stackCount - frameBase < needed) {
+			RuntimeError("missing operand on stack", operation);
+			break;
+		}
 		if (operation <= 23 && operation >= 6) {
 			++instruction;
 			LOGICSTACK* stack = (LOGICSTACK*) m_stack.m_data;
@@ -73,10 +172,23 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 			int variable = encodedVariable;
 			++instruction;
 			LOGICSTACK* stack = (LOGICSTACK*) m_stack.m_data;
+			if (variable < 0 || variable >= initialStack) {
+				RuntimeError("invalid variable slot", variable);
+				break;
+			}
 			if ((stack[variable].m_type & 0x20) && indexActive) {
 				variable = stack[variable].m_num;
 			}
-			int effective = variable + arrayIndex;
+
+
+			const bool characterAssignment = operation == 38 && indexActive &&
+				(stack[encodedVariable].m_type & 1) && !(stack[encodedVariable].m_type & 4);
+			const int64_t effectiveIndex = characterAssignment ? encodedVariable : int64_t(variable) + arrayIndex;
+			if (effectiveIndex < 0 || effectiveIndex >= initialStack) {
+				RuntimeError("array index outside variable storage", arrayIndex);
+				break;
+			}
+			int effective = int(effectiveIndex);
 
 			switch (operation) {
 			case 39: {
@@ -94,6 +206,10 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 						stack[effective].m_str = *stack[stackCount - 1].String();
 					}
 					else {
+						if (arrayIndex < 0 || size_t(arrayIndex) >= strlen(stack[encodedVariable].m_str.m_str)) {
+							RuntimeError("string index outside storage", arrayIndex);
+							break;
+						}
 						stack[encodedVariable].m_str.m_str[arrayIndex] = (char) stack[stackCount - 1].Int();
 					}
 				}
@@ -250,6 +366,14 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 				break;
 			}
 			case 30:
+				if (LOGIC_BYTECODE::ReadInt32(m_stackData + instruction) < 0) {
+					const char* name = "unresolved function";
+					for (const auto& fixup : m_protoFixups) {
+						if (fixup.first == instruction) name = m_variables.m_data[fixup.second].m_name.m_str;
+					}
+					RuntimeError(name, -1);
+					break;
+				}
 				m_stack.Push(LOGICSTACK(frameBase));
 				m_stack.Push(LOGICSTACK(instruction + 4));
 				instruction = LOGIC_BYTECODE::ReadInt32(m_stackData + instruction);
@@ -301,7 +425,20 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 				}
 				break;
 			}
-			default:
+			default: {
+
+
+
+				const int nativeArgs = NativeMinimumArgs(operation);
+				if (m_externalArgs[operation] < 0)
+					RuntimeError("undeclared external command", operation);
+				else if (nativeArgs < 0)
+					RuntimeError("unsupported external command for script dialect", operation);
+				else if (m_externalArgs[operation] < nativeArgs)
+					RuntimeError("external declaration has fewer arguments than native handler", operation);
+				else if (stackCount - frameBase < m_externalArgs[operation])
+					RuntimeError("external command argument underflow", operation);
+				if (m_runtimeFault) break;
 				if ((unsigned char) m_stackData[instruction - 1] == 84) {
 					LOGICSTACK* top = &((LOGICSTACK*) m_stack.m_data)[stackCount - 1];
 					if (top->m_num == (intptr_t) p_a) {
@@ -310,6 +447,7 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 				}
 				ScriptExecFunc((unsigned char) m_stackData[instruction - 1]);
 				break;
+			}
 			}
 		}
 	}
@@ -330,5 +468,5 @@ int LOGIC::CallFunction(int p_fn, const SPRITE* p_a, const SPRITE* p_b, int p_c)
 		}
 		m_stack.m_max = initialStack;
 	}
-	return result;
+	return m_runtimeFault ? 0 : result;
 }

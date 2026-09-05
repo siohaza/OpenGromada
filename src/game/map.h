@@ -13,6 +13,7 @@
 #include "util/angle.h"
 #include "util/decomp.h"
 #include "util/resource.h"
+#include "util/sprite_ids.h"
 #include "world/groups.h"
 
 class SETTINGS;
@@ -66,6 +67,7 @@ public:
 
 	MAP(STRING& p_argv, SETTINGS* p_settings);
 	virtual ~MAP(); // 0x00
+	void DiscardScriptFiles();
 
 	// Returns non-zero when the event was consumed.
 	virtual int ProcessEvent(const union SDL_Event& p_event); // 0x04
@@ -129,6 +131,8 @@ public:
 	int m_menuFrameActive;
 	int m_menuFrameSavedW;
 	int m_menuFrameSavedH;
+	SPRITE_SAVE_IDS m_saveSpriteIds;
+	bool m_gameplayMap = false;
 
 	int DemoTact();
 	VID* Vid(int p_idx) const;

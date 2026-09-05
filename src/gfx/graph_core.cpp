@@ -10,9 +10,12 @@
 #include "gfx/graph.h"
 #include "gfx/texture.h"
 #include "platform/render.h"
+#include "platform/paths.h"
 #include "util/myerror.h"
+#include "video/movie_player.h"
 
 #include <SDL3/SDL.h>
+#include <algorithm>
 #include <cmath>
 #include <limits.h>
 #include <new>
@@ -408,6 +411,9 @@ int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNativ
 // FUNCTION: ALIEN 0x401b10
 GRAPH_CORE::~GRAPH_CORE()
 {
+	StopMovie();
+	delete m_movie;
+	m_movie = nullptr;
 	if (m_font) {
 		delete m_font;
 		m_font = 0;
@@ -544,10 +550,97 @@ void GRAPH_CORE::PostTact(int p_present)
 	if (!(m_flags & 0x10000)) {
 		return;
 	}
-	if (p_present && !m_effectStart[6] && !m_effectStart[7]) {
+	PollMovie();
+	if (p_present && m_movieActive) {
+
+
+
+		PresentMovieFrame();
+	}
+	else if (p_present && !m_effectStart[6] && !m_effectStart[7]) {
 		Platform_RenderPresent();
 	}
 	m_flags &= ~0x10000;
+}
+
+int GRAPH_CORE::OpenMovie(const char* p_filename)
+{
+
+
+
+	StopMovie();
+	m_movieName = p_filename ? p_filename : "";
+	m_movieErrorReported = false;
+	if (!MoviePlayer::Available()) {
+		MYERROR::Log(::Error, "Movie playback is unavailable in this build: '%s'", m_movieName.c_str());
+		return 1;
+	}
+	FILE* file = Platform_FOpen(m_movieName.c_str(), "rb");
+	if (!file) {
+		MYERROR::Log(::Error, "Movie open failed for '%s'; playback stopped", m_movieName.c_str());
+		return 1;
+	}
+	if (!m_movie) m_movie = new MoviePlayer;
+	if (!m_movie->Open(file, SDL_GetTicks())) {
+		MYERROR::Log(::Error, "Movie open failed for '%s': %s", m_movieName.c_str(), m_movie->Error().c_str());
+		m_movieErrorReported = true;
+		return 1;
+	}
+
+
+	int outputWidth = 0, outputHeight = 0;
+	SDL_GetRenderOutputSize(Platform_RenderRenderer(), &outputWidth, &outputHeight);
+	const auto center = [](float edge, float logicalSize, int outputSize, int size) {
+		const double pixels = double(edge) * outputSize / logicalSize;
+		return std::isfinite(pixels) && pixels >= 0 && pixels <= 65536 ? (((int) pixels - size) >> 1) : 0;
+	};
+	m_movieX = center(m_viewXMax, m_width, outputWidth, 640);
+	m_movieY = center(m_viewYMax, m_height, outputHeight, 480);
+	m_movieActive = true;
+	return 0;
+}
+
+void GRAPH_CORE::PollMovie(bool p_consumeCompletion)
+{
+	if (!m_movieActive) return;
+	m_movie->Update(SDL_GetTicks());
+	if (!m_movie->Error().empty() && !m_movieErrorReported) {
+		MYERROR::Log(::Error, "Movie playback stopped for '%s': %s", m_movieName.c_str(), m_movie->Error().c_str());
+		m_movieErrorReported = true;
+	}
+	if (!m_movie->Error().empty() || (p_consumeCompletion && !m_movie->IsPlaying())) m_movieActive = false;
+}
+
+void GRAPH_CORE::PresentMovieFrame()
+{
+	if (!m_movieActive) return;
+	if (!Platform_RenderPresentMovie(m_movie->Pixels(), m_movie->Width(), m_movie->Height(), m_movieX, m_movieY)) {
+		MYERROR::Log(::Error, "Movie presentation failed for '%s': %s", m_movieName.c_str(), SDL_GetError());
+		StopMovie();
+	}
+}
+
+void GRAPH_CORE::PresentIdleMovie()
+{
+
+
+
+	PollMovie(false);
+	PresentMovieFrame();
+}
+
+int GRAPH_CORE::IsMoviePlaying()
+{
+
+
+	return m_movieActive;
+}
+
+void GRAPH_CORE::StopMovie()
+{
+	m_movieActive = false;
+	if (m_movie) m_movie->Stop();
+	Platform_RenderCloseMovie();
 }
 
 // FUNCTION: ALIEN 0x402400
@@ -768,16 +861,19 @@ int GRAPH_CORE::CopyToZBuffer(int* p_dst, int* p_src, void* p_texture)
 struct SHADOW_POINT {
 	double m_x;
 	double m_y;
+	double m_z;
 };
 
 static SHADOW_POINT ReadShadowPoint(const unsigned char* p_bytes, unsigned int p_stride, int p_idx)
 {
 	float x;
 	float y;
+	float z;
 	const unsigned char* vertex = p_bytes + (size_t) p_idx * p_stride;
 	memcpy(&x, vertex, sizeof(x));
 	memcpy(&y, vertex + sizeof(x), sizeof(y));
-	SHADOW_POINT result = {x, y};
+	memcpy(&z, vertex + 2 * sizeof(float), sizeof(z));
+	SHADOW_POINT result = {x, y, z};
 	return result;
 }
 
@@ -852,6 +948,16 @@ static void DrawShadowTriangle(
 		!std::isfinite(p_c.m_x) || !std::isfinite(p_c.m_y)) {
 		return;
 	}
+
+
+
+
+	const bool depthTest =
+		GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND && p_graph->m_state.m_zFunc == D3DCMP_GREATEREQUAL;
+	if (depthTest && (!std::isfinite(p_a.m_z) || !std::isfinite(p_b.m_z) || !std::isfinite(p_c.m_z) ||
+					  !p_graph->m_zbuffer || p_graph->m_zpitch < p_graph->m_width)) {
+		return;
+	}
 	double area = ShadowEdge(p_a, p_b, p_c.m_x, p_c.m_y);
 	if (area == 0.0) {
 		return;
@@ -865,6 +971,7 @@ static void DrawShadowTriangle(
 		SHADOW_POINT t = p_b;
 		p_b = p_c;
 		p_c = t;
+		area = -area;
 	}
 
 	double minX = p_a.m_x;
@@ -954,7 +1061,19 @@ static void DrawShadowTriangle(
 		unsigned int* dst = (unsigned int*) p_graph->m_color + (size_t) y * p_graph->m_pitch;
 		for (int x = x0; x < x1; ++x) {
 			if (ShadowInside(edge0, topLeft0) && ShadowInside(edge1, topLeft1) && ShadowInside(edge2, topLeft2)) {
-				dst[x] = BlendShadowPixel(p_graph->m_state, p_color, dst[x]);
+				bool visible = true;
+				if (depthTest) {
+					const double z = (edge1 * p_a.m_z + edge2 * p_b.m_z + edge0 * p_c.m_z) / area;
+					const auto fixedZ = (unsigned short) std::lround(std::clamp(z * 65536.0, 0.0, 65535.0));
+					auto* depth = static_cast<unsigned short*>(p_graph->m_zbuffer) + (size_t) y * p_graph->m_zpitch + x;
+					visible = fixedZ >= *depth;
+					if (visible && p_graph->m_state.m_zWrite) {
+						*depth = fixedZ;
+					}
+				}
+				if (visible) {
+					dst[x] = BlendShadowPixel(p_graph->m_state, p_color, dst[x]);
+				}
 			}
 			edge0 += stepX0;
 			edge1 += stepX1;
@@ -1064,9 +1183,13 @@ int GRAPH_CORE::SetRenderState(int p_state, unsigned int p_value)
 {
 	switch (p_state) {
 	case D3DRS_ZENABLE:
+
+		return 0;
 	case D3DRS_ZWRITEENABLE:
+		m_state.m_zWrite = p_value != 0;
+		return 0;
 	case D3DRS_ZFUNC:
-		// Depth state is handled by the CPU rasterizers.
+		m_state.m_zFunc = (int) p_value;
 		return 0;
 	case D3DRS_ALPHABLENDENABLE:
 		m_state.m_alphaBlend = p_value != 0;
@@ -1162,6 +1285,9 @@ int GRAPH_CORE::Pause()
 {
 	m_flags |= 1u;
 	PostTact(1);
+
+
+	if (m_movie) m_movie->Pause(SDL_GetTicks());
 	return 0;
 }
 
@@ -1169,6 +1295,7 @@ int GRAPH_CORE::Pause()
 int GRAPH_CORE::Resume()
 {
 	m_flags &= ~1u;
+	if (m_movie) m_movie->Resume(SDL_GetTicks());
 	return 0;
 }
 

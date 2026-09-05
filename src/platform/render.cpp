@@ -10,6 +10,9 @@
 static SDL_Window* s_window;
 static SDL_Renderer* s_renderer;
 static SDL_Texture* s_texture;
+static SDL_Texture* s_movieTexture;
+static int s_movieWidth, s_movieHeight;
+static bool s_hasPresented;
 static unsigned int* s_pixels;
 static int s_width;
 static int s_height;
@@ -162,6 +165,7 @@ static int ReplaceLogicalTargets(int p_width, int p_height)
 	free(s_pixels);
 
 	s_texture = texture;
+	s_hasPresented = false;
 	s_pixels = pixels;
 	s_width = p_width;
 	s_height = p_height;
@@ -230,6 +234,8 @@ int Platform_RenderOpen(
 
 void Platform_RenderClose()
 {
+	Platform_RenderCloseMovie();
+	s_hasPresented = false;
 	if (s_window && SDL_TextInputActive(s_window)) {
 		SDL_StopTextInput(s_window);
 	}
@@ -302,6 +308,7 @@ void Platform_RenderPresent()
 	}
 
 	SDL_UpdateTexture(s_texture, 0, s_pixels, s_width * (int) sizeof(unsigned int));
+	s_hasPresented = true;
 	Uint64 t1 = s_profile ? SDL_GetTicksNS() : 0;
 
 	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
@@ -368,8 +375,57 @@ void Platform_RenderPresent()
 	}
 }
 
+void Platform_RenderCloseMovie()
+{
+	SDL_DestroyTexture(s_movieTexture);
+	s_movieTexture = nullptr;
+	s_movieWidth = s_movieHeight = 0;
+}
+
+bool Platform_RenderPresentMovie(const unsigned int* p_pixels, int p_width, int p_height, int p_x, int p_y)
+{
+	if (!s_renderer || !s_texture) return false;
+
+
+	int logicalWidth = 0, logicalHeight = 0;
+	SDL_RendererLogicalPresentation mode;
+	if (!SDL_GetRenderLogicalPresentation(s_renderer, &logicalWidth, &logicalHeight, &mode) ||
+		!SDL_SetRenderLogicalPresentation(s_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED)) return false;
+	struct RestorePresentation {
+		int w, h;
+		SDL_RendererLogicalPresentation mode;
+		~RestorePresentation() { SDL_SetRenderLogicalPresentation(s_renderer, w, h, mode); }
+	} restore{logicalWidth, logicalHeight, mode};
+
+
+	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
+	if (!SDL_RenderClear(s_renderer)) return false;
+	if (s_hasPresented && !SDL_RenderTexture(s_renderer, s_texture, nullptr, nullptr)) return false;
+	const SDL_FRect rect{(float) p_x, (float) p_y, 640.0f, 480.0f};
+	if (!SDL_RenderFillRect(s_renderer, &rect)) return false;
+	if (p_pixels) {
+		if (p_width <= 0 || p_height <= 0 || p_width > 1920 || p_height > 1080) return false;
+		if (!s_movieTexture || s_movieWidth != p_width || s_movieHeight != p_height) {
+			Platform_RenderCloseMovie();
+			s_movieTexture = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
+				SDL_TEXTUREACCESS_STREAMING, p_width, p_height);
+			if (!s_movieTexture) return false;
+			SDL_SetTextureScaleMode(s_movieTexture, SDL_SCALEMODE_LINEAR);
+			SDL_SetTextureBlendMode(s_movieTexture, SDL_BLENDMODE_NONE);
+			s_movieWidth = p_width;
+			s_movieHeight = p_height;
+		}
+		if (!SDL_UpdateTexture(s_movieTexture, nullptr, p_pixels, p_width * 4) ||
+			!SDL_RenderTexture(s_renderer, s_movieTexture, nullptr, &rect)) return false;
+	}
+	s_debugTextCount = 0;
+	return SDL_RenderPresent(s_renderer);
+}
+
 int Platform_RenderHandleDeviceReset()
 {
+	Platform_RenderCloseMovie();
+	s_hasPresented = false;
 	if (!s_renderer || !s_pixels || s_width <= 0 || s_height <= 0) {
 		return 1;
 	}

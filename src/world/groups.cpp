@@ -12,7 +12,7 @@ int GROUPS::Save(RESOURCE* p_res)
 	for (GROUP* g = m_head.m_next; g != &m_head && g;) {
 		if (g->m_n) {
 			for (int i = 0; i < g->m_n; ++i) {
-				res->Write(&g->m_data[i], 4);
+				Map->m_saveSpriteIds.Write(res, g->m_data[i]);
 			}
 			end = -1;
 			res->Write(&end, 4);

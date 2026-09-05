@@ -1,6 +1,7 @@
 #include "video/vid.h"
 
 #include "game/const.h"
+#include "game/game_descriptor.h"
 #include "game/map.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
@@ -208,6 +209,11 @@ unsigned int VID::ResetSprites()
 	return r;
 }
 
+int VID::DefaultLifetime() const
+{
+	return GameDesc->m_lifetimeInWeapon ? (m_exData ? m_exData->m_legacyLifeTime : 0) : m_unk0x6c;
+}
+
 // FUNCTION: ALIEN 0x413a60
 void VID::SetChildAndLink()
 {
@@ -225,28 +231,36 @@ void VID::SetChildAndLink()
 			);
 		}
 	}
-	int* p = m_exData->m_unk0x84;
-	int n = 8;
-	do {
-		if (p[-8] || p[0] || p[8] || p[16]) {
-			m_unk0x47c |= 1;
-		}
-		if (p[24] != 0x3f800000 || p[32] != 0x3f800000 || p[40] != 0x3f800000) {
-			m_unk0x47c |= 2;
-		}
-		if (((float*) p)[48] != 0.0f || ((float*) p)[56] != 0.0f || ((float*) p)[64] != 0.0f) {
-			m_unk0x47c |= 4;
-		}
-		if (p[72] || p[80] || p[88]) {
-			m_unk0x47c |= 8;
-		}
-		++p;
-		--n;
-	} while (n);
-	if (m_unk0x6c != 999999 || (m_flag & 0x200000) != 0) {
+	if (GameDesc->m_weaponHasKeyframes) {
+		int* p = m_exData->m_unk0x84;
+		int n = 8;
+		do {
+			if (p[-8] || p[0] || p[8] || p[16]) {
+				m_unk0x47c |= 1;
+			}
+			if (p[24] != 0x3f800000 || p[32] != 0x3f800000 || p[40] != 0x3f800000) {
+				m_unk0x47c |= 2;
+			}
+			if (((float*) p)[48] != 0.0f || ((float*) p)[56] != 0.0f || ((float*) p)[64] != 0.0f) {
+				m_unk0x47c |= 4;
+			}
+			if (p[72] || p[80] || p[88]) {
+				m_unk0x47c |= 8;
+			}
+			++p;
+			--n;
+		} while (n);
+	}
+	else {
+
+
+		m_unk0x47c &= ~0xFu;
+		m_unk0x478 = 0;
+	}
+	if (DefaultLifetime() != 999999 || (m_flag & 0x200000) != 0) {
 		m_unk0x478 = 1;
 	}
-	else if ((m_unk0x47c & 0xF) != 0 || (m_flag & 0x400) != 0) {
+	else if (GameDesc->m_weaponHasKeyframes && ((m_unk0x47c & 0xF) != 0 || (m_flag & 0x400) != 0)) {
 		m_unk0x478 = 1;
 	}
 	// Resolve animation child VIDs without crossing array bounds.
@@ -334,6 +348,16 @@ int VID::GetBuildTime()
 // FUNCTION: ALIEN 0x414840
 VID* VID::SetPropHide(int p_hide)
 {
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+
+
+		VID* vid = this;
+		do {
+			vid->m_flag = (vid->m_flag & ~0x400u) | (p_hide ? 0x400u : 0u);
+			vid = vid->m_unk0x5c;
+		} while (vid);
+		return vid;
+	}
 	int bit = ((p_hide != 0) & 1) << 6;
 	m_unk0x47c = (m_unk0x47c & 0xffffffbf) | bit;
 	VID* p = m_unk0x5c;
@@ -424,6 +448,9 @@ float VID::CalculateZSpeed(float p_dz, float p_dist)
 // FUNCTION: ALIEN 0x43a1b0
 unsigned int VID::PropHide()
 {
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+		return (m_flag >> 10) & 1;
+	}
 	return (m_unk0x47c >> 6) & 1;
 }
 

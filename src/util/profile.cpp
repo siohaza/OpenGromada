@@ -1,9 +1,13 @@
 #include "util/profile.h"
 
+#include "game/game_descriptor.h"
 #include "platform/ini.h"
+#include "util/myerror.h"
 
+#include <algorithm>
 #include <ctype.h>
 #include <map>
+#include <set>
 #include <string.h>
 #include <string>
 
@@ -86,6 +90,69 @@ std::string Cp1251ToUtf8(const char* p_value)
 	return result;
 }
 
+void ReportExpansionLimit(const STRING& p_name, const STRING& p_app, const STRING& p_key, const char* p_reason)
+{
+	fprintf(stderr, "PROFILE[%s] %s [%s] %s: reference expansion stopped (%s)\n",
+		GameDesc->m_profileId, p_name.m_str, p_app.m_str, p_key.m_str, p_reason);
+	if (Error) {
+		MYERROR::Log(Error, "PROFILE %s [%s] %s: reference expansion stopped (%s)\n",
+			p_name.m_str, p_app.m_str, p_key.m_str, p_reason);
+	}
+}
+
+std::string ExpandProfileReferences(
+	INI_FILE& p_ini, const STRING& p_name, const STRING& p_app, const STRING& p_key,
+	const char* p_value, const STRING& p_default)
+{
+
+
+
+
+
+	constexpr size_t maxBytes = 4095;
+	constexpr size_t maxSubstitutions = 128;
+	size_t inputSize = 0;
+	while (inputSize <= maxBytes && p_value[inputSize]) ++inputSize;
+	std::string value(p_value, std::min(inputSize, maxBytes));
+	if (inputSize > maxBytes) {
+		ReportExpansionLimit(p_name, p_app, p_key, "4095-byte input limit");
+	}
+	std::set<std::string> seen;
+	seen.insert(value);
+	for (size_t count = 0; count < maxSubstitutions; ++count) {
+		const size_t begin = value.find('{');
+		if (begin == std::string::npos) return value;
+		const size_t colon = value.find(':', begin + 1);
+		if (colon == std::string::npos) return value;
+		const size_t end = value.find('}', colon + 1);
+		if (end == std::string::npos) return value;
+		const std::string section = value.substr(begin + 1, colon - begin - 1);
+		const std::string key = value.substr(colon + 1, end - colon - 1);
+		const char* replacement = p_ini.Get(section.c_str(), key.c_str());
+		if (!replacement) replacement = p_default.m_str;
+		if (!*replacement) return value;
+		size_t replacementSize = 0;
+		while (replacementSize < maxBytes && replacement[replacementSize]) ++replacementSize;
+		const size_t remaining = value.size() - (end - begin + 1);
+		if (replacementSize > maxBytes - remaining) {
+			ReportExpansionLimit(p_name, p_app, p_key, "4095-byte output limit");
+			return value;
+		}
+		std::string next = value.substr(0, begin);
+		next.append(replacement, replacementSize);
+		next.append(value, end + 1, std::string::npos);
+		if (!seen.insert(next).second) {
+			ReportExpansionLimit(p_name, p_app, p_key, "cyclic reference");
+			return value;
+		}
+		value.swap(next);
+	}
+	if (value.find('{') != std::string::npos) {
+		ReportExpansionLimit(p_name, p_app, p_key, "128-substitution limit");
+	}
+	return value;
+}
+
 } // namespace
 
 // FUNCTION: ALIEN 0x407660
@@ -108,7 +175,18 @@ PROFILE* Strings;
 // FUNCTION: ALIEN 0x4076a0
 STRING PROFILE::GetString(const STRING& p_app, const STRING& p_key, const STRING& p_default)
 {
-	const char* value = ProfileFor(m_name).Get(p_app.m_str, p_key.m_str);
+	INI_FILE& ini = ProfileFor(m_name);
+	const char* value = ini.Get(p_app.m_str, p_key.m_str);
+	std::string expanded;
+	if (GameDesc->m_expandProfileReferences) {
+		expanded = ExpandProfileReferences(ini, m_name, p_app, p_key, value ? value : p_default.m_str, p_default);
+		if (!value) {
+
+
+			return STRING(expanded.c_str());
+		}
+		value = expanded.c_str();
+	}
 	if (!value) {
 		if (*p_default.m_str) {
 			return STRING(p_default.m_str);

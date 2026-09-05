@@ -1,5 +1,6 @@
 #include "video/vid_hardware_z.h"
 
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
 #include "gfx/asmdraw.h"
@@ -74,7 +75,8 @@ int VID_HARDWARE_Z::DrawFrame(
 		m_messageLineHeight <= 0) {
 		return 0;
 	}
-	if (!(m_unk0x47c & 0x40)) {
+
+	if (!PropHide()) {
 		int width = m_unk0x2f6;
 		int x0 = (int) (p_x - p_shiftX - width / 2);
 		int y0 = (int) (p_y - p_z - p_shiftY - m_messageLineHeight / 2);
@@ -343,6 +345,23 @@ int VID_HARDWARE_Z::DrawFrame(
 // FUNCTION: ALIEN 0x41b880
 void VID_HARDWARE_Z::SetLayer()
 {
+	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
+
+
+		if (m_flag & 0x40000000) {
+			m_layer = 1;
+		}
+		else if (m_unk0x0c == 64) {
+			m_layer = 7;
+		}
+		else if (!(m_pixelFlag16 & 2)) {
+			m_layer = 5;
+		}
+		else {
+			m_layer = (!(m_pixelFlag16 & 4) && (m_flag & 0x10000)) ? 6 : 9;
+		}
+		return;
+	}
 	if (m_flag & 0x40000000) {
 		m_layer = 4;
 		return;

@@ -47,8 +47,12 @@ public:
 		if (!m_sfx) {
 			return true;
 		}
-		if (p_sfx < 0 || p_sfx > m_noSfx) {
+		if (p_sfx < 0 || p_sfx >= m_noSfx) {
 			return false;
+		}
+		if (m_disabled) {
+
+			return true;
 		}
 		if (!m_sfx[p_sfx].m_samples[0]) {
 			return false;
@@ -56,16 +60,7 @@ public:
 		return true;
 	}
 
-	int IsLooped(int p_sfx) const
-	{
-		if (!m_sfx) {
-			return 0;
-		}
-		if (!ValidateSFX(p_sfx)) {
-			return 0;
-		}
-		return m_sfx[p_sfx].m_unk0x20 == 0;
-	}
+	int IsLooped(int p_sfx) const;
 
 	void InitDS();
 	void LoadSFX(RESOURCE* p_res);

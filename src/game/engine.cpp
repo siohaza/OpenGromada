@@ -18,6 +18,7 @@
 #include "util/game_random.h"
 #include "util/myerror.h"
 #include "util/polar.h"
+#include "util/resource.h"
 #include "video/vid.h"
 #include "video/vid_exdata.h"
 #include "world/hash_map.h"
@@ -468,26 +469,45 @@ decomp_intptr ENGINE::Action(int p_cmd, decomp_intptr p_a, decomp_intptr p_b, de
 	case 80: { // ACT_SAVE
 		UNIT::Action(p_cmd, p_a, p_b, p_c);
 		STREAM* stream = (STREAM*) p_a;
-		m_curDotRef.Write(stream);
-		m_lastDotRef.Write(stream);
-		// Both are 32-bit identity tokens on disk, resolved through RELATION on
-		// load; writing the pointers themselves happened to agree only because
-		// the low half comes first on a little-endian machine.
-		int prevToken = (int) (decomp_intptr) m_prevEngine;
-		int nextToken = (int) (decomp_intptr) m_nextEngine;
-		stream->Write(&prevToken, 4);
-		stream->Write(&nextToken, 4);
+		auto* resource = dynamic_cast<RESOURCE*>(stream);
+		if ((resource && !resource->Good()) || Map->m_logic.m_runtimeFault || m_curDotRef.Write(stream) || m_lastDotRef.Write(stream)) {
+			return 0;
+		}
+		if (Map->m_saveSpriteIds.Write(stream, m_prevEngine) || Map->m_saveSpriteIds.Write(stream, m_nextEngine)) {
+			if (resource) resource->Fail("cannot write train linkage");
+			else Map->m_logic.RuntimeError("cannot write train linkage");
+		}
 		return 0;
 	}
 	case 81: // ACT_RESTORE
 	case 200: {
 		UNIT::Action(p_cmd, p_a, p_b, p_c);
+		STREAM* stream = (STREAM*) p_a;
+		auto* resource = dynamic_cast<RESOURCE*>(stream);
+		if ((resource && !resource->Good()) || Map->m_logic.m_runtimeFault) {
+			return 0;
+		}
 		if (p_b >= 6) {
-			STREAM* stream = (STREAM*) p_a;
-			m_curDotRef.Read(stream);
-			m_lastDotRef.Read(stream);
-			m_prevEngine = (ENGINE*) Map->ReadPointer(stream);
-			m_nextEngine = (ENGINE*) Map->ReadPointer(stream);
+			R_POS current, last;
+			if (current.Read(stream) || last.Read(stream)) {
+				return 0;
+			}
+			SPRITE* previous = Map->ReadPointer(stream);
+			SPRITE* next = Map->ReadPointer(stream);
+			if ((resource && !resource->Good()) || Map->m_logic.m_runtimeFault) {
+				return 0;
+			}
+			if (previous == (SPRITE*) -1 || next == (SPRITE*) -1 ||
+				(previous && !dynamic_cast<ENGINE*>(previous)) || (next && !dynamic_cast<ENGINE*>(next)) ||
+				previous == this || next == this) {
+				if (resource) resource->Fail("invalid train linkage reference");
+				else Map->m_logic.RuntimeError("invalid train linkage reference");
+				return 0;
+			}
+			m_curDotRef = current;
+			m_lastDotRef = last;
+			m_prevEngine = (ENGINE*) previous;
+			m_nextEngine = (ENGINE*) next;
 			SetDotBusy();
 			ANGLE linkDir = m_curDotRef.m_dot ? m_curDotRef.m_dot->m_links[m_curDotRef.m_link].m_dir : ANGLE(0);
 			unsigned char d1 = (unsigned char) (m_dir - linkDir.m_dir);

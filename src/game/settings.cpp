@@ -137,26 +137,29 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 				g_commandLine.m_mask |= OVERRIDE_UI_SCALE;
 			}
 		}
-		else if ((value = OptionValue(arg, "--data-path", &i, p_argc, p_argv))) {
+		else if ((value = OptionValue(arg, "--data-path", &i, p_argc, p_argv)) ||
+				 (value = OptionValue(arg, "--data-dir", &i, p_argc, p_argv))) {
 			SDL_setenv_unsafe("ALIEN_SHOOTER_DATA_PATH", value, 1);
 		}
 		else if ((value = OptionValue(arg, "--pref-path", &i, p_argc, p_argv))) {
 			SDL_setenv_unsafe("ALIEN_SHOOTER_PREF_PATH", value, 1);
 		}
-		else if ((value = OptionValue(arg, "--game", &i, p_argc, p_argv))) {
-			if (!strcmp(value, "as1")) {
-				Game_SetCliOverride(GAME_AS1);
-			}
-			else if (!strcmp(value, "zs1")) {
-				Game_SetCliOverride(GAME_ZS1);
-			}
-			else {
-				fprintf(stderr, "Unknown --game value '%s'. Valid games are: as1, zs1.\n", value);
+		else if ((value = OptionValue(arg, "--game", &i, p_argc, p_argv)) ||
+				 (value = OptionValue(arg, "--profile", &i, p_argc, p_argv))) {
+			if (!Game_SetCliOverride(value)) {
+				fprintf(stderr, "Unknown --game value '%s'. Valid games: as1, zs1, theseus, crazy-lunch, last-hope, chacks-temple, locoland.\n", value);
 				exit(1);
 			}
 		}
+		else if ((value = OptionValue(arg, "--probe-game", &i, p_argc, p_argv))) {
+			if (strcmp(value, "json")) {
+				fprintf(stderr, "--probe-game accepts only 'json'.\n");
+				exit(1);
+			}
+			Game_SetProbeJson(true);
+		}
 		else if ((value = OptionValue(arg, "--config", &i, p_argc, p_argv))) {
-			SetGameArgument(p_gameArgument, value);
+			Game_SetConfigOverride(value);
 		}
 		else if ((value = OptionValue(arg, "--script", &i, p_argc, p_argv))) {
 			SetGameArgument(p_gameArgument, value);
@@ -188,8 +191,16 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 		else if (!strcmp(arg, "--red-blood")) {
 			g_commandLine.m_mask |= OVERRIDE_RED_BLOOD;
 		}
+		else if (!strncmp(arg, "--", 2)) {
+			fprintf(stderr, "Unknown or incomplete option '%s'. Use --data-dir, --game, --config or --script for startup options.\n", arg);
+			exit(1);
+		}
 		else {
 			SetGameArgument(p_gameArgument, arg);
+			size_t length = strlen(arg);
+			if (length >= 4 && !SDL_strcasecmp(arg + length - 4, ".cfg")) {
+				Game_SetConfigOverride(arg);
+			}
 		}
 	}
 }
