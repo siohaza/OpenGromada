@@ -304,7 +304,6 @@ ffmpeg_read("${copyright}" copyright_text)
 if(NOT copyright_text MATCHES "GNU LESSER GENERAL PUBLIC LICENSE")
     message(FATAL_ERROR "Missing LGPL text in installed FFmpeg copyright notice")
 endif()
-ffmpeg_read("${project}/docs/FFmpeg.md" unused)
 set(build_log "${tree}/build-${FFMPEG_TRIPLET}-rel-out.log")
 ffmpeg_read("${build_log}" build_output)
 if(NOT build_output MATCHES "License: LGPL version 2\\.1 or later")
@@ -411,8 +410,10 @@ if(NOT "${status}" STREQUAL "0")
 endif()
 file(RENAME "${stage}/source.tar.gz" "${source_archive}")
 file(REMOVE_RECURSE "${stage}")
-file(COPY "${copyright}" "${patched}/COPYING.LGPLv2.1" "${project}/docs/FFmpeg.md"
+file(COPY "${copyright}" "${patched}/COPYING.LGPLv2.1"
     DESTINATION "${notice_dir}" USE_SOURCE_PERMISSIONS)
+file(WRITE "${notice_dir}/NOTICE.txt"
+    "OpenGromada uses FFmpeg ${version} (https://ffmpeg.org/) under the GNU Lesser General Public License, version 2.1 or later.")
 
 ffmpeg_fixup_runtime("${executable}" "${package}" "${library_dir}" "${FFMPEG_PLATFORM}" "${arch}")
 ffmpeg_probe_runtime("${executable}" "${FFMPEG_PLATFORM}" "${arch}" runtime_probe)
