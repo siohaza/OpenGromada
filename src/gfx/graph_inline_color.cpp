@@ -1,4 +1,5 @@
 #include "game/gametime.h"
+#include "gfx/gpu_backend.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture.h"
@@ -6,8 +7,10 @@
 #include "util/myerror.h"
 #include "video/vid.h"
 
+#include <algorithm>
 #include <math.h>
 #include <stdlib.h>
+#include <vector>
 
 // GLOBAL: ALIEN 0x4b2c68
 static int s_loadFrame;
@@ -63,6 +66,30 @@ int GRAPH::ScreenShot(STRING* p_name, int p_x, int p_y, int p_w, int p_h)
 {
 	GRAPH_CORE* core = (GRAPH_CORE*) this;
 	PICTURE picture(p_w, p_h, 1);
+	if (GPU_RENDER::Active()) {
+		const int left = (int) std::max<int64_t>(0, p_x);
+		const int top = (int) std::max<int64_t>(0, p_y);
+		const int right = (int) std::min<int64_t>(GPU_RENDER::Width(), (int64_t) p_x + p_w);
+		const int bottom = (int) std::min<int64_t>(GPU_RENDER::Height(), (int64_t) p_y + p_h);
+		const int width = std::max(0, right - left), height = std::max(0, bottom - top);
+		std::vector<uint32_t> pixels(size_t(width) * height);
+		if (width && height && !GPU_RENDER::ReadColor(left, top, width, height, pixels.data(), width)) {
+			return 1;
+		}
+		for (int y = 0; y < p_h; ++y) {
+			for (int x = 0; x < p_w; ++x) {
+				const int64_t fx = (int64_t) p_x + x, fy = (int64_t) p_y + y;
+				uint32_t color = 0xff000000u;
+				if (fx >= left && fx < right && fy >= top && fy < bottom && fx >= core->m_viewXMin &&
+					fx < core->m_viewXMax && fy >= core->m_viewYMin && fy < core->m_viewYMax) {
+					color = pixels[size_t(fy - top) * width + size_t(fx - left)];
+				}
+				picture.PutPixel(x, y, COLOR((int) color));
+			}
+		}
+		picture.m_impl->SaveTGA(*p_name, 0, 0, -1, -1);
+		return 0;
+	}
 	for (int y = 0; y < p_h; ++y) {
 		for (int x = 0; x < p_w; ++x) {
 			float fy = (float) (y + p_y);
@@ -89,53 +116,45 @@ void GRAPH::Line(float p_x, float p_y, float p_x1, float p_y1, COLOR p_color)
 	if ((float) fabs(p_x) > 10000.0f) {
 		p_x = 0.0;
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				4,
-				// STRING: ALIEN 0x483f94
-				"x in Line",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   4,
+						   // STRING: ALIEN 0x483f94
+						   "x in Line",
+						   0);
 		}
 	}
 	if ((float) fabs(p_x1) > 10000.0f) {
 		p_x1 = 0.0;
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				4,
-				// STRING: ALIEN 0x483f88
-				"x1 in Line",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   4,
+						   // STRING: ALIEN 0x483f88
+						   "x1 in Line",
+						   0);
 		}
 	}
 	if ((float) fabs(p_y) > 10000.0f) {
 		p_y = 0.0;
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				4,
-				// STRING: ALIEN 0x483f7c
-				"y in Line",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   4,
+						   // STRING: ALIEN 0x483f7c
+						   "y in Line",
+						   0);
 		}
 	}
 	if ((float) fabs(p_y1) > 10000.0f) {
 		p_y1 = 0.0;
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				4,
-				// STRING: ALIEN 0x483f70
-				"y1 in Line",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   4,
+						   // STRING: ALIEN 0x483f70
+						   "y1 in Line",
+						   0);
 		}
 	}
 	int x = (int) p_x;

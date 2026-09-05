@@ -38,6 +38,8 @@ the game's data directories. Alternatively, point to that directory with
 
 | Option | What it does |
 |---|---|
+| `--renderer=auto\|gpu\|software` | Selects actual game rendering. `auto` tries the GPU and falls back to software if initialization fails. `gpu` requires the GPU. `software` uses the CPU renderer. |
+| `--gpu-driver=vulkan\|direct3d12\|metal` | Forces a graphics driver. Requires `--renderer=gpu`. Without this option SDL selects the driver. |
 | `--resolution=WIDTHxHEIGHT` | Sets the resolution. `--resolution=auto` (alias: `desktop`) uses the desktop resolution. You can also give `--width` and `--height`. |
 | `--fullscreen` / `--windowed` | Selects fullscreen or windowed mode. New profiles start in fullscreen at the desktop resolution. Automatic windowed mode fits the window inside 1280x800. |
 | `--native-resolution` | The default. The game renders gameplay at the native resolution, inside a frame with a maximum size of 1280x720 (1152x720 on 16:10 screens). Menus always render at the full native resolution. On maps with small terrain, the game can select a smaller frame to hide unbuilt areas. |

@@ -7,6 +7,8 @@
 #include "game/viewport_math.h"
 #include "gfx/asmdraw.h"
 #include "gfx/color.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
@@ -28,7 +30,6 @@ extern float FSin[256];
 
 static int SoftwareDepthAdd(int p_depth, int p_delta)
 {
-
 
 	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
 		return std::bit_cast<int32_t>(uint32_t(p_depth) + uint32_t(p_delta));
@@ -63,18 +64,16 @@ static int ScaledUIBoundary(int p_source, float p_scale)
 	return scaled >= 0.0 ? (int) std::floor(scaled + 0.5) : (int) std::ceil(scaled - 0.5);
 }
 
-static void DrawScaledUIPixel(
-	const UI_SCALING::RASTER_TARGET32& p_target,
-	unsigned short* p_zbuffer,
-	int p_zpitch,
-	int p_x,
-	int p_y,
-	int p_width,
-	int p_height,
-	unsigned int p_color,
-	short p_z,
-	SCALED_UI_PIXEL_MODE p_mode
-)
+static void DrawScaledUIPixel(const UI_SCALING::RASTER_TARGET32& p_target,
+							  unsigned short* p_zbuffer,
+							  int p_zpitch,
+							  int p_x,
+							  int p_y,
+							  int p_width,
+							  int p_height,
+							  unsigned int p_color,
+							  short p_z,
+							  SCALED_UI_PIXEL_MODE p_mode)
 {
 	UI_SCALING::RECT_I block;
 	if (!p_zbuffer || !UI_SCALING::PixelBlockBounds(p_target, p_x, p_y, p_width, p_height, &block)) {
@@ -106,33 +105,31 @@ static void DrawScaledUIPixel(
 	}
 }
 
-static int DrawScaledUIFrame(
-	VID_SOFTWARE* p_vid,
-	GRAPH_CORE* p_graph,
-	unsigned char* p_rle,
-	int p_rows,
-	int p_x0,
-	int p_yTop,
-	int p_z,
-	float p_scale,
-	int p_horizontalGap,
-	unsigned short p_flags,
-	const int* p_palette
-)
+static int DrawScaledUIFrame(VID_SOFTWARE* p_vid,
+							 GRAPH_CORE* p_graph,
+							 unsigned char* p_rle,
+							 int p_rows,
+							 int p_x0,
+							 int p_yTop,
+							 int p_z,
+							 float p_scale,
+							 int p_horizontalGap,
+							 unsigned short p_flags,
+							 const int* p_palette)
 {
 	if (!p_graph->m_color || !p_graph->m_zbuffer || !p_palette || !(p_flags & 1)) {
 		return 0;
 	}
 
-	UI_SCALING::RECT_I clip =
-		{(int) p_graph->m_viewXMin, (int) p_graph->m_viewYMin, (int) p_graph->m_viewXMax, (int) p_graph->m_viewYMax};
-	UI_SCALING::RASTER_TARGET32 target = UI_SCALING::MakeRasterTarget32(
-		(unsigned int*) p_graph->m_color,
-		(int) p_graph->m_width,
-		(int) p_graph->m_height,
-		p_graph->m_pitch,
-		clip
-	);
+	UI_SCALING::RECT_I clip = {(int) p_graph->m_viewXMin,
+							   (int) p_graph->m_viewYMin,
+							   (int) p_graph->m_viewXMax,
+							   (int) p_graph->m_viewYMax};
+	UI_SCALING::RASTER_TARGET32 target = UI_SCALING::MakeRasterTarget32((unsigned int*) p_graph->m_color,
+																		(int) p_graph->m_width,
+																		(int) p_graph->m_height,
+																		p_graph->m_pitch,
+																		clip);
 	unsigned short* zbuffer = (unsigned short*) p_graph->m_zbuffer;
 
 	bool alpha = (p_flags & 2) && (p_flags & 8);
@@ -156,18 +153,15 @@ static int DrawScaledUIFrame(
 	int firstVisibleRow = 0;
 	if (locoland && alpha && sloped) {
 		while (firstVisibleRow < p_rows &&
-			p_yTop + ScaledUIBoundary(firstVisibleRow + 1, p_scale) <= target.m_clip.m_top) {
+			   p_yTop + ScaledUIBoundary(firstVisibleRow + 1, p_scale) <= target.m_clip.m_top) {
 			++firstVisibleRow;
 		}
 	}
 
 	for (int row = 0; row < p_rows; ++row) {
 
-
-
-		int rowZ = locoland
-			? p_z - ((alpha && sloped && row > firstVisibleRow) ? 8 * (row - firstVisibleRow) : 0)
-			: p_z + (sloped ? 8 * (p_rows - row) : 0);
+		int rowZ = locoland ? p_z - ((alpha && sloped && row > firstVisibleRow) ? 8 * (row - firstVisibleRow) : 0)
+							: p_z + (sloped ? 8 * (p_rows - row) : 0);
 		int rowTop = p_yTop + ScaledUIBoundary(row, p_scale);
 		int rowBottom = p_yTop + ScaledUIBoundary(row + 1, p_scale);
 		int rowHeight = rowBottom - rowTop;
@@ -219,7 +213,8 @@ static int DrawScaledUIFrame(
 					color = (unsigned int) p_palette[indices[i]];
 					pixelZ = (short) rowZ;
 					mode = alpha ? SCALED_UI_ALPHA_UNSIGNED_GE
-						: (horizontallyUnclipped && !locoland ? SCALED_UI_OPAQUE_UNSIGNED_GE : SCALED_UI_OPAQUE_SIGNED_GT);
+								 : (horizontallyUnclipped && !locoland ? SCALED_UI_OPAQUE_UNSIGNED_GE
+																	   : SCALED_UI_OPAQUE_SIGNED_GT);
 				}
 				int sourceX = x + i;
 				if (row < 8 && sourceX >= sourceSplit && sourceX < sourceSplit + sourceTileWidth) {
@@ -235,18 +230,16 @@ static int DrawScaledUIFrame(
 					int splitOffset = sourceX >= sourceSplit + sourceTileWidth ? p_horizontalGap : 0;
 					int pixelLeft = ScaledUIBoundary(sourceX, p_scale);
 					int pixelRight = ScaledUIBoundary(sourceX + 1, p_scale);
-					DrawScaledUIPixel(
-						target,
-						zbuffer,
-						p_graph->m_zpitch,
-						p_x0 + pixelLeft + splitOffset,
-						rowTop,
-						pixelRight - pixelLeft,
-						rowHeight,
-						color,
-						pixelZ,
-						mode
-					);
+					DrawScaledUIPixel(target,
+									  zbuffer,
+									  p_graph->m_zpitch,
+									  p_x0 + pixelLeft + splitOffset,
+									  rowTop,
+									  pixelRight - pixelLeft,
+									  rowHeight,
+									  color,
+									  pixelZ,
+									  mode);
 				}
 			}
 			x += count;
@@ -267,18 +260,16 @@ static int DrawScaledUIFrame(
 				if (blockWidth > tiledExtent - offset) {
 					blockWidth = tiledExtent - offset;
 				}
-				DrawScaledUIPixel(
-					target,
-					zbuffer,
-					p_graph->m_zpitch,
-					p_x0 + ScaledUIBoundary(sourceSplit, p_scale) + offset,
-					rowTop,
-					blockWidth,
-					rowHeight,
-					bridgeColor[bridgePixel],
-					bridgeZ[bridgePixel],
-					bridgeMode[bridgePixel]
-				);
+				DrawScaledUIPixel(target,
+								  zbuffer,
+								  p_graph->m_zpitch,
+								  p_x0 + ScaledUIBoundary(sourceSplit, p_scale) + offset,
+								  rowTop,
+								  blockWidth,
+								  rowHeight,
+								  bridgeColor[bridgePixel],
+								  bridgeZ[bridgePixel],
+								  bridgeMode[bridgePixel]);
 				offset += blockWidth;
 			}
 		}
@@ -332,6 +323,7 @@ VID_SOFTWARE::~VID_SOFTWARE()
 {
 	if (m_weaponPtr == this) {
 		if (m_unk0x48c) {
+			GPU_VID::Forget(m_unk0x48c, m_unk0x488);
 			operator delete(m_unk0x48c);
 		}
 		m_unk0x48c = 0;
@@ -351,11 +343,7 @@ VID_SOFTWARE::~VID_SOFTWARE()
 unsigned char* VID_SOFTWARE::PrepareRecolor()
 {
 	if (!(m_pixelFlag16 & 8)) {
-		Error(
-			10,
-			"SetReColorForArmy for non paletted vid",
-			0
-		);
+		Error(10, "SetReColorForArmy for non paletted vid", 0);
 		return 0;
 	}
 	int palSize = PaletteSize();
@@ -449,9 +437,6 @@ void VID_SOFTWARE::SetReColorForArmy(unsigned int p_color)
 		SetGamma(*(const GAMMA*) &m_colorSub, 4);
 	}
 }
-
-
-
 
 static constexpr int kMaxShadowContourPoints = 256;
 
@@ -567,12 +552,10 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 	int* frames = (int*) operator new(4 * m_dotFrameCount);
 	m_unk0x484 = frames;
 	if (!frames) {
-		Error(
-			2,
-			// STRING: ALIEN 0x482bd8
-			"cadrShift",
-			m_dotFrameCount
-		);
+		Error(2,
+			  // STRING: ALIEN 0x482bd8
+			  "cadrShift",
+			  m_dotFrameCount);
 		return;
 	}
 
@@ -589,8 +572,7 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 					(char*) m_unk0x48c + w,
 					(unsigned short) (((palette[c].m_value >> 3) & 0x1f) |
 									  (RGB16_rMask & (palette[c].m_value >> (16 - RGB16_rShift))) |
-									  (RGB16_gMask & (palette[c].m_value >> (8 - RGB16_gShift))))
-				);
+									  (RGB16_gMask & (palette[c].m_value >> (8 - RGB16_gShift)))));
 			}
 			w += 2;
 		}
@@ -622,9 +604,6 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 		if (GameDesc->m_shortZeroSoftwareFrame && packedSize == 5 &&
 			!memcmp(static_cast<const char*>(m_unk0x48c) + offset, "\0\0\0\0\0", 5)) {
 
-
-
-
 			if (m_unk0x488 - offset < 6) {
 				p_res->Fail("short empty software frame exceeds its allocation");
 				return;
@@ -633,12 +612,10 @@ void VID_SOFTWARE::Load(RESOURCE* p_res)
 			packedSize = 6;
 		}
 		if (packedSize != 2) {
-			if (!ValidateSoftwareFrame(
-					static_cast<const unsigned char*>(m_unk0x48c) + offset,
-					packedSize,
-					m_pixelFlag16,
-					m_unk0x2f6
-				)) {
+			if (!ValidateSoftwareFrame(static_cast<const unsigned char*>(m_unk0x48c) + offset,
+									   packedSize,
+									   m_pixelFlag16,
+									   m_unk0x2f6)) {
 				p_res->Fail("invalid software frame contour or scanline");
 				return;
 			}
@@ -811,8 +788,6 @@ void VID_SOFTWARE::SetLayer()
 {
 	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
 
-
-
 		m_layer = (m_flag & 0x8000) ? 10 : (m_pixelFlag & 2) ? 4 : m_canMove ? 3 : 2;
 		return;
 	}
@@ -926,17 +901,16 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 				VID::MemoryInUse += 3 * palSize;
 				m_unk0x48c = operator new(m_unk0x488);
 				if (!m_unk0x48c) {
-					return Error(
-						2,
-						// STRING: ALIEN 0x482c10
-						"SetGamma",
-						m_unk0x488
-					);
+					return Error(2,
+								 // STRING: ALIEN 0x482c10
+								 "SetGamma",
+								 m_unk0x488);
 				}
 				memcpy((char*) m_unk0x48c + 4 * palSize, old + palSize, m_unk0x488 - 4 * palSize);
 				memcpy((char*) m_unk0x48c, (char*) m_unk0x48c + 4 * palSize, palSize);
 				memcpy((char*) m_unk0x48c + palSize, (char*) m_unk0x48c + 4 * palSize, palSize);
 				memcpy((char*) m_unk0x48c + 2 * palSize, (char*) m_unk0x48c, 2 * palSize);
+				GPU_VID::Forget(old, m_unk0x488 - 3 * palSize);
 				operator delete(old);
 				if (m_unk0x484) {
 					for (int i = 0; i < m_dotFrameCount; ++i) {
@@ -947,6 +921,7 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 				for (VID* mirror = m_weaponPtr; mirror != this; mirror = mirror->m_weaponPtr) {
 					mirror->m_pixelFlag16 |= 0x400;
 					((VID_SOFTWARE*) mirror)->m_unk0x48c = m_unk0x48c;
+					((VID_SOFTWARE*) mirror)->m_unk0x488 = m_unk0x488;
 				}
 			}
 
@@ -961,12 +936,10 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 			}
 		}
 		else {
-			Error(
-				4,
-				// STRING: ALIEN 0x482bec
-				"n_gamma in VID_SOFTWARE::SetGamma",
-				p_idx
-			);
+			Error(4,
+				  // STRING: ALIEN 0x482bec
+				  "n_gamma in VID_SOFTWARE::SetGamma",
+				  p_idx);
 		}
 	}
 	return 0;
@@ -976,7 +949,6 @@ int VID_SOFTWARE::SetGamma(const GAMMA& p_gamma, unsigned int p_idx)
 int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 {
 	const bool locoland = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND;
-
 
 	if (locoland ? (m_flag & 0x400) : (m_unk0x47c & 0x40)) {
 		return 0;
@@ -992,26 +964,24 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	int naturalScaledWidth = ScaledUIBoundary(width, uiScale);
 	int scaledWidth = naturalScaledWidth + horizontalGap;
 	int scaledHeight = ScaledUIBoundary(height, uiScale);
-	int x0 = locoland
-		? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_x - Map->m_shiftX - naturalScaledWidth / 2)
-		: (int) p_sprite->m_x - (int) Map->m_shiftX - naturalScaledWidth / 2;
-	int y0 = locoland
-		? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - scaledHeight / 2)
-		: (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - scaledHeight / 2;
-	if ((int64_t) x0 + scaledWidth < ViewXMin() || x0 >= ViewXMax() ||
-		(int64_t) y0 + scaledHeight < ViewYMin() || y0 >= ViewYMax()) {
+	int x0 = locoland ? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_x - Map->m_shiftX - naturalScaledWidth / 2)
+					  : (int) p_sprite->m_x - (int) Map->m_shiftX - naturalScaledWidth / 2;
+	int y0 =
+		locoland
+			? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - scaledHeight / 2)
+			: (int) (p_sprite->m_y - p_sprite->m_z) - (int) Map->m_shiftY - scaledHeight / 2;
+	if ((int64_t) x0 + scaledWidth < ViewXMin() || x0 >= ViewXMax() || (int64_t) y0 + scaledHeight < ViewYMin() ||
+		y0 >= ViewYMax()) {
 		return 0;
 	}
 
-	int z = locoland ? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_z * 8.0)
-		: (int) (p_sprite->m_z * 8.0f);
+	int z = locoland ? VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_z * 8.0) : (int) (p_sprite->m_z * 8.0f);
 	if ((m_flag & 0x8000) && z < 0x3fff) {
 		z += 0x3fff;
 	}
 	else if (m_flag & 0x10000) {
-		int bob = locoland
-			? VIEWPORT_MATH::LegacyCoordinate((double) FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0)
-			: (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
+		int bob = locoland ? VIEWPORT_MATH::LegacyCoordinate((double) FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0)
+						   : (int) (FSin[(CurrentTime >> 3) & 0xff] * m_unk0x60 * 8.0f);
 		z = SoftwareDepthAdd(z, bob);
 		y0 -= ScaledUIBoundary(bob / 8, uiScale);
 	}
@@ -1035,7 +1005,9 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 	int zpitch = graph->m_zpitch;
 	char* surface;
 	char* zbase = (char*) graph->m_zbuffer;
-	LockDrawGraph(graph);
+	if (!GPU_RENDER::Active()) {
+		LockDrawGraph(graph);
+	}
 	pitch = graph->m_pitch;
 	surface = (char*) graph->m_color;
 
@@ -1055,17 +1027,19 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		}
 		else {
 			GAMMA combined;
-			CombineDrawGamma(
-				&combined,
-				p_sprite->GetGamma(),
-				((GRAPH_CORE*) Graph)->m_gammaSet.m_b,
-				((GRAPH_CORE*) Graph)->m_gammaSet.m_a
-			);
+			CombineDrawGamma(&combined,
+							 p_sprite->GetGamma(),
+							 ((GRAPH_CORE*) Graph)->m_gammaSet.m_b,
+							 ((GRAPH_CORE*) Graph)->m_gammaSet.m_a);
 			SetGammaToPalette(paletteBuf, combined);
 		}
 	}
 
 	unsigned short flag2 = m_pixelFlag16;
+	if (GPU_RENDER::Active()) {
+		GPU_VID::DrawFrame(this, rle, nRows, x0, yTop, z, uiScale, horizontalGap, palette, false);
+		return 0;
+	}
 	if (p_sprite->m_uiScale && (uiScale != 1.0f || horizontalGap > 0)) {
 		return DrawScaledUIFrame(this, graph, rle, nRows, x0, yTop, z, uiScale, horizontalGap, flag2, palette);
 	}
@@ -1091,7 +1065,6 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		}
 		int zstep = 0;
 		if (m_unk0x24 > m_footprintHeight) {
-
 
 			if (!locoland) {
 				z += 8 * rows;
@@ -1255,8 +1228,6 @@ int VID_SOFTWARE::Draw(SPRITE* p_sprite)
 		zstep = -8;
 	}
 
-
-
 	int unclipped = !locoland && x0 >= ViewXMin() && x0 + width <= ViewXMax();
 	for (int y = yTop; y < yEnd; ++y, z += zstep) {
 		int* dst = (int*) (surface + 4 * y * pitch);
@@ -1323,7 +1294,6 @@ void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
 		return;
 	}
 
-
 	if (PropHide()) {
 		return;
 	}
@@ -1331,8 +1301,6 @@ void VID_SOFTWARE::DrawShadow(SPRITE* p_sprite)
 	int height = m_messageLineHeight;
 	float baseX = p_sprite->m_x - Map->m_shiftX - m_unk0x2f6 / 2;
 	float groundY = p_sprite->m_y - p_sprite->m_z - Map->m_shiftY - height / 2;
-
-
 
 	const int x = VIEWPORT_MATH::LegacyCoordinate(baseX);
 	const int y = VIEWPORT_MATH::LegacyCoordinate(groundY);

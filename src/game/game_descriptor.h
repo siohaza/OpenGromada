@@ -11,14 +11,41 @@ enum GAME_ID {
 	GAME_LOCOLAND,
 };
 
-
-enum GAME_OBJ_SCHEMA { GAME_OBJ_AS1, GAME_OBJ_ZS1, GAME_OBJ_LOCOLAND };
-enum GAME_SFX_SCHEMA { GAME_SFX_AS1, GAME_SFX_THESEUS, GAME_SFX_ZS1 };
-enum GAME_SCRIPT_DIALECT { GAME_SCRIPT_AS1, GAME_SCRIPT_THESEUS, GAME_SCRIPT_CRAZY_LUNCH, GAME_SCRIPT_ZS1, GAME_SCRIPT_LOCOLAND };
-enum GAME_HUD_LAYOUT { GAME_HUD_AS1, GAME_HUD_ZS1 };
-enum GAME_LAYER_RULES { GAME_LAYERS_AS1, GAME_LAYERS_ZS1, GAME_LAYERS_LOCOLAND };
-enum GAME_MENU_RULES { GAME_MENU_AS1, GAME_MENU_ZS1 };
-enum GAME_ENEMY_SEARCH_RULES { GAME_ENEMY_SEARCH_FLAGMAN, GAME_ENEMY_SEARCH_HASH };
+enum GAME_OBJ_SCHEMA {
+	GAME_OBJ_AS1,
+	GAME_OBJ_ZS1,
+	GAME_OBJ_LOCOLAND
+};
+enum GAME_SFX_SCHEMA {
+	GAME_SFX_AS1,
+	GAME_SFX_THESEUS,
+	GAME_SFX_ZS1
+};
+enum GAME_SCRIPT_DIALECT {
+	GAME_SCRIPT_AS1,
+	GAME_SCRIPT_THESEUS,
+	GAME_SCRIPT_CRAZY_LUNCH,
+	GAME_SCRIPT_ZS1,
+	GAME_SCRIPT_LOCOLAND
+};
+enum GAME_HUD_LAYOUT {
+	GAME_HUD_AS1,
+	GAME_HUD_ZS1,
+	GAME_HUD_THESEUS
+};
+enum GAME_LAYER_RULES {
+	GAME_LAYERS_AS1,
+	GAME_LAYERS_ZS1,
+	GAME_LAYERS_LOCOLAND
+};
+enum GAME_MENU_RULES {
+	GAME_MENU_AS1,
+	GAME_MENU_ZS1
+};
+enum GAME_ENEMY_SEARCH_RULES {
+	GAME_ENEMY_SEARCH_FLAGMAN,
+	GAME_ENEMY_SEARCH_HASH
+};
 
 struct GAME_DESCRIPTOR {
 	GAME_ID m_id;
@@ -43,21 +70,16 @@ struct GAME_DESCRIPTOR {
 	const char* m_status;
 	bool m_runtimeEnabled;
 
-
 	int m_menuScriptWidth = 0;
 	int m_menuScriptHeight = 0;
 	GAME_MENU_RULES m_menuRules = GAME_MENU_AS1;
 
-
 	int m_unitCountLayers = 0;
-
 
 	bool m_gamebarNumbersAreWidths = true;
 	const char* m_configAlias = nullptr;
 
-
 	bool m_mapObjTrailingBytes = false;
-
 
 	bool m_unitRecordsHaveShortList = false;
 	bool m_lifetimeInWeapon = false;
@@ -65,17 +87,28 @@ struct GAME_DESCRIPTOR {
 	bool m_rtsControls = false;
 	int m_nativeMapVersion = 12;
 
-
 	bool m_shortZeroSoftwareFrame = false;
 
 	bool m_nativeScriptTextFiles = false;
-
 
 	GAME_ENEMY_SEARCH_RULES m_enemySearchRules = GAME_ENEMY_SEARCH_FLAGMAN;
 
 	bool m_nativeMoviePlayback = false;
 
 	bool m_expandProfileReferences = false;
+
+	unsigned int SfxLoopTimeoutMs() const { return m_sfxSchema == GAME_SFX_AS1 ? 100u : 200u; }
+
+	bool SupportsVidExchangeQuery() const
+	{
+		return m_scriptDialect == GAME_SCRIPT_THESEUS || m_scriptDialect == GAME_SCRIPT_ZS1;
+	}
+
+	bool UsesLegacyEmptyReturnCondition() const { return m_scriptDialect == GAME_SCRIPT_THESEUS; }
+
+	int StateBarAmmoTextOffsetY() const { return m_scriptDialect == GAME_SCRIPT_THESEUS ? 7 : 3; }
+
+	int MinimumGamebarWidth() const { return m_hudLayout == GAME_HUD_THESEUS ? 800 : 0; }
 };
 
 extern const GAME_DESCRIPTOR* GameDesc;
@@ -95,8 +128,6 @@ const char* Game_ResourceName();
 const char* Game_StartMap();
 const char* Game_Edition();
 void Game_PrintProbeJson();
-
-
 
 bool Game_Detect();
 bool Game_RuntimeAvailable();

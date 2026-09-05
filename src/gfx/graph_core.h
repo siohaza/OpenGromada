@@ -6,6 +6,7 @@
 #include "gfx/gamma.h"
 #include "gfx/gfxdefs.h"
 #include "util/decomp.h"
+
 #include <string>
 
 class TEXTURE;
@@ -71,13 +72,11 @@ struct RENDER_STATE {
 	RENDER_STATE();
 };
 
-inline unsigned int GraphBlendFactor(
-	int p_factor,
-	unsigned int p_src,
-	unsigned int p_dst,
-	unsigned int p_srcAlpha,
-	unsigned int p_dstAlpha
-)
+inline unsigned int GraphBlendFactor(int p_factor,
+									 unsigned int p_src,
+									 unsigned int p_dst,
+									 unsigned int p_srcAlpha,
+									 unsigned int p_dstAlpha)
 {
 	switch (p_factor) {
 	case D3DBLEND_ZERO:
@@ -163,6 +162,7 @@ public:
 	bool m_movieActive = false;
 
 	void* m_screen;
+	unsigned int m_gpuScreen = 0;
 
 	int m_debugFontHeight;
 

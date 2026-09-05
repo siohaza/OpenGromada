@@ -1,20 +1,20 @@
 #include "game/map.h"
-#include "game/legacy_statistics.h"
 
 #include "audio/sound.h"
 #include "game/const.h"
 #include "game/data_version.h"
-#include "game/game_descriptor.h"
-#include "game/zs1_commands.h"
 #include "game/engine.h"
 #include "game/filedata.h"
+#include "game/game_descriptor.h"
 #include "game/gametime.h"
+#include "game/legacy_statistics.h"
 #include "game/player_arcade.h"
 #include "game/region.h"
 #include "game/settings.h"
 #include "game/terrain_camera.h"
 #include "game/train_info.h"
 #include "game/viewport_math.h"
+#include "game/zs1_commands.h"
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
@@ -38,12 +38,8 @@
 #include "util/profile.h"
 #include "util/registry.h"
 #include "util/string.h"
-#include "video/vid.h"
 #include "video/movie_player.h"
-
-#include <string>
-#include <climits>
-#include <filesystem>
+#include "video/vid.h"
 #include "video/vid_exdata.h"
 #include "video/vid_font.h"
 #include "video/vid_hardware.h"
@@ -53,11 +49,14 @@
 #include "world/hash_map.h"
 
 #include <SDL3/SDL.h>
+#include <climits>
+#include <filesystem>
 #include <float.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 
 FILE* FOpen(char** p_name, const char* p_mode);
 
@@ -74,7 +73,10 @@ struct SCRIPT_FILE {
 };
 static SCRIPT_FILE s_scriptFiles[SCRIPT_FILE_MAX];
 
-static int ScriptFileOpen(FILE* p_file, const std::string& p_target = {}, bool p_nativeText = false, bool p_dirty = false)
+static int ScriptFileOpen(FILE* p_file,
+						  const std::string& p_target = {},
+						  bool p_nativeText = false,
+						  bool p_dirty = false)
 {
 	if (!p_file) {
 		return 0;
@@ -107,27 +109,41 @@ static bool ScriptTextPath(const char* p_name, std::string& p_path)
 {
 	p_path = p_name;
 	for (char& c : p_path) {
-		if (c == '\\') c = '/';
-		else if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
+		if (c == '\\') {
+			c = '/';
+		}
+		else if (c >= 'A' && c <= 'Z') {
+			c += 'a' - 'A';
+		}
 	}
 
-
-	if (p_path.empty() || Platform_IsAbsolutePath(p_path.c_str()) || p_path.find(':') != std::string::npos) return false;
+	if (p_path.empty() || Platform_IsAbsolutePath(p_path.c_str()) || p_path.find(':') != std::string::npos) {
+		return false;
+	}
 	try {
 		std::filesystem::path relative = std::filesystem::u8path(p_path);
-		for (const auto& part : relative) if (part == "..") return false;
+		for (const auto& part : relative) {
+			if (part == "..") {
+				return false;
+			}
+		}
 		p_path = relative.lexically_normal().generic_string();
 	}
-	catch (const std::filesystem::filesystem_error&) { return false; }
+	catch (const std::filesystem::filesystem_error&) {
+		return false;
+	}
 	return !p_path.empty() && p_path != "." && p_path.back() != '/';
 }
 
 static bool ScriptMutableScore(const std::string& p_path)
 {
-	if (p_path == "maps/hiscores") return true;
+	if (p_path == "maps/hiscores") {
+		return true;
+	}
 	if (p_path.size() != strlen("maps/l01/hiscores") || p_path.compare(0, 6, "maps/l") ||
-		p_path.compare(8, 9, "/hiscores") || p_path[6] < '0' || p_path[6] > '9' ||
-		p_path[7] < '0' || p_path[7] > '9') return false;
+		p_path.compare(8, 9, "/hiscores") || p_path[6] < '0' || p_path[6] > '9' || p_path[7] < '0' || p_path[7] > '9') {
+		return false;
+	}
 	const int level = (p_path[6] - '0') * 10 + p_path[7] - '0';
 	return level >= 1 && level <= 20;
 }
@@ -140,13 +156,20 @@ static int ScriptFileStage(const std::string& p_path, FILE* p_source, bool p_cre
 		unsigned char buffer[4096];
 		size_t count;
 		while ((count = fread(buffer, 1, sizeof(buffer), p_source)) != 0) {
-			if (fwrite(buffer, 1, count, staged) != count) { ok = false; break; }
+			if (fwrite(buffer, 1, count, staged) != count) {
+				ok = false;
+				break;
+			}
 		}
 		ok = ok && !ferror(p_source) && fseek(staged, 0, SEEK_SET) == 0;
 	}
-	if (p_source && fclose(p_source)) ok = false;
+	if (p_source && fclose(p_source)) {
+		ok = false;
+	}
 	if (!ok) {
-		if (staged) fclose(staged);
+		if (staged) {
+			fclose(staged);
+		}
 		Map->m_logic.RuntimeError("cannot stage native script text file");
 		return 0;
 	}
@@ -156,7 +179,9 @@ static int ScriptFileStage(const std::string& p_path, FILE* p_source, bool p_cre
 static void ScriptFileClose(int p_handle, bool p_commit = true)
 {
 	SCRIPT_FILE* entry = ScriptFileEntry(p_handle);
-	if (!entry || !entry->file) return;
+	if (!entry || !entry->file) {
+		return;
+	}
 	FILE* file = entry->file;
 	std::string bytes;
 	bool commit = p_commit && !entry->target.empty() && entry->dirty && !entry->failed && !Map->m_logic.m_runtimeFault;
@@ -166,23 +191,37 @@ static void ScriptFileClose(int p_handle, bool p_commit = true)
 		long size = ok ? ftell(file) : -1;
 		ok = ok && size >= 0 && size <= INT_MAX && fseek(file, 0, SEEK_SET) == 0;
 		if (ok) {
-			try { bytes.resize((size_t) size); }
-			catch (const std::exception&) { ok = false; }
+			try {
+				bytes.resize((size_t) size);
+			}
+			catch (const std::exception&) {
+				ok = false;
+			}
 		}
-		if (ok && !bytes.empty()) ok = fread(bytes.data(), 1, bytes.size(), file) == bytes.size();
+		if (ok && !bytes.empty()) {
+			ok = fread(bytes.data(), 1, bytes.size(), file) == bytes.size();
+		}
 	}
-	if (fclose(file)) ok = false;
-	if (commit && ok) ok = Platform_WriteSaveAtomic(entry->target, bytes);
+	if (fclose(file)) {
+		ok = false;
+	}
+	if (commit && ok) {
+		ok = Platform_WriteSaveAtomic(entry->target, bytes);
+	}
 	if (!commit && !entry->target.empty() && entry->dirty) {
 		MYERROR::Log(::Error, "Uncommitted script text file '%s' discarded; original preserved", entry->target.c_str());
 	}
-	if (entry->nativeText && !ok) Map->m_logic.RuntimeError("native script text file close/save failed; original preserved");
+	if (entry->nativeText && !ok) {
+		Map->m_logic.RuntimeError("native script text file close/save failed; original preserved");
+	}
 	*entry = {};
 }
 
 void MAP::DiscardScriptFiles()
 {
-	for (int i = 1; i <= SCRIPT_FILE_MAX; ++i) ScriptFileClose(i, false);
+	for (int i = 1; i <= SCRIPT_FILE_MAX; ++i) {
+		ScriptFileClose(i, false);
+	}
 }
 
 static void SynchronizeGrantedWeaponHud(MAP* p_map, SPRITE* p_sprite, decomp_intptr p_item)
@@ -245,7 +284,7 @@ static SPRITE* FindStateBarAmmoRoot(MAP* p_map, int p_nvid, int p_x, int p_y, in
 			continue;
 		}
 		int expectedX = (int) ((float) (int) root->ScriptX() - p_map->m_shiftX) + 61;
-		int expectedY = (int) ((float) ((int) root->ScriptY() + 3) - p_map->m_shiftY);
+		int expectedY = (int) ((float) ((int) root->ScriptY() + GameDesc->StateBarAmmoTextOffsetY()) - p_map->m_shiftY);
 		int expectedZ = (int) root->m_z + 1;
 		if (p_x == expectedX && p_y == expectedY && p_z == expectedZ) {
 			return root;
@@ -433,11 +472,9 @@ void MAP::ControlShiftCoor()
 		return;
 	}
 
-	SetShiftCoor(
-		(int) (g_shiftSpeedX * (float) (CurrentTime - PrevCurrentTime)) + 0.5f * Graph->m_width + m_shiftX,
-		(int) (g_shiftSpeedY * (float) (CurrentTime - PrevCurrentTime)) + 0.5f * Graph->m_height + m_shiftY,
-		0
-	);
+	SetShiftCoor((int) (g_shiftSpeedX * (float) (CurrentTime - PrevCurrentTime)) + 0.5f * Graph->m_width + m_shiftX,
+				 (int) (g_shiftSpeedY * (float) (CurrentTime - PrevCurrentTime)) + 0.5f * Graph->m_height + m_shiftY,
+				 0);
 }
 
 // FUNCTION: ALIEN 0x40e600
@@ -592,7 +629,7 @@ int MAP::StartTact()
 
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
-		SDL_ConvertEventToRenderCoordinates(Platform_RenderRenderer(), &event);
+		Platform_RenderConvertEvent(&event);
 		ProcessEvent(event);
 	}
 	m_input.ApplyGamepad(delta);
@@ -713,15 +750,13 @@ void MAP::InsertSpriteToLayer(SPRITE* p_sprite)
 		return;
 	}
 	if (refs < 0) {
-		MYERROR::Error(
-			::Error,
-			"SPRITE %i",
-			4,
-			// STRING: ALIEN 0x48290c
-			"noRef at Release",
-			refs,
-			p_sprite->m_vid ? p_sprite->m_vid->m_idx : -1
-		);
+		MYERROR::Error(::Error,
+					   "SPRITE %i",
+					   4,
+					   // STRING: ALIEN 0x48290c
+					   "noRef at Release",
+					   refs,
+					   p_sprite->m_vid ? p_sprite->m_vid->m_idx : -1);
 		return;
 	}
 	if (p_sprite) {
@@ -776,15 +811,13 @@ SPRITE* MAP::GetSprite(int p_type, float p_x, float p_y, SPRITE* p_prev)
 				continue;
 			}
 			VID* vid = candidate->m_vid;
-			if (!UI_SCALING::HitTestCentered(
-					candidate->m_x,
-					candidate->m_y,
-					vid->m_unk0x384,
-					vid->m_unk0x388,
-					candidate->UIDrawScale(),
-					p_x,
-					p_y
-				)) {
+			if (!UI_SCALING::HitTestCentered(candidate->m_x,
+											 candidate->m_y,
+											 vid->m_unk0x384,
+											 vid->m_unk0x388,
+											 candidate->UIDrawScale(),
+											 p_x,
+											 p_y)) {
 				continue;
 			}
 			float distance = SPRITE::NearDistanceTo(p_x - candidate->m_x, p_y - candidate->m_y);
@@ -801,15 +834,13 @@ SPRITE* MAP::GetSprite(int p_type, float p_x, float p_y, SPRITE* p_prev)
 		return 0;
 	}
 	VID* vid = result->m_vid;
-	return UI_SCALING::HitTestCentered(
-			   result->m_x,
-			   result->m_y,
-			   vid->m_unk0x384,
-			   vid->m_unk0x388,
-			   result->UIDrawScale(),
-			   p_x,
-			   p_y
-		   )
+	return UI_SCALING::HitTestCentered(result->m_x,
+									   result->m_y,
+									   vid->m_unk0x384,
+									   vid->m_unk0x388,
+									   result->UIDrawScale(),
+									   p_x,
+									   p_y)
 			   ? result
 			   : 0;
 }
@@ -838,8 +869,7 @@ inline static int IsSpriteCorrectForGetSprite(const SPRITE* p_sprite, int p_quer
 	if ((p_query & 0x80000000) && 0 != (p_sprite->m_flag & 0x7c)) {
 		return 0;
 	}
-	if (!MAP::IsVidQueryFor(p_query) && (p_query & 0x1000) &&
-		(int) p_sprite->m_vid->m_sprClass != (p_query & 0x7ff)) {
+	if (!MAP::IsVidQueryFor(p_query) && (p_query & 0x1000) && (int) p_sprite->m_vid->m_sprClass != (p_query & 0x7ff)) {
 		return 0;
 	}
 	if (MAP::IsVidQueryFor(p_query) && p_sprite->m_vid->m_idx != MAP::VidFromQueryFor(p_query)) {
@@ -912,12 +942,10 @@ SPRITE* MAP::GetSpriteScr(int p_type, float p_scrX, float p_scrY)
 	result = 0;
 
 	if (p_type & 0x8000) { // GETSPRITE_HASH
-		for (SPRITE* sprite = Hash->FirstInBox(
-				 p_scrX - 300.0f,
-				 p_scrY - 300.0f,
-				 p_scrX + 300.0f,
-				 GetGroundZ_ff(p_scrX, p_scrY) + p_scrY + 300.0f
-			 );
+		for (SPRITE* sprite = Hash->FirstInBox(p_scrX - 300.0f,
+											   p_scrY - 300.0f,
+											   p_scrX + 300.0f,
+											   GetGroundZ_ff(p_scrX, p_scrY) + p_scrY + 300.0f);
 			 sprite;
 			 sprite = Hash->NextInBox()) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
@@ -1099,8 +1127,8 @@ SPRITE* MAP::FindNearestSprite(int p_type, float p_x, float p_y, float p_radius,
 		return result;
 	}
 
-	if (IsVidQueryFor(p_type) && ((int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 10
-							   || (int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 19)) {
+	if (IsVidQueryFor(p_type) && ((int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 10 ||
+								  (int) GetVid(VidFromQueryFor(p_type))->m_sprClass == 19)) {
 		for (SPRITE* sprite = LastMenuSprite(m_menu, &iter); sprite; sprite = NextMenuSprite(m_menu, &iter)) {
 			if (!sprite->m_parent && (type & sprite->m_vid->m_unk0x0c) &&
 				((0x10000u << ((sprite->m_flag >> 11) & 3)) & army) && IsSpriteCorrectForGetSprite(sprite, p_type)) {
@@ -1209,27 +1237,23 @@ void MAP::LoadVid(RESOURCE* p_res)
 		LoadWeapon(p_res);
 		int noWeapon = m_noWeapon;
 		if (noWeapon) {
-			MYERROR::Log(
-				::Error,
-				// STRING: ALIEN 0x4829c0
-				"LoadWeapon::No=%-5i             sizeof(WEAPON)=%-4i",
-				noWeapon,
-				GameDesc->m_weapRecordBytes
-			);
+			MYERROR::Log(::Error,
+						 // STRING: ALIEN 0x4829c0
+						 "LoadWeapon::No=%-5i             sizeof(WEAPON)=%-4i",
+						 noWeapon,
+						 GameDesc->m_weapRecordBytes);
 		}
 	}
 	if (p_res->GoBegin(0x204a424f)) {
 
 		if (!hadVids && ::Error) {
-			MYERROR::Error(
-				::Error,
-				// STRING: ALIEN 0x4824d8
-				"MAP",
-				11,
-				// STRING: ALIEN 0x4829b4
-				"load 'VID'",
-				0
-			);
+			MYERROR::Error(::Error,
+						   // STRING: ALIEN 0x4824d8
+						   "MAP",
+						   11,
+						   // STRING: ALIEN 0x4829b4
+						   "load 'VID'",
+						   0);
 		}
 		return;
 	}
@@ -1238,14 +1262,12 @@ void MAP::LoadVid(RESOURCE* p_res)
 		int readError = p_res->ReadWords(&idx, sizeof(idx));
 		if (readError || !ValidVidIndex(idx)) {
 			if (::Error) {
-				MYERROR::Error(
-					::Error,
-					"MAP",
-					4,
-					// STRING: ALIEN 0x4829a4
-					"nvid > MAX_VID",
-					idx
-				);
+				MYERROR::Error(::Error,
+							   "MAP",
+							   4,
+							   // STRING: ALIEN 0x4829a4
+							   "nvid > MAX_VID",
+							   idx);
 			}
 			continue;
 		}
@@ -1254,14 +1276,12 @@ void MAP::LoadVid(RESOURCE* p_res)
 			old->ScalarDeletingDestructor(1);
 			m_vids[idx] = 0;
 			if (::Error) {
-				MYERROR::Error(
-					::Error,
-					"MAP",
-					5,
-					// STRING: ALIEN 0x48298c
-					"this VID already loaded",
-					idx
-				);
+				MYERROR::Error(::Error,
+							   "MAP",
+							   5,
+							   // STRING: ALIEN 0x48298c
+							   "this VID already loaded",
+							   idx);
 			}
 		}
 		m_vids[idx] = CreateVid(p_res, idx);
@@ -1278,12 +1298,10 @@ void MAP::LoadVid(RESOURCE* p_res)
 				vid->m_exData = (VID_EXDATA*) m_weapon + weapon;
 			}
 			else {
-				vid->Error(
-					10,
-					// STRING: ALIEN 0x482978
-					"nWeapon > noWeapon",
-					vid->m_weaponIdx
-				);
+				vid->Error(10,
+						   // STRING: ALIEN 0x482978
+						   "nWeapon > noWeapon",
+						   vid->m_weaponIdx);
 				m_vids[idx]->m_exData = (VID_EXDATA*) m_weapon;
 			}
 			Graph->DrawLoadBar(m_vids[0]);
@@ -1307,16 +1325,14 @@ void MAP::LoadVid(RESOURCE* p_res)
 			++idx;
 		} while (idx < m_noVid);
 	}
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x482920
-		"LoadVid::No   =%-15i   sizeof(VID)   =%-5i    load time     =%ims   MaxSizeX,Y=%i,%i",
-		m_noVid,
-		1156,
-		Platform_Ticks() - start,
-		maxX,
-		maxY
-	);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x482920
+				 "LoadVid::No   =%-15i   sizeof(VID)   =%-5i    load time     =%ims   MaxSizeX,Y=%i,%i",
+				 m_noVid,
+				 1156,
+				 Platform_Ticks() - start,
+				 maxX,
+				 maxY);
 }
 
 // FUNCTION: ALIEN 0x411790
@@ -1381,8 +1397,6 @@ int MAP::LoadWeapon(RESOURCE* p_res)
 	VID_EXDATA* weapons = static_cast<VID_EXDATA*>(operator new(sizeof(VID_EXDATA) * (size_t) count));
 	memset(weapons, 0, sizeof(VID_EXDATA) * (size_t) count);
 
-
-
 	for (int i = 0; i < count; ++i) {
 		if (p_res->m_subSize != diskBytes) {
 			p_res->Fail("WEAP record length does not match selected schema");
@@ -1413,10 +1427,6 @@ int MAP::LoadWeapon(RESOURCE* p_res)
 			p_res->ReadWords(&w->m_buildTime, 4);
 			if (diskBytes == 68) {
 
-
-
-
-
 				p_res->ReadWords(&w->m_legacyLifeTime, 4);
 			}
 			p_res->ReadWords(&w->m_maxAmmo, 4);
@@ -1429,17 +1439,27 @@ int MAP::LoadWeapon(RESOURCE* p_res)
 		}
 		p_res->ReadWords(&w->m_unk0x38, 4);
 
-
-
 		p_res->ReadWords(&w->m_unk0x3c, 4);
 		if (diskBytes != 68) {
 			p_res->ReadWords(&w->m_unk0x40, 4);
 			p_res->ReadWords(w->m_unk0x44, 28);
 			p_res->ReadWords(w->m_unk0x60, 4);
-			void* arrays[] = {w->m_unk0x64, w->m_unk0x84, w->m_unk0xa4, w->m_unk0xc4,
-				w->m_unk0xe4, w->m_unk0x104, w->m_unk0x124, w->m_unk0x144, w->m_unk0x164,
-				w->m_unk0x184, w->m_unk0x1a4, w->m_unk0x1c4, w->m_unk0x1e4,
-				w->m_frameSpeed, w->m_speed, w->m_zSpeed};
+			void* arrays[] = {w->m_unk0x64,
+							  w->m_unk0x84,
+							  w->m_unk0xa4,
+							  w->m_unk0xc4,
+							  w->m_unk0xe4,
+							  w->m_unk0x104,
+							  w->m_unk0x124,
+							  w->m_unk0x144,
+							  w->m_unk0x164,
+							  w->m_unk0x184,
+							  w->m_unk0x1a4,
+							  w->m_unk0x1c4,
+							  w->m_unk0x1e4,
+							  w->m_frameSpeed,
+							  w->m_speed,
+							  w->m_zSpeed};
 			for (void* field : arrays) {
 				p_res->ReadWords(field, 32);
 			}
@@ -1482,14 +1502,12 @@ void MAP::ReloadVid()
 
 	if (res.OpenForRead(m_resName, 0x41544144)) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"MAP",
-				7,
-				// STRING: ALIEN 0x4823a0
-				"resource file",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "MAP",
+						   7,
+						   // STRING: ALIEN 0x4823a0
+						   "resource file",
+						   0);
 		}
 		return;
 	}
@@ -1567,11 +1585,9 @@ void MAP::CreateEmptyHardwareGround()
 	m_vids[1024] = vid;
 	vid->m_exData = (VID_EXDATA*) m_weapon;
 	CreateSprite(m_vids[1024], m_w * 0.5f, m_h * 0.5f, 0.0f, ANGLE((unsigned char) 0), 0);
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x482a70
-		"Create Empty Hardware Ground"
-	);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x482a70
+				 "Create Empty Hardware Ground");
 }
 
 // FUNCTION: ALIEN 0x41f0e0
@@ -1579,7 +1595,6 @@ int MAP::Tact()
 {
 	return 0;
 }
-
 
 static unsigned int EncodeGammaPacked(const GAMMA& p_gamma)
 {
@@ -1675,13 +1690,11 @@ static __forceinline int InlineLogicStackInt(LOGICSTACK* p_value)
 	return p_value->Int();
 }
 
-
-
-
-
 static bool AdaptScriptSpriteQuery(LOGIC& p_logic, int& p_query)
 {
-	if (GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH) return true;
+	if (GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH) {
+		return true;
+	}
 	const unsigned query = (unsigned) p_query;
 	if (query & 0xf0000u) {
 		p_logic.RuntimeError("sprite query requests an unsupported army (4..7)", p_query);
@@ -1689,9 +1702,15 @@ static bool AdaptScriptSpriteQuery(LOGIC& p_logic, int& p_query)
 	}
 	unsigned adapted = query & ((0x67fu << 20) | 0x80000000u);
 	adapted |= (query & 0xf000u) << 4;
-	if (query & 0x10000000u) adapted |= 0x8000u;
-	if (query & 0x800u) adapted |= 0x1000u | (query & 0x7ffu);
-	else if (query & 0x7ffu) adapted |= MAP::MakeVidQuery(query & 0x7ffu);
+	if (query & 0x10000000u) {
+		adapted |= 0x8000u;
+	}
+	if (query & 0x800u) {
+		adapted |= 0x1000u | (query & 0x7ffu);
+	}
+	else if (query & 0x7ffu) {
+		adapted |= MAP::MakeVidQuery(query & 0x7ffu);
+	}
 	p_query = (int) adapted;
 	return true;
 }
@@ -1732,23 +1751,33 @@ VID** MAP::ExecFunc(int p_cmd)
 		bool uiCoordinates = Graph && (vid->m_sprClass == 10 || vid->m_sprClass == 19);
 		const bool menuChild = parent && parent->HasMenuScriptLayout();
 		const bool menuCanvas = Graph && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0 &&
-			(menuChild || (m_menu.HasScriptCanvas() && (uiCoordinates || !m_gameplayMap)));
+								(menuChild || (m_menu.HasScriptCanvas() && (uiCoordinates || !m_gameplayMap)));
 		if (menuCanvas) {
-
-
 
 			GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 			const int scale = menuChild ? parent->UIScale() : graph->m_uiScale;
 			const float drawScale = menuChild ? parent->UIDrawScale() : scale * graph->m_uiPresentationScale;
 			const float shiftX = uiCoordinates ? 0.0f : m_shiftX;
 			const float shiftY = uiCoordinates ? 0.0f : m_shiftY;
-			const auto menuPoint = UI_SCALING::TransformCenteredMenuPoint(
-				(float) x - shiftX, (float) y - shiftY, (float) z, 0, 0,
-				GameDesc->m_menuScriptWidth, GameDesc->m_menuScriptHeight,
-				graph->m_width, graph->m_height, drawScale);
-			sprite = CreateSprite(vid, menuPoint.m_x + shiftX, menuPoint.m_y + shiftY,
-				menuPoint.m_z, ANGLE((char) direction), parent);
-			if (sprite) sprite->SetMenuScriptLayout(scale);
+			const auto menuPoint = UI_SCALING::TransformCenteredMenuPoint((float) x - shiftX,
+																		  (float) y - shiftY,
+																		  (float) z,
+																		  0,
+																		  0,
+																		  GameDesc->m_menuScriptWidth,
+																		  GameDesc->m_menuScriptHeight,
+																		  graph->m_width,
+																		  graph->m_height,
+																		  drawScale);
+			sprite = CreateSprite(vid,
+								  menuPoint.m_x + shiftX,
+								  menuPoint.m_y + shiftY,
+								  menuPoint.m_z,
+								  ANGLE((char) direction),
+								  parent);
+			if (sprite) {
+				sprite->SetMenuScriptLayout(scale);
+			}
 			m_logic.PushObject(sprite);
 			return 0;
 		}
@@ -1760,26 +1789,22 @@ VID** MAP::ExecFunc(int p_cmd)
 			SPRITE* anchor = FindStateBarAmmoRoot(this, nvid, x, y, z);
 			if (anchor) {
 				uiScale = anchor->UIScale();
-				point = UI_SCALING::TransformAnchoredScriptPoint(
-					(float) x,
-					(float) y,
-					(float) z,
-					graph->m_width,
-					graph->m_height,
-					anchor->UIDrawScale(),
-					anchor->UIAnchorX(),
-					anchor->UIAnchorY()
-				);
+				point = UI_SCALING::TransformAnchoredScriptPoint((float) x,
+																 (float) y,
+																 (float) z,
+																 graph->m_width,
+																 graph->m_height,
+																 anchor->UIDrawScale(),
+																 anchor->UIAnchorX(),
+																 anchor->UIAnchorY());
 			}
 			else {
-				point = UI_SCALING::TransformScriptPoint(
-					(float) x,
-					(float) y,
-					(float) z,
-					graph->m_width,
-					graph->m_height,
-					graph->m_uiScale * graph->m_uiPresentationScale
-				);
+				point = UI_SCALING::TransformScriptPoint((float) x,
+														 (float) y,
+														 (float) z,
+														 graph->m_width,
+														 graph->m_height,
+														 graph->m_uiScale * graph->m_uiPresentationScale);
 			}
 		}
 		sprite = uiCoordinates ? CreateSprite(vid, point.m_x, point.m_y, point.m_z, ANGLE((char) direction), parent)
@@ -1818,7 +1843,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
-		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
+		if (!AdaptScriptSpriteQuery(m_logic, type)) {
+			return 0;
+		}
 		SPRITE* sprite = GetSprite(type, (float) x, (float) y, previous);
 		m_logic.PushObject(sprite);
 		return 0;
@@ -1827,7 +1854,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
-		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
+		if (!AdaptScriptSpriteQuery(m_logic, type)) {
+			return 0;
+		}
 		m_logic.PushObject(GetSpriteScr(type, (float) x, (float) y));
 		return 0;
 	}
@@ -1837,7 +1866,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		int y = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int x = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		int type = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
-		if (!AdaptScriptSpriteQuery(m_logic, type)) return 0;
+		if (!AdaptScriptSpriteQuery(m_logic, type)) {
+			return 0;
+		}
 		SPRITE* sprite = FindNearestSprite(type, (float) x, (float) y, (float) radius, previous);
 		m_logic.PushObject(sprite);
 		return 0;
@@ -1909,8 +1940,8 @@ VID** MAP::ExecFunc(int p_cmd)
 					return 0;
 				}
 				if (action == 0x5a || action == 0x9c || action == 0x9b || action == 0x9a || action == 0x65 ||
-					action == 0x67 || (action == 0x63 && !Game_IsZS1() &&
-					GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH)) {
+					action == 0x67 ||
+					(action == 0x63 && !Game_IsZS1() && GameDesc->m_scriptDialect != GAME_SCRIPT_CRAZY_LUNCH)) {
 					decomp_intptr result = sprite->Action(action, var1, var2, var3);
 					m_logic.PushObject(reinterpret_cast<const void*>(result));
 					return 0;
@@ -2063,14 +2094,12 @@ VID** MAP::ExecFunc(int p_cmd)
 		int nvid = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		VID* vid = Vid(nvid);
 		if (vid == EmptyVid && ::Error) {
-			MYERROR::Log(
-				::Error,
-				// STRING: ALIEN 0x484130
-				"!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
-				// STRING: ALIEN 0x48411c
-				"for MenuFind",
-				nvid
-			);
+			MYERROR::Log(::Error,
+						 // STRING: ALIEN 0x484130
+						 "!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
+						 // STRING: ALIEN 0x48411c
+						 "for MenuFind",
+						 nvid);
 		}
 		if (vid != EmptyVid &&
 			vid->m_entitiesNumber[0] + vid->m_entitiesNumber[1] + vid->m_entitiesNumber[2] + vid->m_entitiesNumber[3] !=
@@ -2079,8 +2108,7 @@ VID** MAP::ExecFunc(int p_cmd)
 				SPRITE* sprite = (SPRITE*) m_menu.m_data[i];
 				if (sprite->m_vid == vid &&
 					(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)) ||
-					 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 &&
-					  ndir - 999000 == (int) sprite->m_dir))) {
+					 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 && ndir - 999000 == (int) sprite->m_dir))) {
 					m_logic.PushObject(sprite);
 					return 0;
 				}
@@ -2126,13 +2154,11 @@ VID** MAP::ExecFunc(int p_cmd)
 		VID* vid = Vid(nvid);
 		if (vid == EmptyVid) {
 			if (::Error) {
-				MYERROR::Log(
-					::Error,
-					"!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
-					// STRING: ALIEN 0x48410c
-					"for MenuAction",
-					nvid
-				);
+				MYERROR::Log(::Error,
+							 "!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
+							 // STRING: ALIEN 0x48410c
+							 "for MenuAction",
+							 nvid);
 			}
 			return 0;
 		}
@@ -2140,8 +2166,7 @@ VID** MAP::ExecFunc(int p_cmd)
 			SPRITE* sprite = (SPRITE*) m_menu.m_data[i];
 			if (sprite->m_vid == vid &&
 				(ndir == 999999 || (unsigned int) ndir == vid->RealDirection(ANGLE(sprite->m_dir)) ||
-				 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 &&
-				  ndir - 999000 == (int) sprite->m_dir))) {
+				 (Game_IsZS1() && ndir >= 999000 && ndir != 999999 && ndir - 999000 == (int) sprite->m_dir))) {
 
 				if (action >= 17) {
 					sprite->Action(action, var1, var2, var3);
@@ -2162,35 +2187,43 @@ VID** MAP::ExecFunc(int p_cmd)
 		VID* vid = Vid(nvid);
 		if (vid == EmptyVid) {
 			if (::Error) {
-				MYERROR::Log(
-					::Error,
-					"!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
-					// STRING: ALIEN 0x4840fc
-					"for MenuCreate",
-					nvid
-				);
+				MYERROR::Log(::Error,
+							 "!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
+							 // STRING: ALIEN 0x4840fc
+							 "for MenuCreate",
+							 nvid);
 			}
 			PushInt(0);
 			return 0;
 		}
 		GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 		const bool menuCanvas = m_menu.HasScriptCanvas();
-		UI_SCALING::MENU_POINT point = menuCanvas ? UI_SCALING::TransformCenteredMenuPoint(
-			(float) x, (float) y, (float) z, 0, 0, m_menu.ScriptCanvasWidth(), m_menu.ScriptCanvasHeight(),
-			graph->m_width, graph->m_height, graph->m_uiScale * graph->m_uiPresentationScale
-		) : UI_SCALING::TransformScriptPoint(
-			(float) x,
-			(float) y,
-			(float) z,
-			graph->m_width,
-			graph->m_height,
-			graph->m_uiScale * graph->m_uiPresentationScale
-		);
+		UI_SCALING::MENU_POINT point =
+			menuCanvas ? UI_SCALING::TransformCenteredMenuPoint((float) x,
+																(float) y,
+																(float) z,
+																0,
+																0,
+																m_menu.ScriptCanvasWidth(),
+																m_menu.ScriptCanvasHeight(),
+																graph->m_width,
+																graph->m_height,
+																graph->m_uiScale * graph->m_uiPresentationScale)
+					   : UI_SCALING::TransformScriptPoint((float) x,
+														  (float) y,
+														  (float) z,
+														  graph->m_width,
+														  graph->m_height,
+														  graph->m_uiScale * graph->m_uiPresentationScale);
 		SPRITE* sprite =
 			CreateSprite(vid, point.m_x, point.m_y, point.m_z, ANGLE((char) ((ndir << 8) / (int) vid->m_noDir)), 0);
 		if (sprite) {
-			if (menuCanvas) sprite->SetMenuScriptLayout(graph->m_uiScale);
-			else sprite->SetUIScriptLayout(graph->m_uiScale, point.m_anchorX, point.m_anchorY);
+			if (menuCanvas) {
+				sprite->SetMenuScriptLayout(graph->m_uiScale);
+			}
+			else {
+				sprite->SetUIScriptLayout(graph->m_uiScale, point.m_anchorX, point.m_anchorY);
+			}
 		}
 		PushObject(sprite);
 		return 0;
@@ -2369,11 +2402,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		float listenerX;
 		float listenerY;
 		GetAudioListener(&listenerX, &listenerY);
-		Sound->PlaySFXFromCoor(
-			sfx,
-			VIEWPORT_MATH::RelativeAudioAxis((float) x, listenerX),
-			VIEWPORT_MATH::RelativeAudioAxis((float) y, listenerY)
-		);
+		Sound->PlaySFXFromCoor(sfx,
+							   VIEWPORT_MATH::RelativeAudioAxis((float) x, listenerX),
+							   VIEWPORT_MATH::RelativeAudioAxis((float) y, listenerY));
 		return 0;
 	}
 	case 136: { // script: PlayMusicFile(file, loop=1)
@@ -2447,7 +2478,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		m_logic.PushInt(GameDesc->m_nativeMoviePlayback ? Graph->IsMoviePlaying() : 0);
 		return 0;
 	case 144: // script: StopMovie()
-		if (GameDesc->m_nativeMoviePlayback) Graph->StopMovie();
+		if (GameDesc->m_nativeMoviePlayback) {
+			Graph->StopMovie();
+		}
 		return 0;
 	case 145: { // script: IsMusicPlaying()
 		MUSIC* music = Sound->m_music;
@@ -2515,18 +2548,14 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	case 152: { // script: Exec(cmdline) - launch an external program via the shell
 		commands = *PopStr();
-		MYERROR::Log(
-			::Error,
-			// STRING: ALIEN 0x4840f0
-			"Exec '%s'",
-			commands.m_str
-		);
+		MYERROR::Log(::Error,
+					 // STRING: ALIEN 0x4840f0
+					 "Exec '%s'",
+					 commands.m_str);
 		STRING params;
-		commands.After(
-			&params.m_str,
-			// STRING: ALIEN 0x47f740
-			" "
-		);
+		commands.After(&params.m_str,
+					   // STRING: ALIEN 0x47f740
+					   " ");
 		STRING file;
 		commands.Before(&file.m_str, " ");
 		// The script's Exec always names a document or a URL to hand to the
@@ -2547,7 +2576,6 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 153: { // script: CharAt(str, idx) - signed character code at a position
 		int idx = InlineLogicStackInt((LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n);
 		commands = *PopStr();
-
 
 		if (idx < 0 || size_t(idx) > strlen(commands.m_str)) {
 			m_logic.RuntimeError("CharAt index outside string storage", idx);
@@ -2572,13 +2600,11 @@ VID** MAP::ExecFunc(int p_cmd)
 		VID* vid = VidExist(vidIdx) ? m_vids[vidIdx] : EmptyVid;
 		if (vid == EmptyVid) {
 			if (::Error) {
-				MYERROR::Log(
-					::Error,
-					"!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
-					// STRING: ALIEN 0x4840e0
-					"for ChangeZUnit",
-					vidIdx
-				);
+				MYERROR::Log(::Error,
+							 "!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
+							 // STRING: ALIEN 0x4840e0
+							 "for ChangeZUnit",
+							 vidIdx);
 			}
 			return 0;
 		}
@@ -2611,13 +2637,11 @@ VID** MAP::ExecFunc(int p_cmd)
 		int vidIdx = ((LOGICSTACK*) m_logic.m_stack.m_data)[--m_logic.m_stack.m_n].Int();
 		VID* vid = VidExist(vidIdx) ? m_vids[vidIdx] : EmptyVid;
 		if (vid == EmptyVid && ::Error) {
-			MYERROR::Log(
-				::Error,
-				"!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
-				// STRING: ALIEN 0x4840d0
-				"for CanPlace",
-				vidIdx
-			);
+			MYERROR::Log(::Error,
+						 "!!!ERROR!!!SCRIPT: Invalid nvid %s %i",
+						 // STRING: ALIEN 0x4840d0
+						 "for CanPlace",
+						 vidIdx);
 		}
 		PushObject((void*) Hash->CanPlace(vid, (float) x, (float) y, (float) z));
 		return 0;
@@ -2636,8 +2660,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		}
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x4840c4
-			"for GetVid"
-		);
+			"for GetVid");
 		if (vid == EmptyVid) {
 			PushInt(0);
 			return 0;
@@ -2666,7 +2689,7 @@ VID** MAP::ExecFunc(int p_cmd)
 			PushInt((int) vid->m_exData->m_unk0x18);
 			return 0;
 		case 52:
-			if (Game_IsZS1()) {
+			if (GameDesc->SupportsVidExchangeQuery()) {
 				PushInt(vid->m_mirror ? vid->m_mirror->m_idx : vid->m_idx);
 				return 0;
 			}
@@ -2687,7 +2710,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		case 240:
 		case 241:
 			if (Game_IsZS1()) {
-				float size = type == 239 ? vid->m_footprintWidth : type == 240 ? vid->m_footprintHeight : vid->m_unk0x24;
+				float size = type == 239   ? vid->m_footprintWidth
+							 : type == 240 ? vid->m_footprintHeight
+										   : vid->m_unk0x24;
 				PushInt((int) size);
 				return 0;
 			}
@@ -2799,12 +2824,10 @@ VID** MAP::ExecFunc(int p_cmd)
 				PushInt(vid->m_aniFireCount[type - 92]);
 				return 0;
 			}
-			Error(
-				14,
-				// STRING: ALIEN 0x4840b8
-				"GetVid type",
-				type
-			);
+			Error(14,
+				  // STRING: ALIEN 0x4840b8
+				  "GetVid type",
+				  type);
 			if (Game_IsZS1()) {
 				PushInt(0);
 			}
@@ -2824,8 +2847,7 @@ VID** MAP::ExecFunc(int p_cmd)
 		}
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x4840ac
-			"for SetVid"
-		);
+			"for SetVid");
 		if (vid == EmptyVid) {
 			return 0;
 		}
@@ -2861,7 +2883,9 @@ VID** MAP::ExecFunc(int p_cmd)
 		case 240:
 		case 241:
 			if (Game_IsZS1()) {
-				float* size = type == 239 ? &vid->m_footprintWidth : type == 240 ? &vid->m_footprintHeight : &vid->m_unk0x24;
+				float* size = type == 239   ? &vid->m_footprintWidth
+							  : type == 240 ? &vid->m_footprintHeight
+											: &vid->m_unk0x24;
 				*size = (float) value;
 				if (type != 241) {
 					vid->m_unk0x384 = vid->m_footprintWidth * 0.5f;
@@ -2924,7 +2948,6 @@ VID** MAP::ExecFunc(int p_cmd)
 		case 49: // script: VID_LIFETIME (vid 0 is the reserved empty vid)
 			if (GameDesc->m_lifetimeInWeapon) {
 
-
 				if (vid->m_idx && vid->m_exData && vid->m_exData != (VID_EXDATA*) m_weapon) {
 					vid->m_exData->m_legacyLifeTime = value;
 					for (int nvid = 0; nvid < m_noVid; ++nvid) {
@@ -2954,12 +2977,10 @@ VID** MAP::ExecFunc(int p_cmd)
 				ExchangeVid(vid, Vid(value));
 			}
 			else {
-				Error(
-					4,
-					// STRING: ALIEN 0x484098
-					"SetVid get_image",
-					value
-				);
+				Error(4,
+					  // STRING: ALIEN 0x484098
+					  "SetVid get_image",
+					  value);
 			}
 			return 0;
 		case 54: // script: VID_MOVE_MASK
@@ -3002,12 +3023,10 @@ VID** MAP::ExecFunc(int p_cmd)
 					}
 				}
 				else {
-					Error(
-						4,
-						// STRING: ALIEN 0x484088
-						"SetVid child",
-						value
-					);
+					Error(4,
+						  // STRING: ALIEN 0x484088
+						  "SetVid child",
+						  value);
 				}
 				return 0;
 			}
@@ -3022,12 +3041,10 @@ VID** MAP::ExecFunc(int p_cmd)
 				vid->m_aniFireCount[type - 92] = value;
 				return 0;
 			}
-			Error(
-				14,
-				// STRING: ALIEN 0x48407c
-				"SetVid type",
-				type
-			);
+			Error(14,
+				  // STRING: ALIEN 0x48407c
+				  "SetVid type",
+				  type);
 			return 0;
 		}
 		m_logic.RuntimeError("unsupported SetVidData field for script dialect", rawType);
@@ -3051,8 +3068,7 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 169: { // script: Genocide(vid) - destroy every sprite of the given vid type
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x48406c
-			"for Genocide"
-		);
+			"for Genocide");
 		if (vid == EmptyVid) {
 			return 0;
 		}
@@ -3067,12 +3083,10 @@ VID** MAP::ExecFunc(int p_cmd)
 	case 170: { // script: ReplaceUnit - swap every old-vid sprite for a new one in place
 		VID* newVid = PopVid(
 			// STRING: ALIEN 0x484058
-			"for Replace Unit 2"
-		);
+			"for Replace Unit 2");
 		VID* oldVid = PopVid(
 			// STRING: ALIEN 0x484044
-			"for Replace Unit 1"
-		);
+			"for Replace Unit 1");
 		if (newVid == EmptyVid || oldVid == EmptyVid) {
 			return 0;
 		}
@@ -3119,19 +3133,27 @@ VID** MAP::ExecFunc(int p_cmd)
 				m_logic.RuntimeError("script write to an installed read-only asset is unsupported");
 				return 0;
 			}
-			if (entry->failed || m_logic.m_runtimeFault) return 0;
-
-
+			if (entry->failed || m_logic.m_runtimeFault) {
+				return 0;
+			}
 
 			bool ok = fseek(stream, 0, SEEK_CUR) == 0;
 			for (const unsigned char* c = (const unsigned char*) commands.m_str; ok && *c; ++c) {
-				if (*c == '\n') ok = fputc('\r', stream) != EOF;
-				if (ok) ok = fputc(*c, stream) != EOF;
+				if (*c == '\n') {
+					ok = fputc('\r', stream) != EOF;
+				}
+				if (ok) {
+					ok = fputc(*c, stream) != EOF;
+				}
 			}
-			if (ok) ok = fputs("\r\n", stream) >= 0;
+			if (ok) {
+				ok = fputs("\r\n", stream) >= 0;
+			}
 			entry->dirty = true;
 			entry->failed = !ok;
-			if (!ok) m_logic.RuntimeError("native script text write failed; original preserved");
+			if (!ok) {
+				m_logic.RuntimeError("native script text write failed; original preserved");
+			}
 			return 0;
 		}
 		commands.Write_file(stream);
@@ -3173,12 +3195,13 @@ VID** MAP::ExecFunc(int p_cmd)
 		std::string path;
 		const bool nativeText = GameDesc->m_nativeScriptTextFiles;
 		const bool mutableScoreFile = nativeText && ScriptTextPath(commands.m_str, path) && ScriptMutableScore(path);
-		FILE* stream = mutableScoreFile ? Platform_FOpenMutableRead(commands.m_str) :
-			FOpen(&commands.m_str, nativeText ? "rb" : "r+t");
+		FILE* stream = mutableScoreFile ? Platform_FOpenMutableRead(commands.m_str)
+										: FOpen(&commands.m_str, nativeText ? "rb" : "r+t");
 		if (!stream) {
 			Error(7, commands.m_str, 0);
 		}
-		PushInt(stream && mutableScoreFile ? ScriptFileStage(path, stream, false) : ScriptFileOpen(stream, {}, nativeText));
+		PushInt(stream && mutableScoreFile ? ScriptFileStage(path, stream, false)
+										   : ScriptFileOpen(stream, {}, nativeText));
 		return 0;
 	}
 	case 177: // script: CloseFile(stream)
@@ -3200,17 +3223,16 @@ VID** MAP::ExecFunc(int p_cmd)
 			PushInt(ScriptFileStage(path, nullptr, true));
 			return 0;
 		}
-		PushInt(ScriptFileOpen(FOpen(
-			&commands.m_str,
-			// STRING: ALIEN 0x48403c
-			"w+t"
-		)));
+		PushInt(ScriptFileOpen(FOpen(&commands.m_str,
+									 // STRING: ALIEN 0x48403c
+									 "w+t")));
 		return 0;
 	}
 	case 179: { // script: IsEOF(stream) - true at end of file or for a null stream
 		FILE* stream = ScriptFile(PopInt());
 		// The original read the MSVC FILE struct's _IOEOF bit directly.
-		PushInt(GameDesc->m_nativeScriptTextFiles ? (!stream ? 1 : (feof(stream) ? 0x10 : 0)) : (!stream || feof(stream)));
+		PushInt(GameDesc->m_nativeScriptTextFiles ? (!stream ? 1 : (feof(stream) ? 0x10 : 0))
+												  : (!stream || feof(stream)));
 		return 0;
 	}
 	case 182: { // script: GetReg(path, name, def)
@@ -3467,7 +3489,6 @@ VID** MAP::ExecFunc(int p_cmd)
 				}
 				SPRITE* sprite = (SPRITE*) m_layers[layer].m_data[i];
 
-
 				if (!sprite) {
 					continue;
 				}
@@ -3507,8 +3528,7 @@ VID** MAP::ExecFunc(int p_cmd)
 				// STRING: ALIEN 0x48400c
 				"\xc1\xee\xf0\xe8\xf1, \xf3 \xf2\xe5\xe1\xff \xe2 PatrolTrain - train \xed\xe5\xe2\xe5\xf0\xed\xfb\xe9 "
 				"%p",
-				(const void*) sprite
-			);
+				(const void*) sprite);
 		}
 		return 0;
 	}
@@ -3532,15 +3552,13 @@ VID** MAP::ExecFunc(int p_cmd)
 		return 0;
 	case 247:
 
-
 		PopInt();
 		return 0;
 	case 249: { // script: AddUnitLimit(limit, vid, index) - set a per-vid unit cap
 		int index = PopInt();
 		VID* vid = PopVid(
 			// STRING: ALIEN 0x483ff8
-			"for AddUnitLimit"
-		);
+			"for AddUnitLimit");
 		int limit = PopInt();
 		if (vid == EmptyVid) {
 			return 0;
@@ -3606,14 +3624,12 @@ decomp_intptr MAP::PopObject()
 {
 	LOGICSTACK* top = (LOGICSTACK*) m_logic.m_stack.m_data + m_logic.m_stack.m_n;
 	if (top[-1].m_num && !(top[-1].m_type & 0x10)) {
-		MYERROR::Error(
-			::Error,
-			"LOGIC",
-			10,
-			// STRING: ALIEN 0x48416c
-			"this variable is not unit",
-			0
-		);
+		MYERROR::Error(::Error,
+					   "LOGIC",
+					   10,
+					   // STRING: ALIEN 0x48416c
+					   "this variable is not unit",
+					   0);
 	}
 	LOGICSTACK* e = (LOGICSTACK*) m_logic.m_stack.m_data + --m_logic.m_stack.m_n;
 	if (e->m_type & 1) {

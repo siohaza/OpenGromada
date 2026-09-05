@@ -5,8 +5,11 @@
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/terrain_camera.h"
+#include "game/viewport_math.h"
 #include "gfx/color.h"
 #include "gfx/gamma.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/render_math.h"
@@ -104,8 +107,7 @@ VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 	m_layer = 0;
 	SetName(
 		// STRING: ALIEN 0x482c3c
-		"Self Created Hardware Prerendered Ground "
-	);
+		"Self Created Hardware Prerendered Ground ");
 	int cells = (p_w / 256 + 1) * (p_h / 256 + 1) + 1;
 	m_pixelFlag16 = 0x225;
 	VID_CHILD* children = (VID_CHILD*) operator new(sizeof(VID_CHILD) * cells);
@@ -140,12 +142,10 @@ VID_HARDWARE::VID_HARDWARE(int p_idx, int p_w, int p_h)
 	TEXTURE** textures = (TEXTURE**) operator new(sizeof(TEXTURE*) * (short) m_unk0x488);
 	m_unk0x48c = textures;
 	if (!m_unk0x48c) {
-		Error(
-			2,
-			// STRING: ALIEN 0x482c28
-			"textures",
-			(short) m_unk0x488
-		);
+		Error(2,
+			  // STRING: ALIEN 0x482c28
+			  "textures",
+			  (short) m_unk0x488);
 		return;
 	}
 	for (int t = 0; t < (short) m_unk0x488; t += 2) {
@@ -201,31 +201,36 @@ void VID_HARDWARE::DrawVidToVid(const SPRITE* p_sprite)
 			float savedXMax = graph->m_viewXMax;
 			float savedYMin = graph->m_viewYMin;
 			float savedYMax = graph->m_viewYMax;
-			int sx = (int) p_sprite->m_x;
-			int sy = (int) (p_sprite->m_y - p_sprite->m_z);
+			int sx = VIEWPORT_MATH::LegacyCoordinate(p_sprite->m_x);
+			int sy = VIEWPORT_MATH::LegacyCoordinate((double) p_sprite->m_y - p_sprite->m_z);
 			for (VID_CHILD* child = m_unk0x484; child; child = &(m_unk0x484)[child->m_next]) {
 				int halfW = child->m_w / 2;
-				if (abs(child->m_offsetX - sx + child->m_x + halfW) < halfW + p_sprite->m_vid->m_unk0x2f6 / 2) {
+				int dx = VIEWPORT_MATH::LegacyCoordinateDifference(
+					VIEWPORT_MATH::LegacyCoordinate((double) child->m_offsetX + child->m_x + halfW),
+					sx);
+				if (dx < 0) {
+					dx = VIEWPORT_MATH::LegacyCoordinateDifference(0, dx);
+				}
+				if (dx < halfW + p_sprite->m_vid->m_unk0x2f6 / 2) {
 					int halfH = child->m_h / 2;
-					if (abs(child->m_offsetY - sy + child->m_y + halfH) <
-						halfH + p_sprite->m_vid->m_messageLineHeight / 2) {
-						graph->SetViewPort(
-							(float) child->m_x,
-							(float) child->m_y,
-							(float) (child->m_x + child->m_w),
-							(float) (child->m_y + child->m_h)
-						);
-						TerrainCoverageBegin(
-							m_terrainCoverage,
-							child->m_offsetX - child->m_x,
-							child->m_offsetY - child->m_y
-						);
-						p_sprite->m_vid->DrawToVid(
-							p_sprite,
-							child,
-							m_unk0x48c[child->m_texture],
-							m_unk0x48c[child->m_texture + 1]
-						);
+					int dy = VIEWPORT_MATH::LegacyCoordinateDifference(
+						VIEWPORT_MATH::LegacyCoordinate((double) child->m_offsetY + child->m_y + halfH),
+						sy);
+					if (dy < 0) {
+						dy = VIEWPORT_MATH::LegacyCoordinateDifference(0, dy);
+					}
+					if (dy < halfH + p_sprite->m_vid->m_messageLineHeight / 2) {
+						graph->SetViewPort((float) child->m_x,
+										   (float) child->m_y,
+										   (float) (child->m_x + child->m_w),
+										   (float) (child->m_y + child->m_h));
+						TerrainCoverageBegin(m_terrainCoverage,
+											 child->m_offsetX - child->m_x,
+											 child->m_offsetY - child->m_y);
+						p_sprite->m_vid->DrawToVid(p_sprite,
+												   child,
+												   m_unk0x48c[child->m_texture],
+												   m_unk0x48c[child->m_texture + 1]);
 						TerrainCoverageEnd();
 					}
 				}
@@ -252,12 +257,10 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 	QS1_CODER* colorCoder = 0;
 	QS1_CODER* zCoder = 0;
 	if (p_res->GoNext(0x46525553 /* 'SURF' */)) {
-		Error(
-			5,
-			// STRING: ALIEN 0x482d10
-			"SURF",
-			0
-		);
+		Error(5,
+			  // STRING: ALIEN 0x482d10
+			  "SURF",
+			  0);
 	}
 	p_res->Read(&m_unk0x488, 2);
 	if (!(short) m_unk0x488) {
@@ -274,12 +277,10 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 
 	void* unpack = operator new(0x20008);
 	if (!unpack) {
-		Error(
-			2,
-			// STRING: ALIEN 0x482d04
-			"(unpack)",
-			0
-		);
+		Error(2,
+			  // STRING: ALIEN 0x482d04
+			  "(unpack)",
+			  0);
 		return;
 	}
 
@@ -326,17 +327,14 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		}
 		else {
 
-
 			int format = GameDesc->m_layerRules == GAME_LAYERS_ZS1 ? D3DFMT_A1R5G5B5 : D3DFMT_R5G6B5;
 			m_unk0x48c[i] = new TEXTURE(w, h, format, 0);
 		}
 		if (!m_unk0x48c[i]->m_data) {
-			Error(
-				3,
-				// STRING: ALIEN 0x482c84
-				"texture",
-				0
-			);
+			Error(3,
+				  // STRING: ALIEN 0x482c84
+				  "texture",
+				  0);
 
 			if (colorCoder) {
 				delete colorCoder;
@@ -349,12 +347,10 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		}
 
 		if (m_pixelFlag16 & 8) {
-			Error(
-				10,
-				// STRING: ALIEN 0x482cf8
-				"palette %i",
-				m_unk0x48c[i]->m_format == 41
-			);
+			Error(10,
+				  // STRING: ALIEN 0x482cf8
+				  "palette %i",
+				  m_unk0x48c[i]->m_format == 41);
 			p_res->Read(palette, 768);
 			if (m_unk0x48c[i]->m_format == 41) {
 				unsigned char quads[1024];
@@ -373,24 +369,20 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		p_res->Read(&offset, 4);
 		int decoded = p_res->ReadPacked(unpack, offset, colorCoder);
 		if (decoded) {
-			Error(
-				5,
-				// STRING: ALIEN 0x482ce8
-				"Can't decode",
-				i
-			);
+			Error(5,
+				  // STRING: ALIEN 0x482ce8
+				  "Can't decode",
+				  i);
 		}
 
 		if ((m_pixelFlag16 & 8) || offset >= 2 * w * h) {
 
 			unsigned char* locked = (unsigned char*) m_unk0x48c[i]->Lock(&pitch, 0);
 			if (!locked) {
-				Error(
-					0,
-					// STRING: ALIEN 0x482c74
-					"texture surface",
-					0
-				);
+				Error(0,
+					  // STRING: ALIEN 0x482c74
+					  "texture surface",
+					  0);
 
 				if (colorCoder) {
 					delete colorCoder;
@@ -435,20 +427,16 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		}
 		else {
 
-			Error(
-				10,
-				// STRING: ALIEN 0x482cdc
-				"Load DXT",
-				0
-			);
+			Error(10,
+				  // STRING: ALIEN 0x482cdc
+				  "Load DXT",
+				  0);
 			void* locked = m_unk0x48c[i]->Lock(&pitch, 0);
 			if (!locked) {
-				Error(
-					0,
-					// STRING: ALIEN 0x482cc8
-					"DXT texture surface",
-					0
-				);
+				Error(0,
+					  // STRING: ALIEN 0x482cc8
+					  "DXT texture surface",
+					  0);
 			}
 			else {
 				memcpy(locked, unpack, offset);
@@ -468,30 +456,24 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 					if (offset == pitch * h) {
 						int zdec = p_res->ReadPacked(locked, offset, zCoder);
 						if (zdec) {
-							Error(
-								5,
-								// STRING: ALIEN 0x482c8c
-								"Can't decode z",
-								offset - zdec
-							);
+							Error(5,
+								  // STRING: ALIEN 0x482c8c
+								  "Can't decode z",
+								  offset - zdec);
 						}
 					}
 					else {
-						Error(
-							5,
-							// STRING: ALIEN 0x482c9c
-							"ZBuffer: invalid size",
-							offset
-						);
+						Error(5,
+							  // STRING: ALIEN 0x482c9c
+							  "ZBuffer: invalid size",
+							  offset);
 					}
 				}
 				else {
-					Error(
-						0,
-						// STRING: ALIEN 0x482cb4
-						"texture z surface",
-						0
-					);
+					Error(0,
+						  // STRING: ALIEN 0x482cb4
+						  "texture z surface",
+						  0);
 					p_res->m_state = 2;
 					fseek(p_res->m_file, offset, SEEK_CUR);
 				}
@@ -506,22 +488,18 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 	}
 
 	if (p_res->GoNext(0x41544144 /* 'DATA' */)) {
-		Error(
-			5,
-			// STRING: ALIEN 0x482bb8
-			"DATA",
-			0
-		);
+		Error(5,
+			  // STRING: ALIEN 0x482bb8
+			  "DATA",
+			  0);
 	}
 	if (m_pixelFlag16 & 0x10) {
 		p_res->SubLoad((void**) &m_unk0x484, 0);
 		if (!m_unk0x484) {
-			Error(
-				5,
-				// STRING: ALIEN 0x482c68
-				"tex_coor",
-				0
-			);
+			Error(5,
+				  // STRING: ALIEN 0x482c68
+				  "tex_coor",
+				  0);
 		}
 	}
 	else {
@@ -565,7 +543,6 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 void VID_HARDWARE::SetLayer()
 {
 	if (GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND) {
-
 
 		if (m_flag & 0x40000000) {
 			m_layer = 1;
@@ -611,7 +588,6 @@ void VID_HARDWARE::SetLayer()
 	}
 	if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
 
-
 		if ((flag & 0x8000) && m_noDir == 255) {
 			m_layer = 18;
 			return;
@@ -655,6 +631,10 @@ inline static bool DrawInViewPort(const GRAPH_CORE* p_graph, float p_x, float p_
 
 static int CopyScaledUIZBuffer(GRAPH_CORE* p_graph, const int* p_dst, const int* p_src, TEXTURE* p_texture)
 {
+	if (GPU_RENDER::Active()) {
+		GPU_TEXTURE::CopyDepthToScreen(p_texture, p_dst, p_src, true);
+		return 0;
+	}
 	if (!p_graph->m_zbuffer || !p_texture || !p_texture->m_data) {
 		return 0;
 	}
@@ -723,7 +703,6 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 		if (frameChild->m_h) {
 			int needEx = m_unk0x47c;
 
-
 			if (!PropHide()) {
 				GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 				if (GameDesc->m_layerRules == GAME_LAYERS_ZS1) {
@@ -782,14 +761,10 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 									   (ex->m_y - ex->m_z - p_sprite->m_y + p_sprite->m_z) * s / segments);
 						zval = (int) ((ex->m_z - p_sprite->Z()) * s / segments + p_sprite->m_z);
 					}
+					uint32_t gpuAnchor = 0;
+					bool gpuChildTest = false;
 					bool alphaDepthGate = false;
 					bool alphaAnchorVisible = false;
-
-
-
-
-
-
 
 					const bool independentQuad = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ||
 												 (GameDesc->m_layerRules == GAME_LAYERS_ZS1 &&
@@ -797,23 +772,26 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 					if (!(flag & 0x8000) && !(m_pixelFlag16 & 4) && !independentQuad) {
 						GRAPH_CORE* g = (GRAPH_CORE*) Graph;
 						int threshold = 8 * zval + 1024;
-						if ((m_pixelFlag16 & 2) && !uiSprite) {
+						if (GPU_RENDER::Active()) {
+							gpuAnchor = GPU_TEXTURE::Visibility(baseX, baseY, threshold);
+							gpuChildTest = (m_pixelFlag16 & 2) && !uiSprite;
+						}
+						else if ((m_pixelFlag16 & 2) && !uiSprite) {
 							alphaDepthGate = true;
-							alphaAnchorVisible = RENDER_MATH::AlphaSpriteAnchorVisible(
-								(const unsigned short*) g->m_zbuffer,
-								g->m_zpitch,
-								(int) g->m_width,
-								(int) g->m_height,
-								(int) g->m_viewXMin,
-								(int) g->m_viewYMin,
-								(int) g->m_viewXMax,
-								(int) g->m_viewYMax,
-								baseX,
-								baseY,
-								threshold,
-								m_footprintWidth,
-								m_footprintHeight
-							);
+							alphaAnchorVisible =
+								RENDER_MATH::AlphaSpriteAnchorVisible((const unsigned short*) g->m_zbuffer,
+																	  g->m_zpitch,
+																	  (int) g->m_width,
+																	  (int) g->m_height,
+																	  (int) g->m_viewXMin,
+																	  (int) g->m_viewYMin,
+																	  (int) g->m_viewXMax,
+																	  (int) g->m_viewYMax,
+																	  baseX,
+																	  baseY,
+																	  threshold,
+																	  m_footprintWidth,
+																	  m_footprintHeight);
 						}
 						else {
 							if (!DrawInViewPort(g, (float) baseX, (float) baseY)) {
@@ -871,20 +849,22 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 							dst[1] = sy;
 							dst[2] = sx + (uiSprite ? drawW : (int) (clipW * scaleX));
 							dst[3] = sy + (uiSprite ? drawH : (int) (clipH * scaleY));
+							uint32_t gpuChild =
+								gpuChildTest ? GPU_TEXTURE::Visibility(baseX, baseY, 8 * zval + 1024, dst, gpuAnchor)
+											 : 0;
+							GPU_TEXTURE::SetPredicate(gpuChild ? gpuChild : gpuAnchor);
 							if (alphaDepthGate && !alphaAnchorVisible) {
 								GRAPH_CORE* g = (GRAPH_CORE*) Graph;
-								if (!RENDER_MATH::AlphaSpriteChildVisible(
-										(const unsigned short*) g->m_zbuffer,
-										g->m_zpitch,
-										(int) g->m_width,
-										(int) g->m_height,
-										(int) g->m_viewXMin,
-										(int) g->m_viewYMin,
-										(int) g->m_viewXMax,
-										(int) g->m_viewYMax,
-										dst,
-										8 * zval + 1024
-									)) {
+								if (!RENDER_MATH::AlphaSpriteChildVisible((const unsigned short*) g->m_zbuffer,
+																		  g->m_zpitch,
+																		  (int) g->m_width,
+																		  (int) g->m_height,
+																		  (int) g->m_viewXMin,
+																		  (int) g->m_viewYMin,
+																		  (int) g->m_viewXMax,
+																		  (int) g->m_viewYMax,
+																		  dst,
+																		  8 * zval + 1024)) {
 									if (!child->m_next) {
 										break;
 									}
@@ -900,21 +880,17 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 
 							int zfunc;
 							if (m_pixelFlag16 & 4) {
-								zfunc = uiSprite ? CopyScaledUIZBuffer(
-													   (GRAPH_CORE*) Graph,
-													   dst,
-													   src,
-													   m_unk0x48c[child->m_texture + 1]
-												   )
+								zfunc = uiSprite ? CopyScaledUIZBuffer((GRAPH_CORE*) Graph,
+																	   dst,
+																	   src,
+																	   m_unk0x48c[child->m_texture + 1])
 												 : ((GRAPH_CORE*) Graph)
 													   ->CopyToZBuffer(dst, src, m_unk0x48c[child->m_texture + 1]);
 								if (zfunc) {
-									Error(
-										1,
-										// STRING: ALIEN 0x482d18
-										"zbuffer",
-										zfunc
-									);
+									Error(1,
+										  // STRING: ALIEN 0x482d18
+										  "zbuffer",
+										  zfunc);
 								}
 							}
 
@@ -955,29 +931,32 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 
 							if (m_flag & 0x800) {
 								GAMMA composited;
-								composited.Add(
-									GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
-									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma())
-								);
+								composited.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
+											   GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
 								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &composited);
 							}
 							else {
 								int graphNeg = ((GRAPH_CORE*) Graph)->m_gammaSet.m_a;
 								int graphPos = ((GRAPH_CORE*) Graph)->m_gammaSet.m_b;
 								GAMMA composited;
-								composited.Add(
-									GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
-									GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma())
-								);
+								composited.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
+											   GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
 								GAMMA withGraph;
 								withGraph.Add(composited, GAMMA(GAMMA::RAW_COPY, graphNeg, graphPos));
 								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &withGraph);
+							}
+							GPU_TEXTURE::SetPredicate(0);
+							if (gpuChild) {
+								GPU_RENDER::Release(gpuChild);
 							}
 						}
 						if (!child->m_next) {
 							break;
 						}
 						child = &m_unk0x484[child->m_next];
+					}
+					if (gpuAnchor) {
+						GPU_RENDER::Release(gpuAnchor);
 					}
 				}
 				if (uiSprite) {

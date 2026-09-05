@@ -34,6 +34,16 @@ public:
 
 extern SETTINGS Settings;
 
+enum SETTINGS_RENDERER {
+	SETTINGS_RENDERER_AUTO,
+	SETTINGS_RENDERER_GPU,
+	SETTINGS_RENDERER_SOFTWARE
+};
+
+SETTINGS_RENDERER Settings_Renderer();
+const char* Settings_RendererName();
+const char* Settings_GPUDriver();
+
 // Parses port options and preserves the legacy cfg/script argument.
 void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument);
 bool Settings_ForceRedBlood();

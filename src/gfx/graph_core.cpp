@@ -2,15 +2,16 @@
 #include "gfx/graph_core.h"
 
 #include "game/game_descriptor.h"
-
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/settings.h"
 #include "gfx/display_math.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_graph.h"
 #include "gfx/graph.h"
 #include "gfx/texture.h"
-#include "platform/render.h"
 #include "platform/paths.h"
+#include "platform/render.h"
 #include "util/myerror.h"
 #include "video/movie_player.h"
 
@@ -252,16 +253,14 @@ GRAPH_CORE::GRAPH_CORE(SETTINGS* p_settings)
 	DISPLAY_MATH::RESOLUTION desktop = DesktopResolution(m_displayID);
 	DISPLAY_MATH::RESOLUTION usable = UsableResolution(m_displayID);
 	m_automaticResolution = p_settings->m_desktopResolution != 0;
-	DISPLAY_MATH::RESOLUTION output = DISPLAY_MATH::ResolveOutput(
-		p_settings->m_screenX,
-		p_settings->m_screenY,
-		desktop.m_width,
-		desktop.m_height,
-		usable.m_width,
-		usable.m_height,
-		m_automaticResolution != 0,
-		p_settings->m_fullscreen != 0
-	);
+	DISPLAY_MATH::RESOLUTION output = DISPLAY_MATH::ResolveOutput(p_settings->m_screenX,
+																  p_settings->m_screenY,
+																  desktop.m_width,
+																  desktop.m_height,
+																  usable.m_width,
+																  usable.m_height,
+																  m_automaticResolution != 0,
+																  p_settings->m_fullscreen != 0);
 	m_outputWidth = output.m_width;
 	m_outputHeight = output.m_height;
 	m_renderWidth = p_settings->m_renderWidth;
@@ -275,37 +274,31 @@ GRAPH_CORE::GRAPH_CORE(SETTINGS* p_settings)
 
 void GRAPH_CORE::ResolveDisplaySize()
 {
-	DISPLAY_MATH::RESOLUTION logical = DISPLAY_MATH::ResolveInternal(
-		m_outputWidth,
-		m_outputHeight,
-		m_renderWidth,
-		m_nativeResolution != 0,
-		GameDesc->m_uiBaseHeight
-	);
+	DISPLAY_MATH::RESOLUTION logical = DISPLAY_MATH::ResolveInternal(m_outputWidth,
+																	 m_outputHeight,
+																	 m_renderWidth,
+																	 m_nativeResolution != 0,
+																	 GameDesc->m_uiBaseHeight);
 	if (m_renderWidth <= 0 && GameDesc->m_fixedFrameWidth > 0) {
 		logical = {GameDesc->m_fixedFrameWidth, GameDesc->m_fixedFrameHeight};
 	}
 	m_width = (float) logical.m_width;
 	m_height = (float) logical.m_height;
-	m_uiScale = DISPLAY_MATH::ResolveUIScale(
-		logical.m_width,
-		logical.m_height,
-		m_uiScaleSetting,
-		GameDesc->m_uiBaseWidth,
-		GameDesc->m_uiBaseHeight
-	);
+	m_uiScale = DISPLAY_MATH::ResolveUIScale(logical.m_width,
+											 logical.m_height,
+											 m_uiScaleSetting,
+											 GameDesc->m_uiBaseWidth,
+											 GameDesc->m_uiBaseHeight);
 	m_uiPresentationScale = 1.0f;
 }
 
 int GRAPH_CORE::ConfigureFrameForMap(float p_mapWidth, float p_mapHeight, int p_gameplay)
 {
-	DISPLAY_MATH::RESOLUTION target = DISPLAY_MATH::ResolveInternal(
-		m_outputWidth,
-		m_outputHeight,
-		m_renderWidth,
-		m_nativeResolution != 0,
-		GameDesc->m_uiBaseHeight
-	);
+	DISPLAY_MATH::RESOLUTION target = DISPLAY_MATH::ResolveInternal(m_outputWidth,
+																	m_outputHeight,
+																	m_renderWidth,
+																	m_nativeResolution != 0,
+																	GameDesc->m_uiBaseHeight);
 	bool mapSafeNative = p_gameplay && m_nativeResolution && std::isfinite(p_mapWidth) && std::isfinite(p_mapHeight) &&
 						 p_mapWidth > 0.0f && p_mapHeight > 0.0f && p_mapWidth <= (float) INT_MAX &&
 						 p_mapHeight <= (float) INT_MAX;
@@ -313,13 +306,11 @@ int GRAPH_CORE::ConfigureFrameForMap(float p_mapWidth, float p_mapHeight, int p_
 		target = {GameDesc->m_fixedFrameWidth, GameDesc->m_fixedFrameHeight};
 	}
 	if (mapSafeNative) {
-		target = DISPLAY_MATH::ResolveMapSafeInternal(
-			target,
-			{m_outputWidth, m_outputHeight},
-			(int) p_mapWidth,
-			(int) p_mapHeight,
-			GameDesc->m_uiBaseHeight
-		);
+		target = DISPLAY_MATH::ResolveMapSafeInternal(target,
+													  {m_outputWidth, m_outputHeight},
+													  (int) p_mapWidth,
+													  (int) p_mapHeight,
+													  GameDesc->m_uiBaseHeight);
 	}
 	return ConfigureFrameSize(target.m_width, target.m_height, mapSafeNative ? 1 : 0);
 }
@@ -332,21 +323,16 @@ int GRAPH_CORE::ConfigureFrameForTerrain(int p_width, int p_height)
 int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNative)
 {
 	DISPLAY_MATH::RESOLUTION target = {p_width, p_height};
-	const int targetUIScale =
-		p_mapSafeNative ? DISPLAY_MATH::ResolveGameplayUIScale(
-							  m_outputWidth,
-							  m_outputHeight,
-							  m_uiScaleSetting,
-							  GameDesc->m_uiBaseWidth,
-							  GameDesc->m_uiBaseHeight
-						  )
-						: DISPLAY_MATH::ResolveUIScale(
-							  target.m_width,
-							  target.m_height,
-							  m_uiScaleSetting,
-							  GameDesc->m_uiBaseWidth,
-							  GameDesc->m_uiBaseHeight
-						  );
+	const int targetUIScale = p_mapSafeNative ? DISPLAY_MATH::ResolveGameplayUIScale(m_outputWidth,
+																					 m_outputHeight,
+																					 m_uiScaleSetting,
+																					 GameDesc->m_uiBaseWidth,
+																					 GameDesc->m_uiBaseHeight)
+											  : DISPLAY_MATH::ResolveUIScale(target.m_width,
+																			 target.m_height,
+																			 m_uiScaleSetting,
+																			 GameDesc->m_uiBaseWidth,
+																			 GameDesc->m_uiBaseHeight);
 	float targetUIPresentationScale = 1.0f;
 	if (p_mapSafeNative && (target.m_width < m_outputWidth || target.m_height < m_outputHeight) && m_outputWidth > 0 &&
 		m_outputHeight > 0) {
@@ -373,12 +359,13 @@ int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNativ
 	}
 
 	const size_t zCount = (size_t) target.m_width * (size_t) target.m_height;
-	unsigned short* replacementZ = (unsigned short*) operator new(zCount * sizeof(unsigned short), std::nothrow);
-	if (!replacementZ) {
+	unsigned short* replacementZ =
+		GPU_RENDER::Active() ? nullptr : (unsigned short*) operator new(zCount * sizeof(unsigned short), std::nothrow);
+	if (!replacementZ && !GPU_RENDER::Active()) {
 		MYERROR::Log(::Error, "Unable to allocate render depth %ix%i", target.m_width, target.m_height);
 		return -1;
 	}
-	for (size_t i = 0; i < zCount; ++i) {
+	for (size_t i = 0; replacementZ && i < zCount; ++i) {
 		replacementZ[i] = 0x03ff;
 	}
 
@@ -401,6 +388,8 @@ int GRAPH_CORE::ConfigureFrameSize(int p_width, int p_height, int p_mapSafeNativ
 	m_effectStart[5] = 0;
 	free(m_screen);
 	m_screen = 0;
+	GPU_RENDER::Release(m_gpuScreen);
+	m_gpuScreen = 0;
 	ClearScreen(BLACK);
 	operator delete(oldZ);
 
@@ -437,6 +426,9 @@ GRAPH_CORE::~GRAPH_CORE()
 
 void GRAPH_CORE::ReleaseFrameBuffer()
 {
+	GPU_RENDER::Forget(m_snowRamp);
+	GPU_RENDER::Release(m_gpuScreen);
+	m_gpuScreen = 0;
 	if (m_zbuffer) {
 		operator delete(m_zbuffer);
 		m_zbuffer = 0;
@@ -460,11 +452,11 @@ int GRAPH_CORE::CreateFrameBuffer()
 	// screen.
 	m_color = Platform_RenderPixels();
 	m_pitch = Platform_RenderPitch();
-	if (!m_color) {
+	if (!m_color && !GPU_RENDER::Active()) {
 		return 1;
 	}
 
-	m_zbuffer = operator new(2 * (size_t) w * (size_t) h);
+	m_zbuffer = GPU_RENDER::Active() ? nullptr : operator new(2 * (size_t) w * (size_t) h);
 	m_zpitch = w;
 	return 0;
 }
@@ -482,25 +474,21 @@ int GRAPH_CORE::Init()
 		}
 	}
 
-	if (Platform_RenderOpen(
-			GameDesc->m_title,
-			m_outputWidth,
-			m_outputHeight,
-			w,
-			h,
-			(m_flags & 0x80) != 0,
-			m_automaticResolution,
-			m_displayID
-		)) {
+	if (Platform_RenderOpen(GameDesc->m_title,
+							m_outputWidth,
+							m_outputHeight,
+							w,
+							h,
+							(m_flags & 0x80) != 0,
+							m_automaticResolution,
+							m_displayID)) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				3,
-				// STRING: ALIEN 0x47f1f8
-				"3dDevice",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   3,
+						   // STRING: ALIEN 0x47f1f8
+						   "3dDevice",
+						   0);
 		}
 		return 1;
 	}
@@ -509,28 +497,24 @@ int GRAPH_CORE::Init()
 
 	if (CreateFrameBuffer()) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				3,
-				// STRING: ALIEN 0x47f1d8
-				"tempBuffer",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   3,
+						   // STRING: ALIEN 0x47f1d8
+						   "tempBuffer",
+						   0);
 		}
 		return 1;
 	}
 
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x47f204
-		"Selected output %ix%i, render %.0fx%.0f %s",
-		m_outputWidth,
-		m_outputHeight,
-		m_width,
-		m_height,
-		GetPixelFormat(D3DFMT_A8R8G8B8).m_str
-	);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x47f204
+				 "Selected output %ix%i, render %.0fx%.0f %s",
+				 m_outputWidth,
+				 m_outputHeight,
+				 m_width,
+				 m_height,
+				 GetPixelFormat(D3DFMT_A8R8G8B8).m_str);
 	return 0;
 }
 
@@ -553,8 +537,6 @@ void GRAPH_CORE::PostTact(int p_present)
 	PollMovie();
 	if (p_present && m_movieActive) {
 
-
-
 		PresentMovieFrame();
 	}
 	else if (p_present && !m_effectStart[6] && !m_effectStart[7]) {
@@ -565,8 +547,6 @@ void GRAPH_CORE::PostTact(int p_present)
 
 int GRAPH_CORE::OpenMovie(const char* p_filename)
 {
-
-
 
 	StopMovie();
 	m_movieName = p_filename ? p_filename : "";
@@ -580,16 +560,17 @@ int GRAPH_CORE::OpenMovie(const char* p_filename)
 		MYERROR::Log(::Error, "Movie open failed for '%s'; playback stopped", m_movieName.c_str());
 		return 1;
 	}
-	if (!m_movie) m_movie = new MoviePlayer;
+	if (!m_movie) {
+		m_movie = new MoviePlayer;
+	}
 	if (!m_movie->Open(file, SDL_GetTicks())) {
 		MYERROR::Log(::Error, "Movie open failed for '%s': %s", m_movieName.c_str(), m_movie->Error().c_str());
 		m_movieErrorReported = true;
 		return 1;
 	}
 
-
 	int outputWidth = 0, outputHeight = 0;
-	SDL_GetRenderOutputSize(Platform_RenderRenderer(), &outputWidth, &outputHeight);
+	Platform_RenderOutputSize(&outputWidth, &outputHeight);
 	const auto center = [](float edge, float logicalSize, int outputSize, int size) {
 		const double pixels = double(edge) * outputSize / logicalSize;
 		return std::isfinite(pixels) && pixels >= 0 && pixels <= 65536 ? (((int) pixels - size) >> 1) : 0;
@@ -602,18 +583,24 @@ int GRAPH_CORE::OpenMovie(const char* p_filename)
 
 void GRAPH_CORE::PollMovie(bool p_consumeCompletion)
 {
-	if (!m_movieActive) return;
+	if (!m_movieActive) {
+		return;
+	}
 	m_movie->Update(SDL_GetTicks());
 	if (!m_movie->Error().empty() && !m_movieErrorReported) {
 		MYERROR::Log(::Error, "Movie playback stopped for '%s': %s", m_movieName.c_str(), m_movie->Error().c_str());
 		m_movieErrorReported = true;
 	}
-	if (!m_movie->Error().empty() || (p_consumeCompletion && !m_movie->IsPlaying())) m_movieActive = false;
+	if (!m_movie->Error().empty() || (p_consumeCompletion && !m_movie->IsPlaying())) {
+		m_movieActive = false;
+	}
 }
 
 void GRAPH_CORE::PresentMovieFrame()
 {
-	if (!m_movieActive) return;
+	if (!m_movieActive) {
+		return;
+	}
 	if (!Platform_RenderPresentMovie(m_movie->Pixels(), m_movie->Width(), m_movie->Height(), m_movieX, m_movieY)) {
 		MYERROR::Log(::Error, "Movie presentation failed for '%s': %s", m_movieName.c_str(), SDL_GetError());
 		StopMovie();
@@ -623,8 +610,6 @@ void GRAPH_CORE::PresentMovieFrame()
 void GRAPH_CORE::PresentIdleMovie()
 {
 
-
-
 	PollMovie(false);
 	PresentMovieFrame();
 }
@@ -632,14 +617,15 @@ void GRAPH_CORE::PresentIdleMovie()
 int GRAPH_CORE::IsMoviePlaying()
 {
 
-
 	return m_movieActive;
 }
 
 void GRAPH_CORE::StopMovie()
 {
 	m_movieActive = false;
-	if (m_movie) m_movie->Stop();
+	if (m_movie) {
+		m_movie->Stop();
+	}
 	Platform_RenderCloseMovie();
 }
 
@@ -656,6 +642,10 @@ int GRAPH_CORE::SetViewPort(float p_x1, float p_y1, float p_x2, float p_y2)
 // FUNCTION: ALIEN 0x402600
 void GRAPH_CORE::ClearScreen(COLOR p_color)
 {
+	if (GPU_RENDER::Active()) {
+		GPU_RENDER::Clear(p_color.m_value, 0x03ff);
+		return;
+	}
 	int h = (int) m_height;
 	if (m_color) {
 		unsigned int* dst = (unsigned int*) m_color;
@@ -716,6 +706,13 @@ void GRAPH_CORE::Effect(int p_effect, int p_a, int p_b, int p_duration)
 		return;
 	}
 	if (p_effect == 5) {
+		if (GPU_RENDER::Active()) {
+			GPU_GRAPH::Snapshot(this);
+			m_effectStart[10] = 0;
+			m_effectStart[9] = 0;
+			m_effectStart[3] = 0;
+			return;
+		}
 		if (!m_color) {
 			return;
 		}
@@ -747,7 +744,7 @@ void GRAPH_CORE::Effect(int p_effect, int p_a, int p_b, int p_duration)
 // STUB: ALIEN 0x402820
 int GRAPH_CORE::CopyToZBuffer(int* p_dst, int* p_src, void* p_texture)
 {
-	if (!p_dst || !p_src || !p_texture || !m_zbuffer) {
+	if (!p_dst || !p_src || !p_texture || (!m_zbuffer && !GPU_RENDER::Active())) {
 		return 0;
 	}
 
@@ -841,6 +838,10 @@ int GRAPH_CORE::CopyToZBuffer(int* p_dst, int* p_src, void* p_texture)
 	int srcY = (int) ((int64_t) srcRect.top + yBegin);
 	int width = (int) (xEnd - xBegin);
 	int height = (int) (yEnd - yBegin);
+	if (GPU_RENDER::Active()) {
+		GPU_GRAPH::CopyDepth(texture, dstX, dstY, srcX, srcY, width, height);
+		return 0;
+	}
 	RECT locked = {srcX, srcY, srcX + width, srcY + height};
 	int srcPitch = 0;
 	const unsigned char* src = (const unsigned char*) texture->Lock(&srcPitch, &locked);
@@ -936,21 +937,100 @@ inline static unsigned int BlendShadowPixel(const RENDER_STATE& p_state, unsigne
 	return 0xff000000u | (r << 16) | (g << 8) | b;
 }
 
-static void DrawShadowTriangle(
-	GRAPH_CORE* p_graph,
-	SHADOW_POINT p_a,
-	SHADOW_POINT p_b,
-	SHADOW_POINT p_c,
-	unsigned int p_color
-)
+static bool WeatherCompare(int function, unsigned int source, unsigned int destination)
+{
+	switch (function) {
+	case D3DCMP_NEVER:
+		return false;
+	case D3DCMP_LESS:
+		return source < destination;
+	case D3DCMP_EQUAL:
+		return source == destination;
+	case D3DCMP_LESSEQUAL:
+		return source <= destination;
+	case D3DCMP_GREATER:
+		return source > destination;
+	case D3DCMP_NOTEQUAL:
+		return source != destination;
+	case D3DCMP_GREATEREQUAL:
+		return source >= destination;
+	default:
+		return true;
+	}
+}
+
+static float WeatherInterpolate(float start, float delta, float time)
+{
+	volatile float product = time * delta;
+	return start + product;
+}
+
+static void DrawWeatherLine(GRAPH_CORE* graph, const unsigned char* first, const unsigned char* second)
+{
+	float a[3], b[3];
+	memcpy(a, first, sizeof(a));
+	memcpy(b, second, sizeof(b));
+	const float dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+	for (float value : {a[0], a[1], a[2], b[0], b[1], b[2], dx, dy, dz}) {
+		if (!std::isfinite(value)) {
+			return;
+		}
+	}
+	const int width = (int) graph->m_width, height = (int) graph->m_height;
+	int left = (int) std::clamp(std::floor((double) std::min(a[0], b[0])), 0.0, double(width));
+	int top = (int) std::clamp(std::floor((double) std::min(a[1], b[1])), 0.0, double(height));
+	int right = (int) std::clamp(std::ceil((double) std::max(a[0], b[0])) + 1, 0.0, double(width));
+	int bottom = (int) std::clamp(std::ceil((double) std::max(a[1], b[1])) + 1, 0.0, double(height));
+	left = std::max(left, (int) std::clamp(graph->m_viewXMin, 0.0f, float(width)));
+	top = std::max(top, (int) std::clamp(graph->m_viewYMin, 0.0f, float(height)));
+	right = std::min(right, (int) std::clamp(graph->m_viewXMax, 0.0f, float(width)));
+	bottom = std::min(bottom, (int) std::clamp(graph->m_viewYMax, 0.0f, float(height)));
+	const unsigned int ca = ReadShadowDiffuse(first), cb = ReadShadowDiffuse(second);
+	const bool horizontal = std::abs(dx) >= std::abs(dy);
+	const float extent = horizontal ? dx : dy;
+	for (int y = top; y < bottom; ++y) {
+		auto* color = static_cast<unsigned int*>(graph->m_color) + size_t(y) * graph->m_pitch;
+		auto* depth = static_cast<unsigned short*>(graph->m_zbuffer) + size_t(y) * graph->m_zpitch;
+		for (int x = left; x < right; ++x) {
+			const float time = extent == 0 ? 0 : (horizontal ? float(x) - a[0] : float(y) - a[1]) / extent;
+			if (time < 0 || time > 1 || std::abs(WeatherInterpolate(a[0], dx, time) - x) > 0.5f ||
+				std::abs(WeatherInterpolate(a[1], dy, time) - y) > 0.5f) {
+				continue;
+			}
+			unsigned int source = 0;
+			for (unsigned shift = 0; shift < 32; shift += 8) {
+				volatile float firstChannel = float((ca >> shift) & 255) * (1.0f - time);
+				volatile float secondChannel = float((cb >> shift) & 255) * time;
+				const float value = firstChannel + secondChannel;
+				source |= (unsigned int) std::clamp(value + 0.5f, 0.0f, 255.0f) << shift;
+			}
+			const auto& state = graph->m_state;
+			if (state.m_alphaTest && !WeatherCompare(state.m_alphaFunc, source >> 24, state.m_alphaRef)) {
+				continue;
+			}
+			const float z = WeatherInterpolate(a[2], dz, time);
+			const auto fixedZ = (unsigned short) std::floor(std::clamp(z * 65536.0f, 0.0f, 65535.0f) + 0.5f);
+			if (!WeatherCompare(state.m_zFunc, fixedZ, depth[x])) {
+				continue;
+			}
+			if (state.m_zWrite) {
+				depth[x] = fixedZ;
+			}
+			color[x] = BlendShadowPixel(state, source, color[x]);
+		}
+	}
+}
+
+static void DrawShadowTriangle(GRAPH_CORE* p_graph,
+							   SHADOW_POINT p_a,
+							   SHADOW_POINT p_b,
+							   SHADOW_POINT p_c,
+							   unsigned int p_color)
 {
 	if (!std::isfinite(p_a.m_x) || !std::isfinite(p_a.m_y) || !std::isfinite(p_b.m_x) || !std::isfinite(p_b.m_y) ||
 		!std::isfinite(p_c.m_x) || !std::isfinite(p_c.m_y)) {
 		return;
 	}
-
-
-
 
 	const bool depthTest =
 		GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND && p_graph->m_state.m_zFunc == D3DCMP_GREATEREQUAL;
@@ -1088,16 +1168,30 @@ static void DrawShadowTriangle(
 // FUNCTION: ALIEN 0x402a20
 int GRAPH_CORE::DrawPrimitive(int p_type, unsigned int p_fvf, void* p_verts, unsigned int p_stride, int p_count)
 {
+	if (GPU_RENDER::Active()) {
+		GPU_GRAPH::Primitive(this, p_type, p_fvf, p_verts, p_stride, p_count);
+		return 0;
+	}
 	const unsigned int shadowFvf = D3DFVF_XYZRHW | D3DFVF_DIFFUSE | D3DFVF_SPECULAR;
-	if (p_type != D3DPT_TRIANGLESTRIP || p_fvf != shadowFvf || p_stride != 0x18 || !p_verts || p_count < 3 ||
-		!m_color || m_pitch <= 0 || !std::isfinite(m_width) || !std::isfinite(m_height) || !std::isfinite(m_viewXMin) ||
-		!std::isfinite(m_viewXMax) || !std::isfinite(m_viewYMin) || !std::isfinite(m_viewYMax) || m_width <= 0.0f ||
-		m_height <= 0.0f || (double) m_width >= (double) INT_MAX || (double) m_height >= (double) INT_MAX ||
+	const bool weather = p_type == D3DPT_LINELIST && p_fvf == 0x44 && p_stride == 0x14;
+	if ((!weather && (p_type != D3DPT_TRIANGLESTRIP || p_fvf != shadowFvf || p_stride != 0x18)) || !p_verts ||
+		p_count < (weather ? 2 : 3) || p_count > 1000000 || !m_color || m_pitch <= 0 || !std::isfinite(m_width) ||
+		!std::isfinite(m_height) || !std::isfinite(m_viewXMin) || !std::isfinite(m_viewXMax) ||
+		!std::isfinite(m_viewYMin) || !std::isfinite(m_viewYMax) || m_width <= 0.0f || m_height <= 0.0f ||
+		(double) m_width >= (double) INT_MAX || (double) m_height >= (double) INT_MAX ||
 		(double) m_pitch < std::ceil((double) m_width)) {
 		return 0;
 	}
 
 	const unsigned char* bytes = (const unsigned char*) p_verts;
+	if (weather) {
+		if (m_zbuffer && m_zpitch >= m_width) {
+			for (int i = 0; i + 1 < p_count; i += 2) {
+				DrawWeatherLine(this, bytes + size_t(i) * p_stride, bytes + size_t(i + 1) * p_stride);
+			}
+		}
+		return 0;
+	}
 	unsigned int color = ReadShadowDiffuse(bytes);
 	for (int i = 0; i < p_count - 2; ++i) {
 		int ia = i;
@@ -1126,14 +1220,12 @@ void GRAPH_CORE::ReloadPalettes()
 	delete m_texE0C;
 	m_texE0C = new TEXTURE(width, height, D3DFMT_P8, 0);
 	if (!m_texE0C->m_data && ::Error) {
-		MYERROR::Error(
-			::Error,
-			"GRAPH",
-			3,
-			// STRING: ALIEN 0x483f2c
-			"Light at RelodPalette()",
-			0
-		);
+		MYERROR::Error(::Error,
+					   "GRAPH",
+					   3,
+					   // STRING: ALIEN 0x483f2c
+					   "Light at RelodPalette()",
+					   0);
 	}
 	if (m_texE0C->m_format == D3DFMT_P8) {
 		unsigned int palette[256];
@@ -1142,11 +1234,9 @@ void GRAPH_CORE::ReloadPalettes()
 		}
 		m_texE0C->SetPalette(palette);
 	}
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x483f1c
-		"ReloadPalettes"
-	);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x483f1c
+				 "ReloadPalettes");
 }
 
 // FUNCTION: ALIEN 0x402bc0
@@ -1286,8 +1376,9 @@ int GRAPH_CORE::Pause()
 	m_flags |= 1u;
 	PostTact(1);
 
-
-	if (m_movie) m_movie->Pause(SDL_GetTicks());
+	if (m_movie) {
+		m_movie->Pause(SDL_GetTicks());
+	}
 	return 0;
 }
 
@@ -1295,13 +1386,28 @@ int GRAPH_CORE::Pause()
 int GRAPH_CORE::Resume()
 {
 	m_flags &= ~1u;
-	if (m_movie) m_movie->Resume(SDL_GetTicks());
+	if (m_movie) {
+		m_movie->Resume(SDL_GetTicks());
+	}
 	return 0;
 }
 
 int GRAPH_CORE::FillRect(float p_x1, float p_y1, float p_x2, float p_y2, unsigned int p_color, unsigned int p_specular)
 {
-	if (!m_color) {
+	if (GPU_RENDER::Active()) {
+		if (!std::isfinite(p_x1) || !std::isfinite(p_y1) || !std::isfinite(p_x2) || !std::isfinite(p_y2)) {
+			return 0;
+		}
+		GPU_GRAPH::Fill(this,
+						(int) std::clamp(std::min(p_x1, p_x2), 0.0f, (float) GPU_RENDER::Width()),
+						(int) std::clamp(std::min(p_y1, p_y2), 0.0f, (float) GPU_RENDER::Height()),
+						(int) std::clamp(std::max(p_x1, p_x2), 0.0f, (float) GPU_RENDER::Width()),
+						(int) std::clamp(std::max(p_y1, p_y2), 0.0f, (float) GPU_RENDER::Height()),
+						p_color,
+						p_specular);
+		return 0;
+	}
+	if (!m_color && !GPU_RENDER::Active()) {
 		return 0;
 	}
 
@@ -1476,6 +1582,12 @@ int RGB16_gMask = 0x7e0;
 void GRAPH::PutPixel(float p_x, float p_y, COLOR p_color)
 {
 	if (p_x >= m_viewXMin && p_x < m_viewXMax && p_y >= m_viewYMin && p_y < m_viewYMax) {
+		if (GPU_RENDER::Active()) {
+			if (p_x >= 0 && p_y >= 0 && p_x < GPU_RENDER::Width() && p_y < GPU_RENDER::Height()) {
+				GPU_GRAPH::RawRect((int) p_x, (int) p_y, (int) p_x + 1, (int) p_y + 1, p_color.m_value);
+			}
+			return;
+		}
 		GRAPH_CORE* g = (GRAPH_CORE*) this;
 		if (!g->m_color) {
 			return;
@@ -1488,6 +1600,13 @@ void GRAPH::PutPixel(float p_x, float p_y, COLOR p_color)
 void GRAPH::PutBigPixel(float p_x, float p_y, COLOR p_color)
 {
 	GRAPH_CORE* g = (GRAPH_CORE*) this;
+	if (GPU_RENDER::Active()) {
+		if (p_x >= m_viewXMin && p_y >= m_viewYMin && m_viewXMax - 1.0f > p_x && m_viewYMax - 1.0f > p_y && p_x >= 0 &&
+			p_y >= 0 && p_x < GPU_RENDER::Width() - 1.0f && p_y < GPU_RENDER::Height() - 1.0f) {
+			GPU_GRAPH::RawRect((int) p_x, (int) p_y, (int) p_x + 2, (int) p_y + 2, p_color.m_value);
+		}
+		return;
+	}
 	if (!g->m_color) {
 		return;
 	}

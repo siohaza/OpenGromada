@@ -4,6 +4,8 @@
 #include "platform/platform_types.h"
 #include "util/decomp.h"
 
+#include <cstdint>
+
 class GAMMA;
 class STREAM;
 
@@ -28,6 +30,10 @@ public:
 	int SetPalette(const void* p_palette);
 
 	int BitsPerPixel() const;
+	uint32_t GpuData();
+	uint32_t GpuPalette();
+	void GpuWritten();
+	bool GpuReadback();
 
 	void* m_data;
 	int m_format;
@@ -36,6 +42,10 @@ public:
 	int m_pitch;             // row stride, in bytes
 	unsigned int* m_palette; // 256 ARGB entries
 	unsigned int m_flags;
+	uint32_t m_gpuData = 0;
+	uint64_t m_gpuGeneration = 0;
+	bool m_gpuWritten = false;
+	bool m_gpuCpuDirty = true;
 };
 
 extern int TextureMemoryInUse;

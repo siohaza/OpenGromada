@@ -17,6 +17,8 @@
 
 #include "game/game_descriptor.h"
 #include "gfx/gamma.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "util/myerror.h"
@@ -109,6 +111,11 @@ TEXTURE::TEXTURE(int p_width, int p_height, int p_format, unsigned int p_flags, 
 // FUNCTION: ALIEN 0x403620
 TEXTURE::~TEXTURE()
 {
+	if (m_gpuData && m_gpuGeneration == GPU_RENDER::Generation()) {
+		GPU_RENDER::Release(m_gpuData);
+	}
+	GPU_RENDER::Forget(this);
+	GPU_RENDER::Forget(&m_palette);
 	if (m_data) {
 		TextureMemoryInUse -= m_width * m_height * ((m_format != D3DFMT_P8) + 1);
 		free(m_data);
@@ -131,27 +138,23 @@ void TEXTURE::Create(int p_width, int p_height, int p_format, unsigned int p_fla
 
 	if (p_width > g_textureMaxWidth || p_width <= 0) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"TEXTURE",
-				4,
-				// STRING: ALIEN 0x47f410
-				"initial sizeX",
-				p_width
-			);
+			MYERROR::Error(::Error,
+						   "TEXTURE",
+						   4,
+						   // STRING: ALIEN 0x47f410
+						   "initial sizeX",
+						   p_width);
 		}
 		return;
 	}
 	if (p_height > g_textureMaxHeight || p_height <= 0) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"TEXTURE",
-				4,
-				// STRING: ALIEN 0x47f420
-				"initial sizeY",
-				p_height
-			);
+			MYERROR::Error(::Error,
+						   "TEXTURE",
+						   4,
+						   // STRING: ALIEN 0x47f420
+						   "initial sizeY",
+						   p_height);
 		}
 		return;
 	}
@@ -182,6 +185,35 @@ void TEXTURE::Create(int p_width, int p_height, int p_format, unsigned int p_fla
 // FUNCTION: ALIEN 0x403970
 int TEXTURE::CopyFromScreen(const RECT* p_rect, const POINT* p_point)
 {
+	if (GPU_RENDER::Active()) {
+		if (!p_rect || !p_point || !m_data || p_point->x < 0 || p_point->y < 0 || p_rect->left < 0 || p_rect->top < 0 ||
+			(m_format != D3DFMT_A8R8G8B8 && m_format != D3DFMT_X8R8G8B8 && m_format != D3DFMT_R5G6B5)) {
+			return 1;
+		}
+		int width = std::min(
+			{int(p_rect->right - p_rect->left), m_width - int(p_point->x), GPU_RENDER::Width() - int(p_rect->left)});
+		int height = std::min(
+			{int(p_rect->bottom - p_rect->top), m_height - int(p_point->y), GPU_RENDER::Height() - int(p_rect->top)});
+		if (width <= 0 || height <= 0) {
+			return 1;
+		}
+		GPU_RENDER::Command command;
+		command.op = GPU_TEXTURE::CopyColor;
+		command.left = p_point->x;
+		command.top = p_point->y;
+		command.right = command.left + width;
+		command.bottom = command.top + height;
+		command.p[GPU_TEXTURE::Source] = GPU_RENDER::Color();
+		command.p[GPU_TEXTURE::Destination] = GpuData();
+		command.p[GPU_TEXTURE::Pitch] = m_width;
+		command.p[GPU_TEXTURE::SourceWidth] = GPU_RENDER::Width();
+		command.p[GPU_TEXTURE::SourceLeft] = p_rect->left;
+		command.p[GPU_TEXTURE::SourceTop] = p_rect->top;
+		command.p[GPU_TEXTURE::Format] = m_format;
+		GPU_RENDER::Submit(command, true);
+		GpuWritten();
+		return 0;
+	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	if (!m_data || !graph->m_color) {
 		return 1;
@@ -234,6 +266,11 @@ int TEXTURE::CopyFromScreen(const RECT* p_rect, const POINT* p_point)
 // FUNCTION: ALIEN 0x403a40
 void* TEXTURE::Lock(int* p_pitch, const RECT* p_rect)
 {
+	if (GPU_RENDER::Active() && !GpuReadback()) {
+		return nullptr;
+	}
+	m_gpuWritten = false;
+	m_gpuCpuDirty = true;
 	if (p_pitch) {
 		*p_pitch = m_pitch;
 	}
@@ -267,29 +304,25 @@ inline static unsigned int Expand565(unsigned int p_v)
 	return 0xff000000u | (Expand5(p_v >> 11) << 16) | (Expand6((p_v >> 5) & 0x3f) << 8) | Expand5(p_v & 0x1f);
 }
 
-inline static unsigned int ModulateChannel(
-	unsigned int p_channel,
-	unsigned int p_multiplier,
-	unsigned int p_specular,
-	int p_shift
-)
+inline static unsigned int ModulateChannel(unsigned int p_channel,
+										   unsigned int p_multiplier,
+										   unsigned int p_specular,
+										   int p_shift)
 {
 	unsigned int result = (p_channel * p_multiplier >> p_shift) + p_specular;
 	return result > 255 ? 255 : result;
 }
 
-static void OpaqueRgb565PointRowScalar(
-	const unsigned short* p_src,
-	unsigned int* p_dst,
-	int p_count,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_sr,
-	unsigned int p_sg,
-	unsigned int p_sb,
-	int p_shift
-)
+static void OpaqueRgb565PointRowScalar(const unsigned short* p_src,
+									   unsigned int* p_dst,
+									   int p_count,
+									   unsigned int p_dr,
+									   unsigned int p_dg,
+									   unsigned int p_db,
+									   unsigned int p_sr,
+									   unsigned int p_sg,
+									   unsigned int p_sb,
+									   int p_shift)
 {
 	for (int i = 0; i < p_count; ++i) {
 		unsigned int texel = Expand565(p_src[i]);
@@ -310,17 +343,15 @@ inline static __m128i Clamp255U16Sse2(__m128i p_value)
 }
 
 template <int Shift>
-static void OpaqueRgb565PointRowSse2(
-	const unsigned short* p_src,
-	unsigned int* p_dst,
-	int p_count,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_sr,
-	unsigned int p_sg,
-	unsigned int p_sb
-)
+static void OpaqueRgb565PointRowSse2(const unsigned short* p_src,
+									 unsigned int* p_dst,
+									 int p_count,
+									 unsigned int p_dr,
+									 unsigned int p_dg,
+									 unsigned int p_db,
+									 unsigned int p_sr,
+									 unsigned int p_sg,
+									 unsigned int p_sb)
 {
 	const __m128i zero = _mm_setzero_si128();
 	const __m128i mask5 = _mm_set1_epi16(0x1f);
@@ -347,18 +378,12 @@ static void OpaqueRgb565PointRowSse2(
 
 		__m128i out0 = _mm_or_si128(
 			alpha,
-			_mm_or_si128(
-				_mm_slli_epi32(_mm_unpacklo_epi16(r, zero), 16),
-				_mm_or_si128(_mm_slli_epi32(_mm_unpacklo_epi16(g, zero), 8), _mm_unpacklo_epi16(b, zero))
-			)
-		);
+			_mm_or_si128(_mm_slli_epi32(_mm_unpacklo_epi16(r, zero), 16),
+						 _mm_or_si128(_mm_slli_epi32(_mm_unpacklo_epi16(g, zero), 8), _mm_unpacklo_epi16(b, zero))));
 		__m128i out1 = _mm_or_si128(
 			alpha,
-			_mm_or_si128(
-				_mm_slli_epi32(_mm_unpackhi_epi16(r, zero), 16),
-				_mm_or_si128(_mm_slli_epi32(_mm_unpackhi_epi16(g, zero), 8), _mm_unpackhi_epi16(b, zero))
-			)
-		);
+			_mm_or_si128(_mm_slli_epi32(_mm_unpackhi_epi16(r, zero), 16),
+						 _mm_or_si128(_mm_slli_epi32(_mm_unpackhi_epi16(g, zero), 8), _mm_unpackhi_epi16(b, zero))));
 		_mm_storeu_si128((__m128i*) (p_dst + i), out0);
 		_mm_storeu_si128((__m128i*) (p_dst + i + 4), out1);
 	}
@@ -368,17 +393,15 @@ static void OpaqueRgb565PointRowSse2(
 #elif defined(ALIEN_TEXTURE_NEON)
 
 template <int Shift>
-static void OpaqueRgb565PointRowNeon(
-	const unsigned short* p_src,
-	unsigned int* p_dst,
-	int p_count,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_sr,
-	unsigned int p_sg,
-	unsigned int p_sb
-)
+static void OpaqueRgb565PointRowNeon(const unsigned short* p_src,
+									 unsigned int* p_dst,
+									 int p_count,
+									 unsigned int p_dr,
+									 unsigned int p_dg,
+									 unsigned int p_db,
+									 unsigned int p_sr,
+									 unsigned int p_sg,
+									 unsigned int p_sb)
 {
 	const uint16x8_t mask5 = vdupq_n_u16(0x1f);
 	const uint16x8_t mask6 = vdupq_n_u16(0x3f);
@@ -403,20 +426,14 @@ static void OpaqueRgb565PointRowNeon(
 		g = vminq_u16(vaddq_u16(vshrq_n_u16(vmulq_u16(g, mg), Shift), sg), maximum);
 		b = vminq_u16(vaddq_u16(vshrq_n_u16(vmulq_u16(b, mb), Shift), sb), maximum);
 
-		uint32x4_t out0 = vorrq_u32(
-			alpha,
-			vorrq_u32(
-				vshlq_n_u32(vmovl_u16(vget_low_u16(r)), 16),
-				vorrq_u32(vshlq_n_u32(vmovl_u16(vget_low_u16(g)), 8), vmovl_u16(vget_low_u16(b)))
-			)
-		);
-		uint32x4_t out1 = vorrq_u32(
-			alpha,
-			vorrq_u32(
-				vshlq_n_u32(vmovl_u16(vget_high_u16(r)), 16),
-				vorrq_u32(vshlq_n_u32(vmovl_u16(vget_high_u16(g)), 8), vmovl_u16(vget_high_u16(b)))
-			)
-		);
+		uint32x4_t out0 =
+			vorrq_u32(alpha,
+					  vorrq_u32(vshlq_n_u32(vmovl_u16(vget_low_u16(r)), 16),
+								vorrq_u32(vshlq_n_u32(vmovl_u16(vget_low_u16(g)), 8), vmovl_u16(vget_low_u16(b)))));
+		uint32x4_t out1 =
+			vorrq_u32(alpha,
+					  vorrq_u32(vshlq_n_u32(vmovl_u16(vget_high_u16(r)), 16),
+								vorrq_u32(vshlq_n_u32(vmovl_u16(vget_high_u16(g)), 8), vmovl_u16(vget_high_u16(b)))));
 		vst1q_u32(p_dst + i, out0);
 		vst1q_u32(p_dst + i + 4, out1);
 	}
@@ -425,18 +442,16 @@ static void OpaqueRgb565PointRowNeon(
 
 #endif
 
-static void OpaqueRgb565PointRow(
-	const unsigned short* p_src,
-	unsigned int* p_dst,
-	int p_count,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_sr,
-	unsigned int p_sg,
-	unsigned int p_sb,
-	int p_shift
-)
+static void OpaqueRgb565PointRow(const unsigned short* p_src,
+								 unsigned int* p_dst,
+								 int p_count,
+								 unsigned int p_dr,
+								 unsigned int p_dg,
+								 unsigned int p_db,
+								 unsigned int p_sr,
+								 unsigned int p_sg,
+								 unsigned int p_sb,
+								 int p_shift)
 {
 #if defined(ALIEN_TEXTURE_SSE2)
 	if (p_shift == 7) {
@@ -507,8 +522,8 @@ static unsigned int SampleBilinear(const TEXTURE* p_tex, int p_u, int p_v)
 {
 	int x0 = p_u >> 16;
 	int y0 = p_v >> 16;
-	int x1 = x0 + 1;
-	int y1 = y0 + 1;
+	int x1 = std::max(0, x0 + 1);
+	int y1 = std::max(0, y0 + 1);
 	unsigned int fx = (unsigned int) ((p_u >> 8) & 0xff);
 	unsigned int fy = (unsigned int) ((p_v >> 8) & 0xff);
 
@@ -553,8 +568,8 @@ static unsigned int SampleLightBilinear(const TEXTURE* p_tex, int p_u, int p_v)
 {
 	int x0 = p_u >> 16;
 	int y0 = p_v >> 16;
-	int x1 = x0 + 1;
-	int y1 = y0 + 1;
+	int x1 = std::max(0, x0 + 1);
+	int y1 = std::max(0, y0 + 1);
 	unsigned int fx = (unsigned int) ((p_u >> 8) & 0xff);
 	unsigned int fy = (unsigned int) ((p_v >> 8) & 0xff);
 	if (x0 < 0) {
@@ -581,26 +596,22 @@ static unsigned int SampleLightBilinear(const TEXTURE* p_tex, int p_u, int p_v)
 	return LerpArgb(top, bottom, fy);
 }
 
-inline static unsigned int LightDestColorOneChannel(
-	unsigned int p_src,
-	unsigned int p_dst,
-	unsigned int p_multiplier,
-	int p_shift
-)
+inline static unsigned int LightDestColorOneChannel(unsigned int p_src,
+													unsigned int p_dst,
+													unsigned int p_multiplier,
+													int p_shift)
 {
 	p_src = ModulateChannel(p_src, p_multiplier, 0, p_shift);
 	unsigned int result = p_dst * (p_src + 255) / 255;
 	return result > 255 ? 255 : result;
 }
 
-inline static unsigned int LightDestColorOnePixel(
-	unsigned int p_texel,
-	unsigned int p_dst,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	int p_shift
-)
+inline static unsigned int LightDestColorOnePixel(unsigned int p_texel,
+												  unsigned int p_dst,
+												  unsigned int p_dr,
+												  unsigned int p_dg,
+												  unsigned int p_db,
+												  int p_shift)
 {
 	unsigned int r = LightDestColorOneChannel((p_texel >> 16) & 0xff, (p_dst >> 16) & 0xff, p_dr + 1, p_shift);
 	unsigned int g = LightDestColorOneChannel((p_texel >> 8) & 0xff, (p_dst >> 8) & 0xff, p_dg + 1, p_shift);
@@ -617,18 +628,16 @@ struct LIGHT_SAMPLE_BLOCK {
 };
 
 template <int Format>
-static void FillLightSampleBlock(
-	const TEXTURE* p_tex,
-	int p_u,
-	int p_stepU,
-	int p_y0,
-	int p_y1,
-	LIGHT_SAMPLE_BLOCK* p_block
-)
+static void FillLightSampleBlock(const TEXTURE* p_tex,
+								 int p_u,
+								 int p_stepU,
+								 int p_y0,
+								 int p_y1,
+								 LIGHT_SAMPLE_BLOCK* p_block)
 {
 	for (int lane = 0; lane < 4; ++lane, p_u += p_stepU) {
 		int x0 = p_u >> 16;
-		int x1 = x0 + 1;
+		int x1 = std::max(0, x0 + 1);
 		p_block->m_fx[lane] = (unsigned int) ((p_u >> 8) & 0xff);
 		if (x0 < 0) {
 			x0 = 0;
@@ -646,14 +655,12 @@ static void FillLightSampleBlock(
 	}
 }
 
-static void FillRgb565LightSampleBlock(
-	const TEXTURE* p_tex,
-	int p_u,
-	int p_stepU,
-	int p_y0,
-	int p_y1,
-	LIGHT_SAMPLE_BLOCK* p_block
-)
+static void FillRgb565LightSampleBlock(const TEXTURE* p_tex,
+									   int p_u,
+									   int p_stepU,
+									   int p_y0,
+									   int p_y1,
+									   LIGHT_SAMPLE_BLOCK* p_block)
 {
 	const unsigned short* top =
 		(const unsigned short*) ((const unsigned char*) p_tex->m_data + (size_t) p_y0 * p_tex->m_pitch);
@@ -661,7 +668,7 @@ static void FillRgb565LightSampleBlock(
 		(const unsigned short*) ((const unsigned char*) p_tex->m_data + (size_t) p_y1 * p_tex->m_pitch);
 	for (int lane = 0; lane < 4; ++lane, p_u += p_stepU) {
 		int x0 = p_u >> 16;
-		int x1 = x0 + 1;
+		int x1 = std::max(0, x0 + 1);
 		p_block->m_fx[lane] = (unsigned int) ((p_u >> 8) & 0xff);
 		if (x0 < 0) {
 			x0 = 0;
@@ -708,33 +715,27 @@ inline static __m128i ExpandRgb565ChannelSse2(__m128i p_value, int p_shift, int 
 	return _mm_or_si128(_mm_slli_epi32(component, p_left), _mm_srli_epi32(component, p_right));
 }
 
-inline static __m128i Rgb565LightChannelSse2(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	int p_shift,
-	int p_mask,
-	int p_left,
-	int p_right,
-	__m128i p_fy
-)
+inline static __m128i Rgb565LightChannelSse2(const LIGHT_SAMPLE_BLOCK& p_block,
+											 int p_shift,
+											 int p_mask,
+											 int p_left,
+											 int p_right,
+											 __m128i p_fy)
 {
 	__m128i tl =
 		ExpandRgb565ChannelSse2(_mm_load_si128((const __m128i*) p_block.m_topLeft), p_shift, p_mask, p_left, p_right);
 	__m128i tr =
 		ExpandRgb565ChannelSse2(_mm_load_si128((const __m128i*) p_block.m_topRight), p_shift, p_mask, p_left, p_right);
-	__m128i bl = ExpandRgb565ChannelSse2(
-		_mm_load_si128((const __m128i*) p_block.m_bottomLeft),
-		p_shift,
-		p_mask,
-		p_left,
-		p_right
-	);
-	__m128i br = ExpandRgb565ChannelSse2(
-		_mm_load_si128((const __m128i*) p_block.m_bottomRight),
-		p_shift,
-		p_mask,
-		p_left,
-		p_right
-	);
+	__m128i bl = ExpandRgb565ChannelSse2(_mm_load_si128((const __m128i*) p_block.m_bottomLeft),
+										 p_shift,
+										 p_mask,
+										 p_left,
+										 p_right);
+	__m128i br = ExpandRgb565ChannelSse2(_mm_load_si128((const __m128i*) p_block.m_bottomRight),
+										 p_shift,
+										 p_mask,
+										 p_left,
+										 p_right);
 	__m128i fx = _mm_load_si128((const __m128i*) p_block.m_fx);
 	__m128i top = _mm_add_epi32(tl, _mm_srai_epi32(MulLerpSse2(_mm_sub_epi32(tr, tl), fx), 8));
 	__m128i bottom = _mm_add_epi32(bl, _mm_srai_epi32(MulLerpSse2(_mm_sub_epi32(br, bl), fx), 8));
@@ -750,8 +751,7 @@ template <int Shift>
 inline static __m128i ModulateLightSse2(__m128i p_value, unsigned int p_multiplier)
 {
 	return Clamp255U16Sse2(
-		_mm_srli_epi16(_mm_mullo_epi16(PackChannelU16Sse2(p_value), _mm_set1_epi16((short) p_multiplier)), Shift)
-	);
+		_mm_srli_epi16(_mm_mullo_epi16(PackChannelU16Sse2(p_value), _mm_set1_epi16((short) p_multiplier)), Shift));
 }
 
 inline static __m128i BlendLightSse2(__m128i p_src, __m128i p_dst)
@@ -763,14 +763,12 @@ inline static __m128i BlendLightSse2(__m128i p_src, __m128i p_dst)
 }
 
 template <int Shift>
-static void LightBlockSse2(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	unsigned int* p_dst,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_fy
-)
+static void LightBlockSse2(const LIGHT_SAMPLE_BLOCK& p_block,
+						   unsigned int* p_dst,
+						   unsigned int p_dr,
+						   unsigned int p_dg,
+						   unsigned int p_db,
+						   unsigned int p_fy)
 {
 	__m128i fy = _mm_set1_epi32((int) p_fy);
 	const __m128i zero = _mm_setzero_si128();
@@ -784,22 +782,18 @@ static void LightBlockSse2(
 	__m128i outR = _mm_unpacklo_epi16(BlendLightSse2(srcR, dstR), zero);
 	__m128i outG = _mm_unpacklo_epi16(BlendLightSse2(srcG, dstG), zero);
 	__m128i outB = _mm_unpacklo_epi16(BlendLightSse2(srcB, dstB), zero);
-	__m128i out = _mm_or_si128(
-		_mm_set1_epi32((int) 0xff000000u),
-		_mm_or_si128(_mm_slli_epi32(outR, 16), _mm_or_si128(_mm_slli_epi32(outG, 8), outB))
-	);
+	__m128i out = _mm_or_si128(_mm_set1_epi32((int) 0xff000000u),
+							   _mm_or_si128(_mm_slli_epi32(outR, 16), _mm_or_si128(_mm_slli_epi32(outG, 8), outB)));
 	_mm_storeu_si128((__m128i*) p_dst, out);
 }
 
 template <int Shift>
-static void Rgb565LightBlockSse2(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	unsigned int* p_dst,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_fy
-)
+static void Rgb565LightBlockSse2(const LIGHT_SAMPLE_BLOCK& p_block,
+								 unsigned int* p_dst,
+								 unsigned int p_dr,
+								 unsigned int p_dg,
+								 unsigned int p_db,
+								 unsigned int p_fy)
 {
 	__m128i fy = _mm_set1_epi32((int) p_fy);
 	const __m128i zero = _mm_setzero_si128();
@@ -813,10 +807,8 @@ static void Rgb565LightBlockSse2(
 	__m128i outR = _mm_unpacklo_epi16(BlendLightSse2(srcR, dstR), zero);
 	__m128i outG = _mm_unpacklo_epi16(BlendLightSse2(srcG, dstG), zero);
 	__m128i outB = _mm_unpacklo_epi16(BlendLightSse2(srcB, dstB), zero);
-	__m128i out = _mm_or_si128(
-		_mm_set1_epi32((int) 0xff000000u),
-		_mm_or_si128(_mm_slli_epi32(outR, 16), _mm_or_si128(_mm_slli_epi32(outG, 8), outB))
-	);
+	__m128i out = _mm_or_si128(_mm_set1_epi32((int) 0xff000000u),
+							   _mm_or_si128(_mm_slli_epi32(outR, 16), _mm_or_si128(_mm_slli_epi32(outG, 8), outB)));
 	_mm_storeu_si128((__m128i*) p_dst, out);
 }
 
@@ -830,51 +822,43 @@ inline static uint32x4_t LightChannelNeon(const LIGHT_SAMPLE_BLOCK& p_block, int
 	uint32x4_t bl = vandq_u32(vshlq_u32(vld1q_u32(p_block.m_bottomLeft), vdupq_n_s32(-p_shift)), mask);
 	uint32x4_t br = vandq_u32(vshlq_u32(vld1q_u32(p_block.m_bottomRight), vdupq_n_s32(-p_shift)), mask);
 	int32x4_t fx = vreinterpretq_s32_u32(vld1q_u32(p_block.m_fx));
-	int32x4_t top = vaddq_s32(
-		vreinterpretq_s32_u32(tl),
-		vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(tr), vreinterpretq_s32_u32(tl)), fx), 8)
-	);
-	int32x4_t bottom = vaddq_s32(
-		vreinterpretq_s32_u32(bl),
-		vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(br), vreinterpretq_s32_u32(bl)), fx), 8)
-	);
+	int32x4_t top =
+		vaddq_s32(vreinterpretq_s32_u32(tl),
+				  vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(tr), vreinterpretq_s32_u32(tl)), fx), 8));
+	int32x4_t bottom =
+		vaddq_s32(vreinterpretq_s32_u32(bl),
+				  vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(br), vreinterpretq_s32_u32(bl)), fx), 8));
 	return vreinterpretq_u32_s32(vaddq_s32(top, vshrq_n_s32(vmulq_s32(vsubq_s32(bottom, top), p_fy), 8)));
 }
 
-inline static uint32x4_t ExpandRgb565ChannelNeon(
-	uint32x4_t p_value,
-	int p_shift,
-	unsigned int p_mask,
-	int p_left,
-	int p_right
-)
+inline static uint32x4_t ExpandRgb565ChannelNeon(uint32x4_t p_value,
+												 int p_shift,
+												 unsigned int p_mask,
+												 int p_left,
+												 int p_right)
 {
 	uint32x4_t component = vandq_u32(vshlq_u32(p_value, vdupq_n_s32(-p_shift)), vdupq_n_u32(p_mask));
 	return vorrq_u32(vshlq_u32(component, vdupq_n_s32(p_left)), vshlq_u32(component, vdupq_n_s32(-p_right)));
 }
 
-inline static uint32x4_t Rgb565LightChannelNeon(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	int p_shift,
-	unsigned int p_mask,
-	int p_left,
-	int p_right,
-	int32x4_t p_fy
-)
+inline static uint32x4_t Rgb565LightChannelNeon(const LIGHT_SAMPLE_BLOCK& p_block,
+												int p_shift,
+												unsigned int p_mask,
+												int p_left,
+												int p_right,
+												int32x4_t p_fy)
 {
 	uint32x4_t tl = ExpandRgb565ChannelNeon(vld1q_u32(p_block.m_topLeft), p_shift, p_mask, p_left, p_right);
 	uint32x4_t tr = ExpandRgb565ChannelNeon(vld1q_u32(p_block.m_topRight), p_shift, p_mask, p_left, p_right);
 	uint32x4_t bl = ExpandRgb565ChannelNeon(vld1q_u32(p_block.m_bottomLeft), p_shift, p_mask, p_left, p_right);
 	uint32x4_t br = ExpandRgb565ChannelNeon(vld1q_u32(p_block.m_bottomRight), p_shift, p_mask, p_left, p_right);
 	int32x4_t fx = vreinterpretq_s32_u32(vld1q_u32(p_block.m_fx));
-	int32x4_t top = vaddq_s32(
-		vreinterpretq_s32_u32(tl),
-		vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(tr), vreinterpretq_s32_u32(tl)), fx), 8)
-	);
-	int32x4_t bottom = vaddq_s32(
-		vreinterpretq_s32_u32(bl),
-		vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(br), vreinterpretq_s32_u32(bl)), fx), 8)
-	);
+	int32x4_t top =
+		vaddq_s32(vreinterpretq_s32_u32(tl),
+				  vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(tr), vreinterpretq_s32_u32(tl)), fx), 8));
+	int32x4_t bottom =
+		vaddq_s32(vreinterpretq_s32_u32(bl),
+				  vshrq_n_s32(vmulq_s32(vsubq_s32(vreinterpretq_s32_u32(br), vreinterpretq_s32_u32(bl)), fx), 8));
 	return vreinterpretq_u32_s32(vaddq_s32(top, vshrq_n_s32(vmulq_s32(vsubq_s32(bottom, top), p_fy), 8)));
 }
 
@@ -894,14 +878,12 @@ inline static uint16x4_t BlendLightNeon(uint16x4_t p_src, uint16x4_t p_dst)
 }
 
 template <int Shift>
-static void LightBlockNeon(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	unsigned int* p_dst,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_fy
-)
+static void LightBlockNeon(const LIGHT_SAMPLE_BLOCK& p_block,
+						   unsigned int* p_dst,
+						   unsigned int p_dr,
+						   unsigned int p_dg,
+						   unsigned int p_db,
+						   unsigned int p_fy)
 {
 	int32x4_t fy = vdupq_n_s32((int) p_fy);
 	uint32x4_t dst = vld1q_u32(p_dst);
@@ -920,14 +902,12 @@ static void LightBlockNeon(
 }
 
 template <int Shift>
-static void Rgb565LightBlockNeon(
-	const LIGHT_SAMPLE_BLOCK& p_block,
-	unsigned int* p_dst,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_fy
-)
+static void Rgb565LightBlockNeon(const LIGHT_SAMPLE_BLOCK& p_block,
+								 unsigned int* p_dst,
+								 unsigned int p_dr,
+								 unsigned int p_dg,
+								 unsigned int p_db,
+								 unsigned int p_fy)
 {
 	int32x4_t fy = vdupq_n_s32((int) p_fy);
 	uint32x4_t dst = vld1q_u32(p_dst);
@@ -948,30 +928,28 @@ static void Rgb565LightBlockNeon(
 #endif
 
 template <int Format, int Shift>
-static void BlitLightDestColorOne(
-	const TEXTURE* p_tex,
-	GRAPH_CORE* p_graph,
-	int p_dstL,
-	int p_dstT,
-	int p_srcL,
-	int p_srcT,
-	int p_clipL,
-	int p_clipT,
-	int p_clipR,
-	int p_clipB,
-	int p_stepU,
-	int p_stepV,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db
-)
+static void BlitLightDestColorOne(const TEXTURE* p_tex,
+								  GRAPH_CORE* p_graph,
+								  int p_dstL,
+								  int p_dstT,
+								  int p_srcL,
+								  int p_srcT,
+								  int p_clipL,
+								  int p_clipT,
+								  int p_clipR,
+								  int p_clipB,
+								  int p_stepU,
+								  int p_stepV,
+								  unsigned int p_dr,
+								  unsigned int p_dg,
+								  unsigned int p_db)
 {
 	for (int y = p_clipT; y < p_clipB; ++y) {
 		int v = (int) (((long long) (y - p_dstT) * 2 + 1) * p_stepV / 2) + (p_srcT << 16) - 0x8000;
 		int u = (int) (((long long) (p_clipL - p_dstL) * 2 + 1) * p_stepU / 2) + (p_srcL << 16) - 0x8000;
 		unsigned int fy = (unsigned int) ((v >> 8) & 0xff);
 		int y0 = v >> 16;
-		int y1 = y0 + 1;
+		int y1 = std::max(0, y0 + 1);
 		if (y0 < 0) {
 			y0 = 0;
 		}
@@ -1017,77 +995,69 @@ static void BlitLightDestColorOne(
 }
 
 template <int Format>
-static void DispatchLightDestColorOne(
-	const TEXTURE* p_tex,
-	GRAPH_CORE* p_graph,
-	int p_dstL,
-	int p_dstT,
-	int p_srcL,
-	int p_srcT,
-	int p_clipL,
-	int p_clipT,
-	int p_clipR,
-	int p_clipB,
-	int p_stepU,
-	int p_stepV,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	int p_shift
-)
+static void DispatchLightDestColorOne(const TEXTURE* p_tex,
+									  GRAPH_CORE* p_graph,
+									  int p_dstL,
+									  int p_dstT,
+									  int p_srcL,
+									  int p_srcT,
+									  int p_clipL,
+									  int p_clipT,
+									  int p_clipR,
+									  int p_clipB,
+									  int p_stepU,
+									  int p_stepV,
+									  unsigned int p_dr,
+									  unsigned int p_dg,
+									  unsigned int p_db,
+									  int p_shift)
 {
 	if (p_shift == 7) {
-		BlitLightDestColorOne<Format, 7>(
-			p_tex,
-			p_graph,
-			p_dstL,
-			p_dstT,
-			p_srcL,
-			p_srcT,
-			p_clipL,
-			p_clipT,
-			p_clipR,
-			p_clipB,
-			p_stepU,
-			p_stepV,
-			p_dr,
-			p_dg,
-			p_db
-		);
+		BlitLightDestColorOne<Format, 7>(p_tex,
+										 p_graph,
+										 p_dstL,
+										 p_dstT,
+										 p_srcL,
+										 p_srcT,
+										 p_clipL,
+										 p_clipT,
+										 p_clipR,
+										 p_clipB,
+										 p_stepU,
+										 p_stepV,
+										 p_dr,
+										 p_dg,
+										 p_db);
 	}
 	else {
-		BlitLightDestColorOne<Format, 8>(
-			p_tex,
-			p_graph,
-			p_dstL,
-			p_dstT,
-			p_srcL,
-			p_srcT,
-			p_clipL,
-			p_clipT,
-			p_clipR,
-			p_clipB,
-			p_stepU,
-			p_stepV,
-			p_dr,
-			p_dg,
-			p_db
-		);
+		BlitLightDestColorOne<Format, 8>(p_tex,
+										 p_graph,
+										 p_dstL,
+										 p_dstT,
+										 p_srcL,
+										 p_srcT,
+										 p_clipL,
+										 p_clipT,
+										 p_clipR,
+										 p_clipB,
+										 p_stepU,
+										 p_stepV,
+										 p_dr,
+										 p_dg,
+										 p_db);
 	}
 }
 
-static void Argb4444AlphaBlendRow(
-	const unsigned short* p_src,
-	unsigned int* p_out,
-	int p_count,
-	int p_u0,
-	int p_stepU,
-	unsigned int p_dr,
-	unsigned int p_dg,
-	unsigned int p_db,
-	unsigned int p_da,
-	int p_shift
-)
+static void Argb4444AlphaBlendRow(const unsigned short* p_src,
+								  unsigned int* p_out,
+								  int p_count,
+								  int p_u0,
+								  int p_stepU,
+								  unsigned int p_dr,
+								  unsigned int p_dg,
+								  unsigned int p_db,
+								  unsigned int p_da,
+								  int p_shift)
 {
 	int u = p_u0;
 	for (int i = 0; i < p_count; ++i, u += p_stepU) {
@@ -1117,16 +1087,18 @@ static void Argb4444AlphaBlendRow(
 	}
 }
 
-static void BlitQuad(
-	TEXTURE* p_tex,
-	const int* p_dst,
-	const int* p_src,
-	const GAMMA* p_gamma,
-	bool p_depthTest = false,
-	double p_depthTop = 0,
-	double p_depthBottom = 0
-)
+static void BlitQuad(TEXTURE* p_tex,
+					 const int* p_dst,
+					 const int* p_src,
+					 const GAMMA* p_gamma,
+					 bool p_depthTest = false,
+					 double p_depthTop = 0,
+					 double p_depthBottom = 0)
 {
+	if (GPU_RENDER::Active()) {
+		GPU_TEXTURE::Draw(p_tex, p_dst, p_src, p_gamma, p_depthTest, p_depthTop, p_depthBottom);
+		return;
+	}
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	if (!p_tex->m_data || !graph->m_color) {
 		return;
@@ -1165,12 +1137,18 @@ static void BlitQuad(
 	int clipR = dstR > (int) graph->m_viewXMax ? (int) graph->m_viewXMax : dstR;
 	int clipB = dstB > (int) graph->m_viewYMax ? (int) graph->m_viewYMax : dstB;
 
-
-
-	if (clipL < 0) clipL = 0;
-	if (clipT < 0) clipT = 0;
-	if (clipR > (int) graph->m_width) clipR = (int) graph->m_width;
-	if (clipB > (int) graph->m_height) clipB = (int) graph->m_height;
+	if (clipL < 0) {
+		clipL = 0;
+	}
+	if (clipT < 0) {
+		clipT = 0;
+	}
+	if (clipR > (int) graph->m_width) {
+		clipR = (int) graph->m_width;
+	}
+	if (clipB > (int) graph->m_height) {
+		clipB = (int) graph->m_height;
+	}
 	if (clipL >= clipR || clipT >= clipB) {
 		return;
 	}
@@ -1213,45 +1191,41 @@ static void BlitQuad(
 	if (!p_depthTest && bilinear && blend && srcBlend == D3DBLEND_DESTCOLOR && dstBlend == D3DBLEND_ONE && sr == 0 &&
 		sg == 0 && sb == 0) {
 		if (p_tex->m_format == D3DFMT_P8) {
-			DispatchLightDestColorOne<D3DFMT_P8>(
-				p_tex,
-				graph,
-				dstL,
-				dstT,
-				srcL,
-				srcT,
-				clipL,
-				clipT,
-				clipR,
-				clipB,
-				stepU,
-				stepV,
-				dr,
-				dg,
-				db,
-				modulateShift
-			);
+			DispatchLightDestColorOne<D3DFMT_P8>(p_tex,
+												 graph,
+												 dstL,
+												 dstT,
+												 srcL,
+												 srcT,
+												 clipL,
+												 clipT,
+												 clipR,
+												 clipB,
+												 stepU,
+												 stepV,
+												 dr,
+												 dg,
+												 db,
+												 modulateShift);
 			return;
 		}
 		if (p_tex->m_format == D3DFMT_R5G6B5) {
-			DispatchLightDestColorOne<D3DFMT_R5G6B5>(
-				p_tex,
-				graph,
-				dstL,
-				dstT,
-				srcL,
-				srcT,
-				clipL,
-				clipT,
-				clipR,
-				clipB,
-				stepU,
-				stepV,
-				dr,
-				dg,
-				db,
-				modulateShift
-			);
+			DispatchLightDestColorOne<D3DFMT_R5G6B5>(p_tex,
+													 graph,
+													 dstL,
+													 dstT,
+													 srcL,
+													 srcT,
+													 clipL,
+													 clipT,
+													 clipR,
+													 clipB,
+													 stepU,
+													 stepV,
+													 dr,
+													 dg,
+													 db,
+													 modulateShift);
 			return;
 		}
 	}
@@ -1281,10 +1255,7 @@ static void BlitQuad(
 
 	for (int y = clipT; y < clipB; ++y) {
 
-
-
-		const double rowDepth = p_depthTop + (p_depthBottom - p_depthTop) *
-			((double) y - dstT) / dstH;
+		const double rowDepth = p_depthTop + (p_depthBottom - p_depthTop) * ((double) y - dstT) / dstH;
 		const unsigned short fixedDepth = (unsigned short) std::lround(std::clamp(rowDepth, 0.0, 65535.0));
 		int v = (int) (((long long) (y - dstT) * 2 + 1) * stepV / 2) + (srcT << 16) - (bilinear ? 0x8000 : 0);
 		int u0 = (int) (((long long) (clipL - dstL) * 2 + 1) * stepU / 2) + (srcL << 16) - (bilinear ? 0x8000 : 0);
@@ -1401,10 +1372,6 @@ char* TEXTURE::Draw_z(float p_z1, int p_z2, const int* p_dst, const int* p_src, 
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	graph->SetRenderState(D3DRS_SPECULARENABLE, p_gamma->m_b != 0);
 
-
-
-
-
 	const bool locoland = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND;
 	bool depthTest =
 		(GameDesc->m_layerRules == GAME_LAYERS_ZS1 || locoland) && graph->m_state.m_zFunc == D3DCMP_GREATEREQUAL;
@@ -1430,14 +1397,12 @@ int TEXTURE::SetPalette(const void* p_palette)
 	}
 	if (m_format != D3DFMT_P8) {
 		if (::Error) {
-			return MYERROR::Error(
-				::Error,
-				"TEXTURE",
-				8,
-				// STRING: ALIEN 0x47f45c
-				"palette for non palette texture",
-				0
-			);
+			return MYERROR::Error(::Error,
+								  "TEXTURE",
+								  8,
+								  // STRING: ALIEN 0x47f45c
+								  "palette for non palette texture",
+								  0);
 		}
 		return 0;
 	}

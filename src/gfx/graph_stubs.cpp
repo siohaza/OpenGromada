@@ -3,6 +3,8 @@
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/viewport_math.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_graph.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/picture.h"
@@ -30,8 +32,6 @@ static float s_oldShiftY;
 static void DrawLocolandLayers(GRAPH* p_graph)
 {
 
-
-
 	p_graph->SetRenderState(D3DRS_ZFUNC, 8);
 	p_graph->SetRenderState(D3DRS_ZWRITEENABLE, 1);
 	for (int layer = 0; layer <= 4; ++layer) {
@@ -51,7 +51,6 @@ static void DrawLocolandLayers(GRAPH* p_graph)
 			VIEWPORT_MATH::LegacyCoordinate(((double) p_graph->m_viewXMin + p_graph->m_viewXMax) * 0.5 + Map->m_shiftX);
 		const int cy =
 			VIEWPORT_MATH::LegacyCoordinate(((double) p_graph->m_viewYMin + p_graph->m_viewYMax) * 0.5 + Map->m_shiftY);
-
 
 		const int halfWidth = (int) ceil(width * 0.5) + 192 > 512 ? (int) ceil(width * 0.5) + 192 : 512;
 		const int halfHeight = (int) ceil(height * 0.5) + 272 > 512 ? (int) ceil(height * 0.5) + 272 : 512;
@@ -97,7 +96,6 @@ void GRAPH::Tact(int p_draw)
 	}
 	if (p_draw) {
 		const bool extendedLayers = GameDesc->m_layerRules == GAME_LAYERS_ZS1;
-
 
 		if (extendedLayers || Map->m_menuFrameActive || Map->m_noVid <= 1024 || !Map->m_vids[1024] ||
 			Map->m_shiftX < 0.0f || core->m_viewXMax + Map->m_shiftX - core->m_viewXMin > (double) Map->m_w ||
@@ -213,6 +211,10 @@ inline static unsigned int QuantizeAlphaAppearSource(unsigned int p_color)
 
 static void BlendAlphaAppear(GRAPH_CORE* p_core, unsigned int p_alpha)
 {
+	if (p_core && GPU_RENDER::Active()) {
+		GPU_GRAPH::AlphaAppear(p_core, p_alpha);
+		return;
+	}
 	if (!p_core || !p_core->m_screen || !p_core->m_color) {
 		return;
 	}
@@ -321,10 +323,9 @@ void GRAPH::DrawEffect(int p_draw)
 			}
 			unsigned int scale = num / dur;
 
-
 			unsigned int sourceColor = (unsigned int) core->m_effectA[1];
 			unsigned int color = ((((sourceColor & 0xff00u) * scale) >> 8) & 0xff00u) +
-						(((sourceColor & 0xffu) * scale) >> 8) + (((sourceColor * scale) >> 8) & 0xff0000u);
+								 (((sourceColor & 0xffu) * scale) >> 8) + (((sourceColor * scale) >> 8) & 0xff0000u);
 			LightBar(0, 0, core->m_width, core->m_height, color);
 			LightBar(0, 0, core->m_width, core->m_height, color);
 			LightBar(0, 0, core->m_width, core->m_height, color);
@@ -466,18 +467,16 @@ static unsigned int s_snowStart;
 static unsigned int s_snowFade;
 
 // FUNCTION: ALIEN 0x431e40
-void GRAPH::DrawFog(
-	float p_x0,
-	float p_y0,
-	float p_x1,
-	float p_y1,
-	int p_zTop,
-	int p_zBottom,
-	COLOR p_color,
-	const unsigned short* p_ramp,
-	int p_zBase,
-	int p_blend
-)
+void GRAPH::DrawFog(float p_x0,
+					float p_y0,
+					float p_x1,
+					float p_y1,
+					int p_zTop,
+					int p_zBottom,
+					COLOR p_color,
+					const unsigned short* p_ramp,
+					int p_zBase,
+					int p_blend)
 {
 	GRAPH_CORE* core = (GRAPH_CORE*) this;
 	int x0 = (int) p_x0;
@@ -518,7 +517,7 @@ void GRAPH::DrawFog(
 	if (cols < 4 || rows < 4) {
 		return;
 	}
-	if (!core->m_texE0C || !core->m_zbuffer || core->m_zpitch < (int) core->m_width) {
+	if (!core->m_texE0C || (!core->m_zbuffer && !GPU_RENDER::Active()) || core->m_zpitch < (int) core->m_width) {
 		return;
 	}
 
@@ -533,65 +532,65 @@ void GRAPH::DrawFog(
 	dstRect[1] = y0;
 	dstRect[2] = x1;
 	dstRect[3] = y1;
-	int pitch;
-	unsigned char* dst = (unsigned char*) core->m_texE0C->Lock(&pitch, (const RECT*) srcRect);
-	if (!dst) {
-		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				0,
-				// STRING: ALIEN 0x483f44
-				"fog buffer",
-				0
-			);
-		}
-		return;
-	}
-
-	if (core->m_texE0C->m_format != D3DFMT_P8) {
-		if (!WEATHER_RASTER::FillFog<false>(
-				dst,
-				pitch,
-				core->m_texE0C->m_width,
-				core->m_texE0C->m_height,
-				(const unsigned short*) core->m_zbuffer,
-				core->m_zpitch,
-				(int) core->m_width,
-				(int) core->m_height,
-				x0,
-				y0,
-				x1,
-				y1,
-				p_ramp,
-				p_zBase,
-				zFar
-			)) {
+	if (GPU_RENDER::Active()) {
+		if (!GPU_GRAPH::FogMap(core, core->m_texE0C, x0, y0, x1, y1, p_ramp, p_zBase, zFar)) {
 			return;
 		}
 	}
 	else {
-		if (!WEATHER_RASTER::FillFog<true>(
-				dst,
-				pitch,
-				core->m_texE0C->m_width,
-				core->m_texE0C->m_height,
-				(const unsigned short*) core->m_zbuffer,
-				core->m_zpitch,
-				(int) core->m_width,
-				(int) core->m_height,
-				x0,
-				y0,
-				x1,
-				y1,
-				p_ramp,
-				p_zBase,
-				zFar
-			)) {
+		int pitch;
+		unsigned char* dst = (unsigned char*) core->m_texE0C->Lock(&pitch, (const RECT*) srcRect);
+		if (!dst) {
+			if (::Error) {
+				MYERROR::Error(::Error,
+							   "GRAPH",
+							   0,
+							   // STRING: ALIEN 0x483f44
+							   "fog buffer",
+							   0);
+			}
 			return;
 		}
-	}
 
+		if (core->m_texE0C->m_format != D3DFMT_P8) {
+			if (!WEATHER_RASTER::FillFog<false>(dst,
+												pitch,
+												core->m_texE0C->m_width,
+												core->m_texE0C->m_height,
+												(const unsigned short*) core->m_zbuffer,
+												core->m_zpitch,
+												(int) core->m_width,
+												(int) core->m_height,
+												x0,
+												y0,
+												x1,
+												y1,
+												p_ramp,
+												p_zBase,
+												zFar)) {
+				return;
+			}
+		}
+		else {
+			if (!WEATHER_RASTER::FillFog<true>(dst,
+											   pitch,
+											   core->m_texE0C->m_width,
+											   core->m_texE0C->m_height,
+											   (const unsigned short*) core->m_zbuffer,
+											   core->m_zpitch,
+											   (int) core->m_width,
+											   (int) core->m_height,
+											   x0,
+											   y0,
+											   x1,
+											   y1,
+											   p_ramp,
+											   p_zBase,
+											   zFar)) {
+				return;
+			}
+		}
+	}
 	core->SetAlphaBlend((p_blend == 0) + 1, 4);
 	float zScale = (p_zBase + 1022) * 0.000015258789f;
 	GAMMA fogGamma(p_color, COLOR((int) 0xff000000));
@@ -635,54 +634,55 @@ void GRAPH::DrawSnow()
 	full.top = 0;
 	full.right = w;
 	full.bottom = h;
-	bits = (char*) core->m_texE0C->Lock(&pitch, &quarter);
-	if (!bits) {
-		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				0,
-				// STRING: ALIEN 0x483f50
-				"snow buffer",
-				0
-			);
-		}
-		return;
-	}
-	if (core->m_texE0C->m_format != D3DFMT_P8) {
-		if (!WEATHER_RASTER::FillSnow<false>(
-				(unsigned char*) bits,
-				pitch,
-				core->m_texE0C->m_width,
-				core->m_texE0C->m_height,
-				(const unsigned short*) m_zbuffer,
-				m_zpitch,
-				w,
-				h,
-				xPhase,
-				yPhase,
-				s_snowFade,
-				core->m_snowRamp
-			)) {
+	if (GPU_RENDER::Active()) {
+		if (!GPU_GRAPH::SnowMap(core, core->m_texE0C, xPhase, yPhase, s_snowFade)) {
 			return;
 		}
 	}
 	else {
-		if (!WEATHER_RASTER::FillSnow<true>(
-				(unsigned char*) bits,
-				pitch,
-				core->m_texE0C->m_width,
-				core->m_texE0C->m_height,
-				(const unsigned short*) m_zbuffer,
-				m_zpitch,
-				w,
-				h,
-				xPhase,
-				yPhase,
-				s_snowFade,
-				core->m_snowRamp
-			)) {
+		bits = (char*) core->m_texE0C->Lock(&pitch, &quarter);
+		if (!bits) {
+			if (::Error) {
+				MYERROR::Error(::Error,
+							   "GRAPH",
+							   0,
+							   // STRING: ALIEN 0x483f50
+							   "snow buffer",
+							   0);
+			}
 			return;
+		}
+		if (core->m_texE0C->m_format != D3DFMT_P8) {
+			if (!WEATHER_RASTER::FillSnow<false>((unsigned char*) bits,
+												 pitch,
+												 core->m_texE0C->m_width,
+												 core->m_texE0C->m_height,
+												 (const unsigned short*) m_zbuffer,
+												 m_zpitch,
+												 w,
+												 h,
+												 xPhase,
+												 yPhase,
+												 s_snowFade,
+												 core->m_snowRamp)) {
+				return;
+			}
+		}
+		else {
+			if (!WEATHER_RASTER::FillSnow<true>((unsigned char*) bits,
+												pitch,
+												core->m_texE0C->m_width,
+												core->m_texE0C->m_height,
+												(const unsigned short*) m_zbuffer,
+												m_zpitch,
+												w,
+												h,
+												xPhase,
+												yPhase,
+												s_snowFade,
+												core->m_snowRamp)) {
+				return;
+			}
 		}
 	}
 	core->SetRenderState(D3DRS_SPECULARENABLE, 0);
@@ -1146,14 +1146,12 @@ void GRAPH::DrawVid(VID* p_vid, int p_cadr, float p_x, float p_y, float p_z)
 	}
 	if (p_cadr < 0 || p_cadr >= p_vid->m_dotFrameCount) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				4,
-				// STRING: ALIEN 0x483f5c
-				"ncadr in DrawVid",
-				p_cadr
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   4,
+						   // STRING: ALIEN 0x483f5c
+						   "ncadr in DrawVid",
+						   p_cadr);
 		}
 		return;
 	}

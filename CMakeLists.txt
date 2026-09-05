@@ -21,6 +21,18 @@ message(STATUS
 
 find_package(SDL3 3.4 REQUIRED CONFIG)
 
+set(ALIEN_SHADERCROSS "" CACHE FILEPATH "Pinned SDL_shadercross executable for shader regeneration")
+add_custom_target(regenerate-shaders
+    COMMAND "${CMAKE_COMMAND}" "-DSHADERCROSS=${ALIEN_SHADERCROSS}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader-generation"
+        -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateShaders.cmake"
+    VERBATIM)
+add_custom_target(check-shaders
+    COMMAND "${CMAKE_COMMAND}" "-DSHADERCROSS=${ALIEN_SHADERCROSS}"
+        "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}" "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/shader-check"
+        -DCHECK_ONLY=ON -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/GenerateShaders.cmake"
+    VERBATIM)
+
 set(ALIEN_MAIN "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp")
 set(ALIEN_LIB_SOURCES ${ALIEN_SOURCES})
 list(REMOVE_ITEM ALIEN_LIB_SOURCES "${ALIEN_MAIN}")

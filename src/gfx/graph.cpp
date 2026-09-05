@@ -1,11 +1,13 @@
 
 #include "gfx/graph.h"
 
-#include "game/gametime.h"
 #include "game/game_descriptor.h"
+#include "game/gametime.h"
 #include "game/settings.h"
 #include "gfx/color.h"
 #include "gfx/gamma.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/render_math.h"
 #include "gfx/texture.h"
@@ -164,8 +166,7 @@ int GRAPH::Init()
 	core->m_flags = (core->m_flags & 0xfffffdff) | ((Registry->GetInt(
 														 // STRING: ALIEN 0x483f10
 														 STRING("LowDetail"),
-														 0
-													 ) &
+														 0) &
 													 1)
 													<< 9);
 
@@ -201,8 +202,7 @@ int GRAPH::Init()
 		core->m_viewXMin,
 		core->m_viewYMin,
 		core->m_viewXMax,
-		core->m_viewYMax
-	);
+		core->m_viewYMax);
 
 	core->SetTextureStageState(D3DTSS_COLORARG1, D3DTA_TEXTURE);
 	core->SetTextureStageState(D3DTSS_COLORARG2, D3DTA_DIFFUSE);
@@ -223,14 +223,12 @@ int GRAPH::Init()
 	core->m_texE0C = new TEXTURE(scratchWidth, scratchHeight, D3DFMT_P8, 0);
 	if (!core->m_texE0C->m_data) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				3,
-				// STRING: ALIEN 0x483ebc
-				"light buffer",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   3,
+						   // STRING: ALIEN 0x483ebc
+						   "light buffer",
+						   0);
 		}
 		return 1;
 	}
@@ -244,28 +242,24 @@ int GRAPH::Init()
 	core->m_texE10 = new TEXTURE(scratchWidth, scratchHeight, D3DFMT_R5G6B5, 0);
 	if (!core->m_texE10->m_data) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				3,
-				// STRING: ALIEN 0x483eb0
-				"hiBuffer",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   3,
+						   // STRING: ALIEN 0x483eb0
+						   "hiBuffer",
+						   0);
 		}
 		return 1;
 	}
 	core->m_texE14 = new TEXTURE(scratchWidth, scratchHeight, D3DFMT_A4R4G4B4, 0);
 	if (!core->m_texE14->m_data) {
 		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				"GRAPH",
-				3,
-				// STRING: ALIEN 0x483ea4
-				"alphaBuffer",
-				0
-			);
+			MYERROR::Error(::Error,
+						   "GRAPH",
+						   3,
+						   // STRING: ALIEN 0x483ea4
+						   "alphaBuffer",
+						   0);
 		}
 		return 1;
 	}
@@ -277,8 +271,7 @@ int GRAPH::Init()
 		// STRING: ALIEN 0x483e9c
 		STRING("Courier"),
 		7,
-		8
-	);
+		8);
 
 	SetRampFormat(core->m_texE10->m_format == D3DFMT_R5G6B5);
 	unsigned short* entry = core->m_snowRamp;
@@ -310,19 +303,15 @@ int GRAPH::Init()
 			// STRING: ALIEN 0x483de8
 			"VSYNC ";
 	}
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x483dd0
-		"caps=%s",
-		(const char*) capsStr
-	);
-	MYERROR::Log(
-		::Error,
-		// STRING: ALIEN 0x483dbc
-		"Pitch=%i zPitch=%i",
-		core->m_pitch * core->BytesPerPixel(),
-		2 * core->m_zpitch
-	);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x483dd0
+				 "caps=%s",
+				 (const char*) capsStr);
+	MYERROR::Log(::Error,
+				 // STRING: ALIEN 0x483dbc
+				 "Pitch=%i zPitch=%i",
+				 core->m_pitch * core->BytesPerPixel(),
+				 2 * core->m_zpitch);
 	core->ReloadPalettes();
 	return 0;
 }
@@ -416,78 +405,80 @@ void GRAPH::DrawLight(float p_x, float p_y, float p_z, int p_a, int p_b, unsigne
 	srcRect.bottom = hh / 2;
 
 	TEXTURE* tex = core->m_lightBufferToggle ? core->m_texE10 : core->m_texE0C;
-	int pitch = 0;
-	char* pix = (char*) tex->Lock(&pitch, &srcRect);
-	if (!pix) {
-		if (::Error) {
-			MYERROR::Error(
-				::Error,
-				// STRING: ALIEN 0x47f240
-				"GRAPH",
-				10,
-				"light buffer",
-				0
-			);
+	if (GPU_RENDER::Active()) {
+		GPU_GRAPH::LightMap(core, tex, p_x, p_y, hw, hh, zHeight, zCenter, falloffDiv);
+	}
+	else {
+		int pitch = 0;
+		char* pix = (char*) tex->Lock(&pitch, &srcRect);
+		if (!pix) {
+			if (::Error) {
+				MYERROR::Error(::Error,
+							   // STRING: ALIEN 0x47f240
+							   "GRAPH",
+							   10,
+							   "light buffer",
+							   0);
+			}
+			return;
 		}
-		return;
-	}
-	// The light map is written a pixel at a time, so the pitch is carried in
-	// the map's own units.
-	if (tex->m_format != D3DFMT_P8) {
-		pitch /= 2;
-	}
+		// The light map is written a pixel at a time, so the pitch is carried in
+		// the map's own units.
+		if (tex->m_format != D3DFMT_P8) {
+			pitch /= 2;
+		}
 
-	for (int row = -hh; row < hh; row += 4) {
-		for (int col = -hw; col < hw; col += 4) {
-			int mapX = col + hw;
-			float sy = (float) row + p_y;
-			int za;
-			if (!DrawLightInViewPort(core, (float) col + p_x, sy)) {
-				za = 0x7fff;
-			}
-			else {
-				za = (((unsigned short*) core->m_zbuffer)[((int) p_y + row) * core->m_zpitch + col + (int) p_x] >> 3) -
-					 128;
-			}
-			int zb;
-			if (!DrawLightInViewPort(core, (float) col + p_x + 3.0f, (float) row + p_y + 3.0f)) {
-				zb = 0x7fff;
-			}
-			else {
-				zb = ((
-						  (unsigned short*) core->m_zbuffer
-					  )[((int) p_y + row + 3) * core->m_zpitch + col + (int) p_x + 3] >>
-					  3) -
-					 128;
-			}
-			if (zb < za) {
-				za = zb;
-			}
-			int intensity = 0;
-			if (za != 0x7fff) {
-				int d = row + za - zCenter;
-				int zDiff = za - zHeight;
-				d = 9 * d * d / 4;
-				d += zDiff * zDiff / 4;
-				d += col * col;
-				intensity = falloffDiv ? 256 - d / falloffDiv : 256 - d;
-				if (intensity < 0) {
-					intensity = 0;
+		for (int row = -hh; row < hh; row += 4) {
+			for (int col = -hw; col < hw; col += 4) {
+				int mapX = col + hw;
+				float sy = (float) row + p_y;
+				int za;
+				if (!DrawLightInViewPort(core, (float) col + p_x, sy)) {
+					za = 0x7fff;
 				}
-				else if (intensity > 255) {
-					intensity = 255;
+				else {
+					za = (((unsigned short*) core->m_zbuffer)[((int) p_y + row) * core->m_zpitch + col + (int) p_x] >>
+						  3) -
+						 128;
 				}
-			}
-			int mapY = row + hh;
-			if (tex->m_format != D3DFMT_P8) {
-				((unsigned short*) pix)[pitch * (mapY / 4) + mapX / 4] = core->m_snowRamp[intensity];
-			}
-			else {
-				((unsigned char*) pix)[pitch * (mapY / 4) + mapX / 4] = (unsigned char) intensity;
+				int zb;
+				if (!DrawLightInViewPort(core, (float) col + p_x + 3.0f, (float) row + p_y + 3.0f)) {
+					zb = 0x7fff;
+				}
+				else {
+					zb = (((unsigned short*)
+							   core->m_zbuffer)[((int) p_y + row + 3) * core->m_zpitch + col + (int) p_x + 3] >>
+						  3) -
+						 128;
+				}
+				if (zb < za) {
+					za = zb;
+				}
+				int intensity = 0;
+				if (za != 0x7fff) {
+					int d = row + za - zCenter;
+					int zDiff = za - zHeight;
+					d = 9 * d * d / 4;
+					d += zDiff * zDiff / 4;
+					d += col * col;
+					intensity = falloffDiv ? 256 - d / falloffDiv : 256 - d;
+					if (intensity < 0) {
+						intensity = 0;
+					}
+					else if (intensity > 255) {
+						intensity = 255;
+					}
+				}
+				int mapY = row + hh;
+				if (tex->m_format != D3DFMT_P8) {
+					((unsigned short*) pix)[pitch * (mapY / 4) + mapX / 4] = core->m_snowRamp[intensity];
+				}
+				else {
+					((unsigned char*) pix)[pitch * (mapY / 4) + mapX / 4] = (unsigned char) intensity;
+				}
 			}
 		}
 	}
-
 	core->SetRenderState(D3DRS_SPECULARENABLE, 0);
 	core->SetAlphaBlend(9, 2);
 	srcRect.left++;
@@ -497,13 +488,11 @@ void GRAPH::DrawLight(float p_x, float p_y, float p_z, int p_a, int p_b, unsigne
 	GAMMA gamma(COLOR((int) p_color), COLOR((int) 0xff000000));
 	int lightSrc[4] = {srcRect.left, srcRect.top, srcRect.right, srcRect.bottom};
 
-	tex->Draw_z(
-		z1,
-		GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? std::bit_cast<int>(z1) : 0,
-		dstRect,
-		lightSrc,
-		&gamma
-	);
+	tex->Draw_z(z1,
+				GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? std::bit_cast<int>(z1) : 0,
+				dstRect,
+				lightSrc,
+				&gamma);
 }
 
 static bool ReadGraphParameterBytes(STREAM* p_stream, unsigned char* p_bytes, int p_size)
@@ -534,7 +523,6 @@ static uint32_t GraphParameterWord(const unsigned char* p_bytes)
 unsigned char* GRAPH::OldLoadParameters(STREAM* p_stream)
 {
 
-
 	unsigned char bytes[11];
 	if (!ReadGraphParameterBytes(p_stream, bytes, sizeof(bytes))) {
 		return nullptr;
@@ -549,7 +537,6 @@ unsigned char* GRAPH::OldLoadParameters(STREAM* p_stream)
 // FUNCTION: ALIEN 0x433cd0
 int GRAPH::LoadParameters(STREAM* p_stream)
 {
-
 
 	unsigned char bytes[20];
 	if (!ReadGraphParameterBytes(p_stream, bytes, sizeof(bytes))) {

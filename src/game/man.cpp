@@ -3,6 +3,7 @@
 #include "game/game_descriptor.h"
 #include "game/gametime.h"
 #include "game/map.h"
+#include "gfx/gpu_backend.h"
 #include "gfx/graph.h"
 #include "sprite/ex_sprite_data.h"
 #include "video/vid.h"
@@ -112,7 +113,10 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 		float sy = fy - Map->m_shiftY;
 		float gz;
 		if (sx >= Graph->m_viewXMin && sx < Graph->m_viewXMax && sy >= Graph->m_viewYMin && sy < Graph->m_viewYMax) {
-			gz = (float) (*((unsigned short*) Graph->m_zbuffer + (int) sy * Graph->m_zpitch + (int) sx) >> 3) - 128.0f;
+			const unsigned short depth =
+				GPU_RENDER::Active() ? GPU_RENDER::ReadDepth((int) sx, (int) sy)
+									 : *((unsigned short*) Graph->m_zbuffer + (int) sy * Graph->m_zpitch + (int) sx);
+			gz = (float) (depth >> 3) - 128.0f;
 			if (gz > m_z + 70.0f) {
 				gz = m_z + 50.0f;
 			}
@@ -234,14 +238,12 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			if (dmg >= m_unk0x54 && Action(0x38, 230, 0, 0)) {
 				Action(0x37, 230, 0, 0);
 				ChangeHp(m_vid->m_maxHp[(m_flag >> 11) & 3]);
-				Map->CreateSprite(
-					Map->Vid(181),
-					(float) GetX(),
-					(float) GetY(),
-					(float) (GetZ() + 22.0f),
-					ANGLE(0),
-					this
-				);
+				Map->CreateSprite(Map->Vid(181),
+								  (float) GetX(),
+								  (float) GetY(),
+								  (float) (GetZ() + 22.0f),
+								  ANGLE(0),
+								  this);
 				break;
 			}
 		}
@@ -271,39 +273,32 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 			const float scale = UIDrawScale();
 			if (scale != 1.0f) {
 
-
 				armorY += (1.0f - scale) * GetVid()->m_unk0x54;
 			}
 		}
 		if (m_exData && HaveItemFromEnd(m_exData, 204)) {
-			Child()->AddLink(Map->CreateSprite(
-				Map->Vid(200),
-				(float) GetX(),
-				armorY,
-				(float) (GetZ() + GetVid()->m_unk0x54),
-				Direction(),
-				0
-			));
+			Child()->AddLink(Map->CreateSprite(Map->Vid(200),
+											   (float) GetX(),
+											   armorY,
+											   (float) (GetZ() + GetVid()->m_unk0x54),
+											   Direction(),
+											   0));
 		}
 		else if (m_exData && HaveItemFromEnd(m_exData, 205)) {
-			Child()->AddLink(Map->CreateSprite(
-				Map->Vid(201),
-				(float) GetX(),
-				armorY,
-				(float) (GetZ() + GetVid()->m_unk0x54),
-				Direction(),
-				0
-			));
+			Child()->AddLink(Map->CreateSprite(Map->Vid(201),
+											   (float) GetX(),
+											   armorY,
+											   (float) (GetZ() + GetVid()->m_unk0x54),
+											   Direction(),
+											   0));
 		}
 		else if (m_exData && HaveItemFromEnd(m_exData, 206)) {
-			Child()->AddLink(Map->CreateSprite(
-				Map->Vid(202),
-				(float) GetX(),
-				armorY,
-				(float) (GetZ() + GetVid()->m_unk0x54),
-				Direction(),
-				0
-			));
+			Child()->AddLink(Map->CreateSprite(Map->Vid(202),
+											   (float) GetX(),
+											   armorY,
+											   (float) (GetZ() + GetVid()->m_unk0x54),
+											   Direction(),
+											   0));
 		}
 		VID* v = m_vid;
 		UNIT::Action(0x5d, m_ammo[v->m_unk0x5c->m_idx - 10] - UNIT::Action(0x5c, 0, 0, 0), 0, 0);

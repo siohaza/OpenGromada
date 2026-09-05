@@ -2,6 +2,8 @@
 
 #include "game/map.h"
 #include "game/viewport_math.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_graph.h"
 #include "gfx/graph.h"
 #include "sprite/r_dot.h"
 #include "sprite/sprite.h"
@@ -15,11 +17,6 @@
 
 namespace
 {
-
-
-
-
-
 
 struct MINIMAP_CANVAS {
 	float x, y, width, height, scale;
@@ -36,7 +33,6 @@ struct MINIMAP_CANVAS {
 	void Stamp(float p_x, float p_y, int p_nativeSize, unsigned int p_colour) const
 	{
 
-
 		const int size = std::max(1, (int) std::ceil(p_nativeSize * scale));
 		if (!(p_x >= Graph->m_viewXMin && p_y >= Graph->m_viewYMin && p_x < Graph->m_viewXMax - (size - 1) &&
 			  p_y < Graph->m_viewYMax - (size - 1) && p_x >= 0 && p_y >= 0 && p_x < screenWidth - (size - 1) &&
@@ -44,6 +40,10 @@ struct MINIMAP_CANVAS {
 			return;
 		}
 		const int px = (int) p_x, py = (int) p_y;
+		if (GPU_RENDER::Active()) {
+			GPU_GRAPH::RawRect(px, py, px + size, py + size, p_colour);
+			return;
+		}
 		for (int row = 0; row < size; ++row) {
 			unsigned int* dst = pixels + size_t(py + row) * Graph->m_pitch + px;
 			std::fill_n(dst, size, p_colour);
@@ -57,7 +57,6 @@ struct MINIMAP_CANVAS {
 			return;
 		}
 		if (p_size == 4) {
-
 
 			Stamp(sx - 2 * scale, sy - 2 * scale, 2, p_colour);
 			Stamp(sx - 2 * scale, sy, 2, p_colour);
@@ -84,6 +83,10 @@ struct MINIMAP_CANVAS {
 		if (first > last) {
 			return;
 		}
+		if (GPU_RENDER::Active()) {
+			GPU_GRAPH::RawRect((int) first, (int) p_y, (int) last + 1, (int) p_y + 1, 0x00cfcfcfu);
+			return;
+		}
 		unsigned int* dst = pixels + size_t((int) p_y) * Graph->m_pitch;
 		std::fill(dst + (int) first, dst + (int) last + 1, 0x00cfcfcfu);
 	}
@@ -101,6 +104,10 @@ struct MINIMAP_CANVAS {
 		const double last =
 			std::min({std::trunc(p_y1), double(screenHeight - 1), std::ceil((double) Graph->m_viewYMax) - 1});
 		if (first > last) {
+			return;
+		}
+		if (GPU_RENDER::Active()) {
+			GPU_GRAPH::RawRect((int) p_x, (int) first, (int) p_x + 1, (int) last + 1, 0x00cfcfcfu);
 			return;
 		}
 		for (int row = (int) first; row <= (int) last; ++row) {
@@ -171,23 +178,22 @@ void UnitMarker(const MINIMAP_CANVAS& p_canvas, const SPRITE* p_sprite)
 
 void DrawRtsMinimap(const SPRITE* p_frame)
 {
-	if (!p_frame || !p_frame->m_vid || (p_frame->m_flag & 0x10000) || !Map || !Graph || !Graph->m_color ||
-		!(Map->m_w > 0) || !(Map->m_h > 0) || !std::isfinite(Map->m_w) || !std::isfinite(Map->m_h)) {
+	if (!p_frame || !p_frame->m_vid || (p_frame->m_flag & 0x10000) || !Map || !Graph ||
+		(!Graph->m_color && !GPU_RENDER::Active()) || !(Map->m_w > 0) || !(Map->m_h > 0) || !std::isfinite(Map->m_w) ||
+		!std::isfinite(Map->m_h)) {
 		return;
 	}
-	const float bounds[] = {
-		Graph->m_width,
-		Graph->m_height,
-		Graph->m_viewXMin,
-		Graph->m_viewXMax,
-		Graph->m_viewYMin,
-		Graph->m_viewYMax,
-		p_frame->m_x,
-		p_frame->m_y,
-		p_frame->m_z,
-		Map->m_shiftX,
-		Map->m_shiftY
-	};
+	const float bounds[] = {Graph->m_width,
+							Graph->m_height,
+							Graph->m_viewXMin,
+							Graph->m_viewXMax,
+							Graph->m_viewYMin,
+							Graph->m_viewYMax,
+							p_frame->m_x,
+							p_frame->m_y,
+							p_frame->m_z,
+							Map->m_shiftX,
+							Map->m_shiftY};
 	for (float value : bounds) {
 		if (!std::isfinite(value)) {
 			return;
@@ -202,17 +208,14 @@ void DrawRtsMinimap(const SPRITE* p_frame)
 	if (w <= 14 || h <= 13 || !(scale > 0) || scale > 3) {
 		return;
 	}
-	MINIMAP_CANVAS canvas = {
-		p_frame->m_x - Map->m_shiftX - (w / 2 - 8) * scale,
-		p_frame->m_y - p_frame->m_z - Map->m_shiftY - (h / 2 - 10) * scale,
-		(w - 14) * scale,
-		(h - 13) * scale,
-		scale,
-		(int) Graph->m_width,
-		(int) Graph->m_height,
-		static_cast<unsigned int*>(Graph->m_color)
-	};
-
+	MINIMAP_CANVAS canvas = {p_frame->m_x - Map->m_shiftX - (w / 2 - 8) * scale,
+							 p_frame->m_y - p_frame->m_z - Map->m_shiftY - (h / 2 - 10) * scale,
+							 (w - 14) * scale,
+							 (h - 13) * scale,
+							 scale,
+							 (int) Graph->m_width,
+							 (int) Graph->m_height,
+							 static_cast<unsigned int*>(Graph->m_color)};
 
 	for (int i = 0; i < RailMap.m_list.m_n; ++i) {
 		const R_DOT* dot = RailMap.m_list.m_data[i];

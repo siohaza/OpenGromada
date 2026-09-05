@@ -42,7 +42,9 @@ struct MENU_LAYOUT {
 static std::string MenuKey(const std::string& p_name)
 {
 	std::string key(p_name);
-	for (char& c : key) c = c == '\\' ? '/' : (char) SDL_tolower((unsigned char) c);
+	for (char& c : key) {
+		c = c == '\\' ? '/' : (char) SDL_tolower((unsigned char) c);
+	}
 	return key;
 }
 
@@ -59,20 +61,29 @@ static bool MenuFileExists(const std::string& p_name)
 static std::string ResolveMenuName(const STRING& p_name)
 {
 	std::string requested(p_name.m_str);
-	if (MenuFileExists(requested) || !GameDesc->m_gamebarNumbersAreWidths || !MENU_PATH::IsGamebarVariant(p_name.m_str)) {
+	if (!GameDesc->m_gamebarNumbersAreWidths || !MENU_PATH::IsGamebarVariant(p_name.m_str)) {
+		return requested;
+	}
+	const int minimumWidth = GameDesc->MinimumGamebarWidth();
+	const int requestedWidth = MENU_PATH::GamebarVariantWidth(p_name.m_str);
+	if (requestedWidth >= minimumWidth && MenuFileExists(requested)) {
 		return requested;
 	}
 
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	int preferred = MENU_PATH::PreferredGamebarWidth(graph ? (int) graph->m_width : 640, graph ? graph->m_uiScale : 1);
+	int preferred = MENU_PATH::PreferredGamebarWidth(graph ? (int) graph->m_width : 640,
+													 graph ? graph->m_uiScale * graph->m_uiPresentationScale : 1.0f);
+	if (preferred < minimumWidth) {
+		preferred = minimumWidth;
+	}
 	std::string candidate = MENU_PATH::CanonicalGamebar(p_name.m_str, preferred);
-	if (MenuFileExists(candidate)) {
+	if (preferred >= minimumWidth && MenuFileExists(candidate)) {
 		return candidate;
 	}
 
 	const int widths[] = {1280, 1024, 800, 640};
 	for (int width : widths) {
-		if (width == preferred) {
+		if (width == preferred || width < minimumWidth) {
 			continue;
 		}
 		candidate = MENU_PATH::CanonicalGamebar(p_name.m_str, width);
@@ -80,7 +91,7 @@ static std::string ResolveMenuName(const STRING& p_name)
 			return candidate;
 		}
 	}
-	return requested;
+	return requestedWidth < minimumWidth ? MENU_PATH::CanonicalGamebar(p_name.m_str, minimumWidth) : requested;
 }
 
 static void ReadMenuHeader(RESOURCE* p_resource, MENU_HEADER* p_header)
@@ -95,68 +106,66 @@ static void ReadMenuHeader(RESOURCE* p_resource, MENU_HEADER* p_header)
 static MENU_LAYOUT ResolveMenuLayout(const std::string& p_name)
 {
 	int width = GameDesc->m_gamebarNumbersAreWidths ? MENU_PATH::GamebarVariantWidth(p_name.c_str()) : 0;
-	MENU_LAYOUT result = {width, MENU_PATH::GamebarVariantHeight(width),
-		!width && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0};
+	MENU_LAYOUT result = {width,
+						  MENU_PATH::GamebarVariantHeight(width),
+						  !width && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0};
 	return result;
 }
 
-static UI_SCALING::MENU_POINT MenuPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	int p_nvid,
-	const MENU_HEADER& p_header,
-	const MENU_LAYOUT& p_layout
-)
+static UI_SCALING::MENU_POINT MenuPoint(float p_x,
+										float p_y,
+										float p_z,
+										int p_nvid,
+										const MENU_HEADER& p_header,
+										const MENU_LAYOUT& p_layout)
 {
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
 	float drawScale = (float) graph->m_uiScale * graph->m_uiPresentationScale;
 	if (p_layout.m_gamebarWidth) {
-		return UI_SCALING::TransformGamebarPoint(
-			p_x,
-			p_y,
-			p_z,
-			p_header.m_originX,
-			p_header.m_originY,
-			p_header.m_width,
-			p_header.m_height,
-			(float) p_layout.m_gamebarWidth,
-			(float) p_layout.m_gamebarHeight,
-			graph->m_width,
-			graph->m_height,
-			drawScale,
-			p_nvid
-		);
+		return UI_SCALING::TransformGamebarPoint(p_x,
+												 p_y,
+												 p_z,
+												 p_header.m_originX,
+												 p_header.m_originY,
+												 p_header.m_width,
+												 p_header.m_height,
+												 (float) p_layout.m_gamebarWidth,
+												 (float) p_layout.m_gamebarHeight,
+												 graph->m_width,
+												 graph->m_height,
+												 drawScale,
+												 p_nvid,
+												 GameDesc->m_hudLayout == GAME_HUD_THESEUS);
 	}
-	return UI_SCALING::TransformCenteredMenuPoint(
-		p_x,
-		p_y,
-		p_z,
-		p_header.m_originX,
-		p_header.m_originY,
-		p_header.m_width,
-		p_header.m_height,
-		graph->m_width,
-		graph->m_height,
-		drawScale
-	);
+	return UI_SCALING::TransformCenteredMenuPoint(p_x,
+												  p_y,
+												  p_z,
+												  p_header.m_originX,
+												  p_header.m_originY,
+												  p_header.m_width,
+												  p_header.m_height,
+												  graph->m_width,
+												  graph->m_height,
+												  drawScale);
 }
 
 static void PlaceLoadedMenuSprite(SPRITE* p_sprite, const MENU_HEADER& p_header, const MENU_LAYOUT& p_layout)
 {
 	float shiftX = Map->m_shiftX;
 	float shiftY = Map->m_shiftY;
-	UI_SCALING::MENU_POINT point = MenuPoint(
-		p_sprite->X() - shiftX,
-		p_sprite->Y() - shiftY,
-		p_sprite->Z(),
-		p_sprite->m_vid->m_idx,
-		p_header,
-		p_layout
-	);
+	UI_SCALING::MENU_POINT point = MenuPoint(p_sprite->X() - shiftX,
+											 p_sprite->Y() - shiftY,
+											 p_sprite->Z(),
+											 p_sprite->m_vid->m_idx,
+											 p_header,
+											 p_layout);
 	p_sprite->ChangeCoor(point.m_x + shiftX, point.m_y + shiftY, point.m_z);
-	if (p_layout.m_scriptCanvas) p_sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
-	else p_sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, point.m_anchorX, point.m_anchorY);
+	if (p_layout.m_scriptCanvas) {
+		p_sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
+	}
+	else {
+		p_sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, point.m_anchorX, point.m_anchorY);
+	}
 }
 
 static void AlignGamebarBackingWithInventory(MENU* p_menu, int p_firstLoaded, const MENU_LAYOUT& p_layout)
@@ -185,26 +194,22 @@ static void AlignGamebarBackingWithInventory(MENU* p_menu, int p_firstLoaded, co
 	}
 
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	int gap = UI_SCALING::GamebarInventoryOffset(
-		graph->m_width,
-		graph->m_height,
-		backing->UIDrawScale(),
-		backing->m_vid->m_unk0x2f6
-	);
+	int gap = UI_SCALING::GamebarInventoryOffset(graph->m_width,
+												 graph->m_height,
+												 backing->UIDrawScale(),
+												 backing->m_vid->m_unk0x2f6);
 	if (gap > 0) {
 		backing->SetUIHorizontalGap(gap);
 	}
 }
 
-static bool ReadMenuSpriteIdentity(
-	RESOURCE* p_resource,
-	int p_version,
-	bool p_flatRecords,
-	int* p_nvid,
-	float* p_x,
-	float* p_y,
-	float* p_z
-)
+static bool ReadMenuSpriteIdentity(RESOURCE* p_resource,
+								   int p_version,
+								   bool p_flatRecords,
+								   int* p_nvid,
+								   float* p_x,
+								   float* p_y,
+								   float* p_z)
 {
 	int pointerToken;
 	p_resource->Read(&pointerToken, 4);
@@ -234,15 +239,13 @@ static bool ReadMenuSpriteIdentity(
 	return true;
 }
 
-static void DeleteMatchingMenuSprites(
-	MENU* p_menu,
-	int p_nvid,
-	float p_x,
-	float p_y,
-	float p_z,
-	const MENU_HEADER& p_header,
-	const MENU_LAYOUT& p_layout
-)
+static void DeleteMatchingMenuSprites(MENU* p_menu,
+									  int p_nvid,
+									  float p_x,
+									  float p_y,
+									  float p_z,
+									  const MENU_HEADER& p_header,
+									  const MENU_LAYOUT& p_layout)
 {
 	UI_SCALING::MENU_POINT point = MenuPoint(p_x, p_y, p_z, p_nvid, p_header, p_layout);
 	float worldX = point.m_x + Map->m_shiftX;
@@ -269,7 +272,10 @@ MENU::MENU()
 	m_state = 0;
 }
 
-void MENU::ClearScriptCanvas() { m_scriptCanvasMenus.clear(); }
+void MENU::ClearScriptCanvas()
+{
+	m_scriptCanvasMenus.clear();
+}
 
 void MENU::DeleteAll()
 {
@@ -282,21 +288,35 @@ bool MENU::HasScriptCanvas() const
 	return !m_scriptCanvasMenus.empty() && GameDesc->m_menuScriptWidth > 0 && GameDesc->m_menuScriptHeight > 0;
 }
 
-int MENU::ScriptCanvasWidth() const { return HasScriptCanvas() ? GameDesc->m_menuScriptWidth : 0; }
-int MENU::ScriptCanvasHeight() const { return HasScriptCanvas() ? GameDesc->m_menuScriptHeight : 0; }
+int MENU::ScriptCanvasWidth() const
+{
+	return HasScriptCanvas() ? GameDesc->m_menuScriptWidth : 0;
+}
+int MENU::ScriptCanvasHeight() const
+{
+	return HasScriptCanvas() ? GameDesc->m_menuScriptHeight : 0;
+}
 
 float MENU::ScriptScreenX(float p_frameX) const
 {
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	return HasScriptCanvas() && graph ? UI_SCALING::UntransformCanvasAxis(p_frameX, graph->m_width,
-		GameDesc->m_menuScriptWidth, graph->m_uiScale * graph->m_uiPresentationScale) : p_frameX;
+	return HasScriptCanvas() && graph
+			   ? UI_SCALING::UntransformCanvasAxis(p_frameX,
+												   graph->m_width,
+												   GameDesc->m_menuScriptWidth,
+												   graph->m_uiScale * graph->m_uiPresentationScale)
+			   : p_frameX;
 }
 
 float MENU::ScriptScreenY(float p_frameY) const
 {
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	return HasScriptCanvas() && graph ? UI_SCALING::UntransformCanvasAxis(p_frameY, graph->m_height,
-		GameDesc->m_menuScriptHeight, graph->m_uiScale * graph->m_uiPresentationScale) : p_frameY;
+	return HasScriptCanvas() && graph
+			   ? UI_SCALING::UntransformCanvasAxis(p_frameY,
+												   graph->m_height,
+												   GameDesc->m_menuScriptHeight,
+												   graph->m_uiScale * graph->m_uiPresentationScale)
+			   : p_frameY;
 }
 
 // FUNCTION: ALIEN 0x43e140
@@ -311,10 +331,9 @@ int MENU::Control(INPUT_AS* p_input)
 			if (vid->m_unk0x18) {
 				int ani = sprite->m_ani;
 
-
 				const bool interactive = GameDesc->m_menuRules == GAME_MENU_ZS1
-					? ani < 14 && ani != 8 && ani != 9
-					: ani != 14 && ani < 15 && ani != 7 && ani != 6;
+											 ? ani < 14 && ani != 8 && ani != 9
+											 : ani != 14 && ani < 15 && ani != 7 && ani != 6;
 				if (interactive) {
 					if (!sprite->IsInside(p_input->m_worldX, p_input->m_worldY) ||
 						(m_underCursor && sprite->Z() <= m_underCursor->Z())) {
@@ -342,7 +361,6 @@ int MENU::Control(INPUT_AS* p_input)
 		int ani = sprite->m_ani;
 		if (GameDesc->m_menuRules == GAME_MENU_ZS1) {
 
-
 			const int state = ani & ~1;
 			if (state != 4 && state != 2 && state != 6) {
 				if (!sprite->m_vid->m_noAnimCadr[6] && !sprite->m_vid->m_noAnimCadr[7]) {
@@ -368,25 +386,21 @@ int MENU::Load(const STRING& p_name, int p_opt)
 	std::string resolvedName = ResolveMenuName(p_name);
 	STRING actualName(resolvedName.c_str());
 	if (resource.OpenForRead(actualName, 0x554e454d)) {
-		MYERROR::Error(
-			::Error,
-			// STRING: ALIEN 0x48436c
-			"MENU",
-			7,
-			p_name.m_str,
-			0
-		);
+		MYERROR::Error(::Error,
+					   // STRING: ALIEN 0x48436c
+					   "MENU",
+					   7,
+					   p_name.m_str,
+					   0);
 		return 1;
 	}
 	if (resource.GoBegin(0x44414548)) {
-		MYERROR::Error(
-			::Error,
-			"MENU",
-			11,
-			// STRING: ALIEN 0x48435c
-			"'HEAD'in menu",
-			0
-		);
+		MYERROR::Error(::Error,
+					   "MENU",
+					   11,
+					   // STRING: ALIEN 0x48435c
+					   "'HEAD'in menu",
+					   0);
 		return 1;
 	}
 	MENU_HEADER header;
@@ -409,8 +423,14 @@ int MENU::Load(const STRING& p_name, int p_opt)
 			if (sprite) {
 				PlaceLoadedMenuSprite(sprite, header, layout);
 				sprite->Action(0x51, (decomp_intptr) &resource, header.m_version, 0);
-				if (layout.m_scriptCanvas) sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
-				else sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale, sprite->UIAnchorX(), sprite->UIAnchorY());
+				if (layout.m_scriptCanvas) {
+					sprite->SetMenuScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale);
+				}
+				else {
+					sprite->SetUIScriptLayout(((GRAPH_CORE*) Graph)->m_uiScale,
+											  sprite->UIAnchorX(),
+											  sprite->UIAnchorY());
+				}
 			}
 			resource.GoNextSub(0x20525053);
 			sprite = Map->LoadSprite(&resource, header.m_version);
@@ -426,19 +446,21 @@ int MENU::Load(const STRING& p_name, int p_opt)
 		}
 	}
 	else {
-		MYERROR::Error(
-			::Error,
-			"MENU",
-			11,
-			// STRING: ALIEN 0x484340
-			"'SPR ' or 'SPRI' in menu",
-			0
-		);
+		MYERROR::Error(::Error,
+					   "MENU",
+					   11,
+					   // STRING: ALIEN 0x484340
+					   "'SPR ' or 'SPRI' in menu",
+					   0);
 		return 1;
 	}
 	AlignGamebarBackingWithInventory(this, firstLoaded, layout);
-	if (!resource.Good()) return 1;
-	if (layout.m_scriptCanvas) m_scriptCanvasMenus.push_back(MenuKey(resolvedName));
+	if (!resource.Good()) {
+		return 1;
+	}
+	if (layout.m_scriptCanvas) {
+		m_scriptCanvasMenus.push_back(MenuKey(resolvedName));
+	}
 	resource.Close();
 	return 0;
 }
@@ -482,12 +504,18 @@ int MENU::DeleteFromFile(const STRING& p_name)
 			resource.GoNextSub(0x20525053);
 		}
 	}
-	if (!resource.Good()) return 1;
+	if (!resource.Good()) {
+		return 1;
+	}
 	resource.Close();
 	const std::string key = MenuKey(resolvedName);
 	for (auto it = m_scriptCanvasMenus.begin(); it != m_scriptCanvasMenus.end();) {
-		if (*it == key) it = m_scriptCanvasMenus.erase(it);
-		else ++it;
+		if (*it == key) {
+			it = m_scriptCanvasMenus.erase(it);
+		}
+		else {
+			++it;
+		}
 	}
 	return 0;
 }

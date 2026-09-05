@@ -35,6 +35,8 @@ struct COMMAND_LINE_SETTINGS {
 };
 
 COMMAND_LINE_SETTINGS g_commandLine;
+SETTINGS_RENDERER g_renderer = SETTINGS_RENDERER_AUTO;
+const char* g_gpuDriver;
 
 const char* OptionValue(const char* p_arg, const char* p_name, int* p_index, int p_argc, char** p_argv)
 {
@@ -87,6 +89,8 @@ int SETTINGS::CheckMode(int p_width, int p_height, int p_bpp)
 void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument)
 {
 	g_commandLine = {};
+	g_renderer = SETTINGS_RENDERER_AUTO;
+	g_gpuDriver = nullptr;
 	if (p_gameArgument) {
 		*p_gameArgument = STRING::EMPTY;
 	}
@@ -94,7 +98,37 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 	for (int i = 1; i < p_argc; ++i) {
 		const char* arg = p_argv[i];
 		const char* value;
-		if ((value = OptionValue(arg, "--width", &i, p_argc, p_argv))) {
+		if ((value = OptionValue(arg, "--renderer", &i, p_argc, p_argv))) {
+			if (!strcmp(value, "auto")) {
+				g_renderer = SETTINGS_RENDERER_AUTO;
+			}
+			else if (!strcmp(value, "gpu")) {
+				g_renderer = SETTINGS_RENDERER_GPU;
+			}
+			else if (!strcmp(value, "software")) {
+				g_renderer = SETTINGS_RENDERER_SOFTWARE;
+			}
+			else {
+				fprintf(stderr, "Invalid --renderer value '%s'; expected auto, gpu, or software.\n", value);
+				exit(1);
+			}
+		}
+		else if ((value = OptionValue(arg, "--gpu-driver", &i, p_argc, p_argv))) {
+			if (!strcmp(value, "vulkan")) {
+				g_gpuDriver = "vulkan";
+			}
+			else if (!strcmp(value, "direct3d12")) {
+				g_gpuDriver = "direct3d12";
+			}
+			else if (!strcmp(value, "metal")) {
+				g_gpuDriver = "metal";
+			}
+			else {
+				fprintf(stderr, "Invalid --gpu-driver value '%s'; expected vulkan, direct3d12, or metal.\n", value);
+				exit(1);
+			}
+		}
+		else if ((value = OptionValue(arg, "--width", &i, p_argc, p_argv))) {
 			int n = PositiveInt(value);
 			if (n) {
 				g_commandLine.m_width = n;
@@ -147,7 +181,10 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 		else if ((value = OptionValue(arg, "--game", &i, p_argc, p_argv)) ||
 				 (value = OptionValue(arg, "--profile", &i, p_argc, p_argv))) {
 			if (!Game_SetCliOverride(value)) {
-				fprintf(stderr, "Unknown --game value '%s'. Valid games: as1, zs1, theseus, crazy-lunch, last-hope, chacks-temple, locoland.\n", value);
+				fprintf(stderr,
+						"Unknown --game value '%s'. Valid games: as1, zs1, theseus, crazy-lunch, last-hope, "
+						"chacks-temple, locoland.\n",
+						value);
 				exit(1);
 			}
 		}
@@ -192,7 +229,10 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 			g_commandLine.m_mask |= OVERRIDE_RED_BLOOD;
 		}
 		else if (!strncmp(arg, "--", 2)) {
-			fprintf(stderr, "Unknown or incomplete option '%s'. Use --data-dir, --game, --config or --script for startup options.\n", arg);
+			fprintf(stderr,
+					"Unknown or incomplete option '%s'. Use --data-dir, --game, --config or --script for startup "
+					"options.\n",
+					arg);
 			exit(1);
 		}
 		else {
@@ -203,6 +243,32 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 			}
 		}
 	}
+	if (g_gpuDriver && g_renderer != SETTINGS_RENDERER_GPU) {
+		fprintf(stderr, "--gpu-driver requires --renderer=gpu.\n");
+		exit(1);
+	}
+}
+
+SETTINGS_RENDERER Settings_Renderer()
+{
+	return g_renderer;
+}
+
+const char* Settings_RendererName()
+{
+	switch (g_renderer) {
+	case SETTINGS_RENDERER_GPU:
+		return "gpu";
+	case SETTINGS_RENDERER_SOFTWARE:
+		return "software";
+	default:
+		return "auto";
+	}
+}
+
+const char* Settings_GPUDriver()
+{
+	return g_gpuDriver;
 }
 
 bool Settings_ForceRedBlood()

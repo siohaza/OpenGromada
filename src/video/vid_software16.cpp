@@ -5,6 +5,8 @@
 #include "game/terrain_camera.h"
 #include "gfx/asmdraw.h"
 #include "gfx/gamma.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
@@ -88,16 +90,14 @@ void VID_SOFTWARE16::SetReColorForArmy(unsigned int p_color)
 extern int RGB16_rMask;
 extern int RGB16_gMask;
 
-static void DrawTerrainAlphaSpan(
-	unsigned char* p_src,
-	unsigned short* p_zbuf,
-	unsigned short* p_dest,
-	int p_count,
-	unsigned short p_z,
-	const int* p_palette,
-	int p_x,
-	int p_y
-)
+static void DrawTerrainAlphaSpan(unsigned char* p_src,
+								 unsigned short* p_zbuf,
+								 unsigned short* p_dest,
+								 int p_count,
+								 unsigned short p_z,
+								 const int* p_palette,
+								 int p_x,
+								 int p_y)
 {
 	for (int i = 0; i < p_count; ++i) {
 		if (p_z >= p_zbuf[i] && ((unsigned int) p_palette[p_src[i]] >> 24) == 0xff) {
@@ -146,34 +146,29 @@ void VID_SOFTWARE16::SetGammaToPalette(unsigned char* p_palette, const GAMMA& p_
 int VID_SOFTWARE16::Draw(SPRITE* p_sprite)
 {
 
-
 	if (PropHide()) {
 		return 0;
 	}
-	return DrawFrame(
-		p_sprite->m_noCadr,
-		p_sprite->m_x,
-		p_sprite->m_y,
-		p_sprite->m_z,
-		Map->m_shiftX,
-		Map->m_shiftY,
-		p_sprite->m_flag,
-		p_sprite->m_exData,
-		p_sprite
-	);
+	return DrawFrame(p_sprite->m_noCadr,
+					 p_sprite->m_x,
+					 p_sprite->m_y,
+					 p_sprite->m_z,
+					 Map->m_shiftX,
+					 Map->m_shiftY,
+					 p_sprite->m_flag,
+					 p_sprite->m_exData,
+					 p_sprite);
 }
 
-int VID_SOFTWARE16::DrawFrame(
-	int p_frame,
-	float p_x,
-	float p_y,
-	float p_z,
-	float p_shiftX,
-	float p_shiftY,
-	unsigned int p_spriteFlags,
-	EX_SPRITE_DATA* p_exData,
-	SPRITE* p_gammaSprite
-)
+int VID_SOFTWARE16::DrawFrame(int p_frame,
+							  float p_x,
+							  float p_y,
+							  float p_z,
+							  float p_shiftX,
+							  float p_shiftY,
+							  unsigned int p_spriteFlags,
+							  EX_SPRITE_DATA* p_exData,
+							  SPRITE* p_gammaSprite)
 {
 	if (PropHide()) {
 		return 0;
@@ -213,11 +208,11 @@ int VID_SOFTWARE16::DrawFrame(
 
 	// Expand RGB565 spans into the ARGB8888 framebuffer.
 	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-	int pitch = graph->Lock();
+	int pitch = GPU_RENDER::Active() ? graph->m_pitch : graph->Lock();
 	int zpitch = graph->m_zpitch;
 	char* surface = (char*) graph->m_color;
 	char* zbase = (char*) graph->m_zbuffer;
-	if (!surface || !zbase) {
+	if ((!surface || !zbase) && !GPU_RENDER::Active()) {
 		return 0;
 	}
 
@@ -237,16 +232,18 @@ int VID_SOFTWARE16::DrawFrame(
 		}
 		else {
 			GAMMA combined;
-			CombineDrawGamma(
-				&combined,
-				p_gammaSprite->GetGamma(),
-				((GRAPH_CORE*) Graph)->m_gammaSet.m_b,
-				((GRAPH_CORE*) Graph)->m_gammaSet.m_a
-			);
+			CombineDrawGamma(&combined,
+							 p_gammaSprite->GetGamma(),
+							 ((GRAPH_CORE*) Graph)->m_gammaSet.m_b,
+							 ((GRAPH_CORE*) Graph)->m_gammaSet.m_a);
 			SetGammaToPalette(paletteBuf, combined);
 		}
 	}
 	unsigned short flag2 = m_pixelFlag16;
+	if (GPU_RENDER::Active()) {
+		GPU_VID::DrawFrame(this, rle, nRows, x0, yTop, z, 1.0f, 0, palette, true);
+		return 0;
+	}
 	if ((flag2 & 2) && (flag2 & 1) && (flag2 & 8)) {
 
 		z += 1024;
@@ -482,38 +479,32 @@ int VID_SOFTWARE16::DrawFrame(
 }
 
 // STUB: ALIEN 0x418940
-void VID_SOFTWARE16::DrawToVid(
-	const SPRITE* p_sprite,
-	const VID_TEXCOOR* p_texCoor,
-	TEXTURE* p_texture,
-	TEXTURE* p_zTexture
-)
+void VID_SOFTWARE16::DrawToVid(const SPRITE* p_sprite,
+							   const VID_TEXCOOR* p_texCoor,
+							   TEXTURE* p_texture,
+							   TEXTURE* p_zTexture)
 {
 	if (m_unk0x47c & 0x40) {
 		return;
 	}
-	DrawFrameToVid(
-		p_sprite->m_noCadr,
-		p_sprite->m_x,
-		p_sprite->m_y,
-		p_sprite->m_z,
-		p_sprite->m_flag,
-		p_texCoor,
-		p_texture,
-		p_zTexture
-	);
+	DrawFrameToVid(p_sprite->m_noCadr,
+				   p_sprite->m_x,
+				   p_sprite->m_y,
+				   p_sprite->m_z,
+				   p_sprite->m_flag,
+				   p_texCoor,
+				   p_texture,
+				   p_zTexture);
 }
 
-void VID_SOFTWARE16::DrawFrameToVid(
-	int p_frame,
-	float p_x,
-	float p_y,
-	float p_z,
-	unsigned int p_spriteFlags,
-	const VID_TEXCOOR* p_texCoor,
-	TEXTURE* p_texture,
-	TEXTURE* p_zTexture
-)
+void VID_SOFTWARE16::DrawFrameToVid(int p_frame,
+									float p_x,
+									float p_y,
+									float p_z,
+									unsigned int p_spriteFlags,
+									const VID_TEXCOOR* p_texCoor,
+									TEXTURE* p_texture,
+									TEXTURE* p_zTexture)
 {
 	const VID_TEXCOOR* coor = p_texCoor;
 	TEXTURE* colorTex = p_texture;
@@ -556,6 +547,12 @@ void VID_SOFTWARE16::DrawFrameToVid(
 		yEnd = ViewYMax();
 	}
 
+	if (GPU_RENDER::Active()) {
+		int army = (m_fontFlag & 4) ? ((p_spriteFlags >> 11) & 3) * PaletteSize() : 0;
+		const void* palette = static_cast<const char*>(m_unk0x48c) + army;
+		GPU_VID::DrawFrame(this, rle, yTop, x0, nRows, z, 1.0f, 0, palette, true, colorTex, zTex);
+		return;
+	}
 	int zpitch;
 	int pitch;
 	char* zbase = (char*) zTex->Lock(&zpitch, 0);
@@ -599,16 +596,14 @@ void VID_SOFTWARE16::DrawFrameToVid(
 					int count = rle[1];
 					x += rle[0];
 					rle += 2;
-					DrawTerrainAlphaSpan(
-						rle,
-						zrow + x,
-						dst + x,
-						count,
-						spanZ,
-						palette,
-						x,
-						(int) ((dst - (unsigned short*) surface) / pitch)
-					);
+					DrawTerrainAlphaSpan(rle,
+										 zrow + x,
+										 dst + x,
+										 count,
+										 spanZ,
+										 palette,
+										 x,
+										 (int) ((dst - (unsigned short*) surface) / pitch));
 					rle += count;
 					x += count;
 				}
@@ -629,55 +624,47 @@ void VID_SOFTWARE16::DrawFrameToVid(
 					int runEnd = x + count;
 					if (x < ViewXMin()) {
 						if (runEnd > ViewXMax()) {
-							DrawTerrainAlphaSpan(
-								src + ViewXMin() - x,
-								zrow + ViewXMin(),
-								dst + ViewXMin(),
-								ViewXMax() - ViewXMin(),
-								spanZ,
-								palette,
-								ViewXMin(),
-								(int) ((dst - (unsigned short*) surface) / pitch)
-							);
+							DrawTerrainAlphaSpan(src + ViewXMin() - x,
+												 zrow + ViewXMin(),
+												 dst + ViewXMin(),
+												 ViewXMax() - ViewXMin(),
+												 spanZ,
+												 palette,
+												 ViewXMin(),
+												 (int) ((dst - (unsigned short*) surface) / pitch));
 						}
 						else if (runEnd > ViewXMin()) {
-							DrawTerrainAlphaSpan(
-								src + ViewXMin() - x,
-								zrow + ViewXMin(),
-								dst + ViewXMin(),
-								count - (ViewXMin() - x),
-								spanZ,
-								palette,
-								ViewXMin(),
-								(int) ((dst - (unsigned short*) surface) / pitch)
-							);
+							DrawTerrainAlphaSpan(src + ViewXMin() - x,
+												 zrow + ViewXMin(),
+												 dst + ViewXMin(),
+												 count - (ViewXMin() - x),
+												 spanZ,
+												 palette,
+												 ViewXMin(),
+												 (int) ((dst - (unsigned short*) surface) / pitch));
 						}
 					}
 					else if (runEnd > ViewXMax()) {
 						if (x < ViewXMax()) {
-							DrawTerrainAlphaSpan(
-								src,
-								zrow + x,
-								dst + x,
-								ViewXMax() - x,
-								spanZ,
-								palette,
-								x,
-								(int) ((dst - (unsigned short*) surface) / pitch)
-							);
+							DrawTerrainAlphaSpan(src,
+												 zrow + x,
+												 dst + x,
+												 ViewXMax() - x,
+												 spanZ,
+												 palette,
+												 x,
+												 (int) ((dst - (unsigned short*) surface) / pitch));
 						}
 					}
 					else {
-						DrawTerrainAlphaSpan(
-							src,
-							zrow + x,
-							dst + x,
-							count,
-							spanZ,
-							palette,
-							x,
-							(int) ((dst - (unsigned short*) surface) / pitch)
-						);
+						DrawTerrainAlphaSpan(src,
+											 zrow + x,
+											 dst + x,
+											 count,
+											 spanZ,
+											 palette,
+											 x,
+											 (int) ((dst - (unsigned short*) surface) / pitch));
 					}
 					rle = src + count;
 					x = runEnd;

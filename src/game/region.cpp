@@ -2,9 +2,10 @@
 
 #include "game/region.h"
 
-#include "game/gametime.h"
 #include "game/game_descriptor.h"
+#include "game/gametime.h"
 #include "game/map.h"
+#include "gfx/gpu_backend.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
@@ -51,6 +52,7 @@ REGION::~REGION()
 {
 	Map->DeletePointerToSprite(this);
 	if (m_fogTable) {
+		GPU_RENDER::Forget(m_fogTable);
 		operator delete(m_fogTable);
 	}
 }
@@ -58,13 +60,11 @@ REGION::~REGION()
 // FUNCTION: ALIEN 0x449730
 void REGION::DrawSecondaryInfo()
 {
-	Graph->Box(
-		(float) (X1Scr() - 1.0f),
-		(float) (Y1Scr() - 1.0f),
-		(float) (X2Scr() + 1.0f),
-		(float) (Y2Scr() + 1.0f),
-		COLOR(255, 255, 255)
-	);
+	Graph->Box((float) (X1Scr() - 1.0f),
+			   (float) (Y1Scr() - 1.0f),
+			   (float) (X2Scr() + 1.0f),
+			   (float) (Y2Scr() + 1.0f),
+			   COLOR(255, 255, 255));
 }
 
 // FUNCTION: ALIEN 0x449790
@@ -169,32 +169,28 @@ void REGION::Draw()
 		}
 
 		if (flag & 8) {
-			Graph->DrawFog(
-				((GRAPH_CORE*) Graph)->GetViewXMin(),
-				((GRAPH_CORE*) Graph)->GetViewYMin(),
-				((GRAPH_CORE*) Graph)->GetViewXMax(),
-				((GRAPH_CORE*) Graph)->GetViewYMax(),
-				m_fogZ1,
-				m_fogZ2,
-				m_fogColor,
-				m_fogTable,
-				m_unk0x70,
-				flag & 2
-			);
+			Graph->DrawFog(((GRAPH_CORE*) Graph)->GetViewXMin(),
+						   ((GRAPH_CORE*) Graph)->GetViewYMin(),
+						   ((GRAPH_CORE*) Graph)->GetViewXMax(),
+						   ((GRAPH_CORE*) Graph)->GetViewYMax(),
+						   m_fogZ1,
+						   m_fogZ2,
+						   m_fogColor,
+						   m_fogTable,
+						   m_unk0x70,
+						   flag & 2);
 		}
 		else {
-			Graph->DrawFog(
-				X1Scr(),
-				Y1Scr(),
-				X2Scr(),
-				Y2Scr(),
-				m_fogZ1,
-				m_fogZ2,
-				m_fogColor,
-				m_fogTable,
-				m_unk0x70,
-				flag & 2
-			);
+			Graph->DrawFog(X1Scr(),
+						   Y1Scr(),
+						   X2Scr(),
+						   Y2Scr(),
+						   m_fogZ1,
+						   m_fogZ2,
+						   m_fogColor,
+						   m_fogTable,
+						   m_unk0x70,
+						   flag & 2);
 		}
 	}
 	else {
@@ -206,7 +202,6 @@ void REGION::Draw()
 VID* REGION::ConvertVid(VID* p_vid, float p_x, float p_y, float p_z)
 {
 	int iter;
-
 
 	const int layer = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ? 7 : 10;
 	for (SPRITE* sprite = Map->FirstSprite(layer, &iter); sprite; sprite = Map->NextSprite(layer, &iter)) {
@@ -230,6 +225,7 @@ void REGION::SetFogParameters(int p_z1, int p_z2, COLOR p_color)
 	m_fogZ1 = p_z1;
 	m_fogColor = p_color;
 	if (m_fogTable) {
+		GPU_RENDER::Forget(m_fogTable);
 		operator delete(m_fogTable);
 	}
 	if (m_fogZ1 >= m_fogZ2) {
@@ -239,12 +235,10 @@ void REGION::SetFogParameters(int p_z1, int p_z2, COLOR p_color)
 	unsigned short* table = (unsigned short*) operator new(16 * (m_fogZ2 - m_fogZ1) + 2);
 	m_fogTable = table;
 	if (!table) {
-		MYERROR::LogExit(
-			::Error,
-			// STRING: ALIEN 0x4847f4
-			"Enough memory for DrawFog %i",
-			8 * (m_fogZ2 - m_fogZ1) + 1
-		);
+		MYERROR::LogExit(::Error,
+						 // STRING: ALIEN 0x4847f4
+						 "Enough memory for DrawFog %i",
+						 8 * (m_fogZ2 - m_fogZ1) + 1);
 	}
 
 	int count = 8 * (m_fogZ2 - m_fogZ1);

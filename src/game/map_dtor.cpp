@@ -54,13 +54,11 @@ MAP::~MAP()
 			}
 		}
 		m_noVid = 0;
-		MYERROR::Log(
-			::Error,
-			// STRING: ALIEN 0x4824ec
-			"Vid    release %i %i",
-			TextureMemoryInUse,
-			VID::MemoryInUse
-		);
+		MYERROR::Log(::Error,
+					 // STRING: ALIEN 0x4824ec
+					 "Vid    release %i %i",
+					 TextureMemoryInUse,
+					 VID::MemoryInUse);
 	}
 	if (Graph) {
 		delete Graph;
@@ -88,10 +86,15 @@ int MAP::ProcessEvent(const SDL_Event& p_event)
 	}
 
 	switch (p_event.type) {
+	case SDL_EVENT_RENDER_TARGETS_RESET:
 	case SDL_EVENT_RENDER_DEVICE_RESET:
 		if (Platform_RenderHandleDeviceReset()) {
 			MYERROR::Log(::Error, "SDL renderer reset recovery failed: %s", SDL_GetError());
 		}
+		return 0;
+	case SDL_EVENT_RENDER_DEVICE_LOST:
+		Platform_RenderHandleDeviceLoss();
+		m_quit = 1;
 		return 0;
 
 	case SDL_EVENT_QUIT:

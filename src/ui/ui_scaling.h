@@ -52,16 +52,14 @@ inline float ScaleMetric(float p_value, float p_scale)
 	return p_value * NormalizeDrawScale(p_scale);
 }
 
-inline bool HitTestSprite(
-	float p_centerX,
-	float p_top,
-	float p_halfWidth,
-	float p_upperOffset,
-	float p_lowerOffset,
-	float p_scale,
-	float p_x,
-	float p_y
-)
+inline bool HitTestSprite(float p_centerX,
+						  float p_top,
+						  float p_halfWidth,
+						  float p_upperOffset,
+						  float p_lowerOffset,
+						  float p_scale,
+						  float p_x,
+						  float p_y)
 {
 	float halfWidth = ScaleMetric(p_halfWidth, p_scale);
 	if (p_x < p_centerX - halfWidth || p_x > p_centerX + halfWidth) {
@@ -76,15 +74,13 @@ inline bool HitTestSprite(
 	return true;
 }
 
-inline bool HitTestCentered(
-	float p_centerX,
-	float p_centerY,
-	float p_halfWidth,
-	float p_halfHeight,
-	float p_scale,
-	float p_x,
-	float p_y
-)
+inline bool HitTestCentered(float p_centerX,
+							float p_centerY,
+							float p_halfWidth,
+							float p_halfHeight,
+							float p_scale,
+							float p_x,
+							float p_y)
 {
 	float halfWidth = ScaleMetric(p_halfWidth, p_scale);
 	float halfHeight = ScaleMetric(p_halfHeight, p_scale);
@@ -98,25 +94,24 @@ struct MOUSE_TIP_PLACEMENT {
 	float m_width;
 };
 
-inline MOUSE_TIP_PLACEMENT PlaceMouseTip(
-	float p_cursorX,
-	float p_cursorY,
-	float p_viewXMax,
-	float p_viewYMin,
-	float p_glyphWidth,
-	float p_glyphHeight,
-	int p_columns,
-	float p_scale,
-	float p_depth
-)
+inline MOUSE_TIP_PLACEMENT PlaceMouseTip(float p_cursorX,
+										 float p_cursorY,
+										 float p_viewXMax,
+										 float p_viewYMin,
+										 float p_glyphWidth,
+										 float p_glyphHeight,
+										 int p_columns,
+										 float p_scale,
+										 float p_depth)
 {
 	p_scale = NormalizeDrawScale(p_scale);
 	float glyphWidth = ScaleMetric(p_glyphWidth, p_scale);
 	float glyphHeight = ScaleMetric(p_glyphHeight, p_scale);
 	float cursorGap = ScaleMetric(5.0f, p_scale);
 	float verticalGap = ScaleMetric(10.0f, p_scale);
-	MOUSE_TIP_PLACEMENT result =
-		{p_cursorX + cursorGap, p_cursorY - glyphHeight + p_depth - verticalGap, (p_columns + 2) * glyphWidth};
+	MOUSE_TIP_PLACEMENT result = {p_cursorX + cursorGap,
+								  p_cursorY - glyphHeight + p_depth - verticalGap,
+								  (p_columns + 2) * glyphWidth};
 	float halfHeight = glyphHeight * 0.5f;
 	if (halfHeight + result.m_y - p_depth <= p_viewYMin) {
 		result.m_y = halfHeight + p_cursorY + p_depth + verticalGap;
@@ -138,14 +133,12 @@ inline AXIS_ANCHOR ClassifyAxis(float p_designPosition, float p_retailExtent)
 	return ANCHOR_CENTER;
 }
 
-inline float TransformMenuAxis(
-	float p_authoredPosition,
-	int p_origin,
-	int p_menuExtent,
-	float p_viewExtent,
-	float p_scale,
-	float p_retailExtent
-)
+inline float TransformMenuAxis(float p_authoredPosition,
+							   int p_origin,
+							   int p_menuExtent,
+							   float p_viewExtent,
+							   float p_scale,
+							   float p_retailExtent)
 {
 	float authoredPosition = p_authoredPosition - (float) p_origin;
 	float menuHalf = (float) (p_menuExtent / 2);
@@ -172,18 +165,16 @@ inline bool IsShippedLegacyViewport(float p_width, float p_height, float p_scale
 		   (p_width == 1024.0f && p_height == 768.0f) || (p_width == 1280.0f && p_height == 720.0f);
 }
 
-inline MENU_POINT TransformMenuPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	int p_originX,
-	int p_originY,
-	int p_menuWidth,
-	int p_menuHeight,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale
-)
+inline MENU_POINT TransformMenuPoint(float p_x,
+									 float p_y,
+									 float p_z,
+									 int p_originX,
+									 int p_originY,
+									 int p_menuWidth,
+									 int p_menuHeight,
+									 float p_viewWidth,
+									 float p_viewHeight,
+									 float p_scale)
 {
 	bool legacyViewport = IsShippedLegacyViewport(p_viewWidth, p_viewHeight, p_scale);
 	float x = legacyViewport ? p_x - p_originX - p_menuWidth / 2 + p_viewWidth * 0.5f
@@ -199,18 +190,16 @@ inline MENU_POINT TransformMenuPoint(
 	return result;
 }
 
-inline MENU_POINT TransformCenteredMenuPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	int p_originX,
-	int p_originY,
-	int p_menuWidth,
-	int p_menuHeight,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale
-)
+inline MENU_POINT TransformCenteredMenuPoint(float p_x,
+											 float p_y,
+											 float p_z,
+											 int p_originX,
+											 int p_originY,
+											 int p_menuWidth,
+											 int p_menuHeight,
+											 float p_viewWidth,
+											 float p_viewHeight,
+											 float p_scale)
 {
 	p_scale = NormalizeDrawScale(p_scale);
 	float menuHalfWidth = (float) (p_menuWidth / 2);
@@ -226,13 +215,11 @@ inline float UntransformCanvasAxis(float p_position, float p_viewExtent, float p
 	return p_canvasExtent * 0.5f + (p_position - p_viewExtent * 0.5f) / NormalizeDrawScale(p_scale);
 }
 
-inline float TransformAnchoredReferenceAxis(
-	float p_position,
-	float p_referenceExtent,
-	float p_viewExtent,
-	float p_scale,
-	AXIS_ANCHOR p_anchor
-)
+inline float TransformAnchoredReferenceAxis(float p_position,
+											float p_referenceExtent,
+											float p_viewExtent,
+											float p_scale,
+											AXIS_ANCHOR p_anchor)
 {
 	p_scale = NormalizeDrawScale(p_scale);
 	switch (p_anchor) {
@@ -272,15 +259,13 @@ inline int GamebarInventoryOffset(float p_viewWidth, float p_viewHeight, float p
 	return gap > 0 ? gap : 0;
 }
 
-inline float NormalizeWidescreenWeaponProjectedY(
-	float p_projectedY,
-	float p_nominalWidth,
-	float p_nominalHeight,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale,
-	int p_nvid
-)
+inline float NormalizeWidescreenWeaponProjectedY(float p_projectedY,
+												 float p_nominalWidth,
+												 float p_nominalHeight,
+												 float p_viewWidth,
+												 float p_viewHeight,
+												 float p_scale,
+												 int p_nvid)
 {
 	if (p_nvid != 710 && p_nvid != 745) {
 		return p_projectedY;
@@ -318,49 +303,55 @@ inline float NormalizeWidescreenWeaponProjectedY(
 	return p_projectedY;
 }
 
-inline MENU_POINT TransformGamebarPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	int p_originX,
-	int p_originY,
-	int p_menuWidth,
-	int p_menuHeight,
-	float p_nominalWidth,
-	float p_nominalHeight,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale,
-	int p_nvid = -1
-)
+inline MENU_POINT TransformGamebarPoint(float p_x,
+										float p_y,
+										float p_z,
+										int p_originX,
+										int p_originY,
+										int p_menuWidth,
+										int p_menuHeight,
+										float p_nominalWidth,
+										float p_nominalHeight,
+										float p_viewWidth,
+										float p_viewHeight,
+										float p_scale,
+										int p_nvid = -1,
+										bool p_splitHud = false)
 {
 	if (p_nominalWidth <= 0.0f || p_nominalHeight <= 0.0f) {
-		return TransformCenteredMenuPoint(
-			p_x,
-			p_y,
-			p_z,
-			p_originX,
-			p_originY,
-			p_menuWidth,
-			p_menuHeight,
-			p_viewWidth,
-			p_viewHeight,
-			p_scale
-		);
+		return TransformCenteredMenuPoint(p_x,
+										  p_y,
+										  p_z,
+										  p_originX,
+										  p_originY,
+										  p_menuWidth,
+										  p_menuHeight,
+										  p_viewWidth,
+										  p_viewHeight,
+										  p_scale);
 	}
 
 	float nominalX = p_x - (float) p_originX - (float) (p_menuWidth / 2) + p_nominalWidth * 0.5f;
 	float nominalProjectedY = p_y - p_z - (float) p_originY - (float) (p_menuHeight / 2) + p_nominalHeight * 0.5f;
+	if (p_splitHud) {
+		AXIS_ANCHOR anchorX =
+			p_nvid == 817 ? ANCHOR_CENTER : (nominalX > p_nominalWidth * 0.5f ? ANCHOR_MAX_EDGE : ANCHOR_MIN_EDGE);
+		AXIS_ANCHOR anchorY = nominalProjectedY > p_nominalHeight * 0.875f ? ANCHOR_MAX_EDGE : ANCHOR_MIN_EDGE;
+		return {TransformAnchoredReferenceAxis(nominalX, p_nominalWidth, p_viewWidth, p_scale, anchorX),
+				TransformAnchoredReferenceAxis(nominalProjectedY, p_nominalHeight, p_viewHeight, p_scale, anchorY) +
+					p_z,
+				p_z,
+				anchorX,
+				anchorY};
+	}
 	bool wideViewport = p_viewWidth * RETAIL_HEIGHT > p_viewHeight * RETAIL_WIDTH;
-	nominalProjectedY = NormalizeWidescreenWeaponProjectedY(
-		nominalProjectedY,
-		p_nominalWidth,
-		p_nominalHeight,
-		p_viewWidth,
-		p_viewHeight,
-		p_scale,
-		p_nvid
-	);
+	nominalProjectedY = NormalizeWidescreenWeaponProjectedY(nominalProjectedY,
+															p_nominalWidth,
+															p_nominalHeight,
+															p_viewWidth,
+															p_viewHeight,
+															p_scale,
+															p_nvid);
 	bool rightInventory = wideViewport && IsGamebarInventoryRoot(p_nvid);
 	AXIS_ANCHOR anchorX = rightInventory ? ANCHOR_MAX_EDGE : ANCHOR_MIN_EDGE;
 	float referenceWidth = rightInventory ? RETAIL_WIDTH : p_nominalWidth;
@@ -370,13 +361,11 @@ inline MENU_POINT TransformGamebarPoint(
 	if (rightInventory) {
 		transformedY += 6.0f * p_scale;
 	}
-	MENU_POINT result = {
-		TransformAnchoredReferenceAxis(nominalX, referenceWidth, p_viewWidth, p_scale, anchorX),
-		transformedY + p_z,
-		p_z,
-		anchorX,
-		anchorY
-	};
+	MENU_POINT result = {TransformAnchoredReferenceAxis(nominalX, referenceWidth, p_viewWidth, p_scale, anchorX),
+						 transformedY + p_z,
+						 p_z,
+						 anchorX,
+						 anchorY};
 	return result;
 }
 
@@ -412,35 +401,29 @@ inline float UntransformScriptAxis(float p_position, float p_viewExtent, float p
 	}
 }
 
-inline MENU_POINT TransformAnchoredScriptPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale,
-	AXIS_ANCHOR p_anchorX,
-	AXIS_ANCHOR p_anchorY
-)
+inline MENU_POINT TransformAnchoredScriptPoint(float p_x,
+											   float p_y,
+											   float p_z,
+											   float p_viewWidth,
+											   float p_viewHeight,
+											   float p_scale,
+											   AXIS_ANCHOR p_anchorX,
+											   AXIS_ANCHOR p_anchorY)
 {
-	MENU_POINT result = {
-		TransformScriptAxis(p_x, p_viewWidth, p_scale, p_anchorX),
-		TransformScriptAxis(p_y - p_z, p_viewHeight, p_scale, p_anchorY) + p_z,
-		p_z,
-		p_anchorX,
-		p_anchorY
-	};
+	MENU_POINT result = {TransformScriptAxis(p_x, p_viewWidth, p_scale, p_anchorX),
+						 TransformScriptAxis(p_y - p_z, p_viewHeight, p_scale, p_anchorY) + p_z,
+						 p_z,
+						 p_anchorX,
+						 p_anchorY};
 	return result;
 }
 
-inline MENU_POINT TransformScriptPoint(
-	float p_x,
-	float p_y,
-	float p_z,
-	float p_viewWidth,
-	float p_viewHeight,
-	float p_scale
-)
+inline MENU_POINT TransformScriptPoint(float p_x,
+									   float p_y,
+									   float p_z,
+									   float p_viewWidth,
+									   float p_viewHeight,
+									   float p_scale)
 {
 	AXIS_ANCHOR anchorX = ClassifyAxis(p_x, p_viewWidth);
 	AXIS_ANCHOR anchorY = ClassifyAxis(p_y - p_z, p_viewHeight);
@@ -491,14 +474,12 @@ inline RASTER_TARGET32 MakeRasterTarget32(uint32_t* p_pixels, int p_width, int p
 	return result;
 }
 
-inline bool PixelBlockBounds(
-	const RASTER_TARGET32& p_target,
-	int p_destinationX,
-	int p_destinationY,
-	int p_width,
-	int p_height,
-	RECT_I* p_out
-)
+inline bool PixelBlockBounds(const RASTER_TARGET32& p_target,
+							 int p_destinationX,
+							 int p_destinationY,
+							 int p_width,
+							 int p_height,
+							 RECT_I* p_out)
 {
 	if (!p_out || !p_target.m_pixels || p_target.m_width <= 0 || p_target.m_height <= 0 ||
 		p_target.m_pitch < p_target.m_width || p_width <= 0 || p_height <= 0) {
@@ -520,25 +501,21 @@ inline bool PixelBlockBounds(
 	return p_out->m_left < p_out->m_right && p_out->m_top < p_out->m_bottom;
 }
 
-inline bool ScaledPixelBounds(
-	const RASTER_TARGET32& p_target,
-	int p_destinationX,
-	int p_destinationY,
-	int p_scale,
-	RECT_I* p_out
-)
+inline bool ScaledPixelBounds(const RASTER_TARGET32& p_target,
+							  int p_destinationX,
+							  int p_destinationY,
+							  int p_scale,
+							  RECT_I* p_out)
 {
 	p_scale = NormalizeScale(p_scale);
 	return PixelBlockBounds(p_target, p_destinationX, p_destinationY, p_scale, p_scale, p_out);
 }
 
-inline int StoreNearestPixel32(
-	const RASTER_TARGET32& p_target,
-	int p_destinationX,
-	int p_destinationY,
-	int p_scale,
-	uint32_t p_color
-)
+inline int StoreNearestPixel32(const RASTER_TARGET32& p_target,
+							   int p_destinationX,
+							   int p_destinationY,
+							   int p_scale,
+							   uint32_t p_color)
 {
 	RECT_I block;
 	if (!ScaledPixelBounds(p_target, p_destinationX, p_destinationY, p_scale, &block)) {
@@ -555,16 +532,14 @@ inline int StoreNearestPixel32(
 	return written;
 }
 
-inline int BlitNearest32(
-	const RASTER_TARGET32& p_target,
-	int p_destinationX,
-	int p_destinationY,
-	const uint32_t* p_source,
-	int p_sourceWidth,
-	int p_sourceHeight,
-	int p_sourcePitch,
-	int p_scale
-)
+inline int BlitNearest32(const RASTER_TARGET32& p_target,
+						 int p_destinationX,
+						 int p_destinationY,
+						 const uint32_t* p_source,
+						 int p_sourceWidth,
+						 int p_sourceHeight,
+						 int p_sourcePitch,
+						 int p_scale)
 {
 	if (!p_source || p_sourceWidth <= 0 || p_sourceHeight <= 0 || p_sourcePitch < p_sourceWidth) {
 		return 0;
@@ -572,13 +547,11 @@ inline int BlitNearest32(
 	int written = 0;
 	for (int y = 0; y < p_sourceHeight; ++y) {
 		for (int x = 0; x < p_sourceWidth; ++x) {
-			written += StoreNearestPixel32(
-				p_target,
-				p_destinationX + x * p_scale,
-				p_destinationY + y * p_scale,
-				p_scale,
-				p_source[(size_t) y * p_sourcePitch + x]
-			);
+			written += StoreNearestPixel32(p_target,
+										   p_destinationX + x * p_scale,
+										   p_destinationY + y * p_scale,
+										   p_scale,
+										   p_source[(size_t) y * p_sourcePitch + x]);
 		}
 	}
 	return written;

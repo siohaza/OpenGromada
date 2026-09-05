@@ -1,5 +1,8 @@
 #include "platform/render.h"
 
+#include "game/settings.h"
+#include "gfx/gpu_backend.h"
+
 #include <SDL3/SDL.h>
 #include <algorithm>
 #include <cmath>
@@ -9,6 +12,7 @@
 
 static SDL_Window* s_window;
 static SDL_Renderer* s_renderer;
+static SDL_GPUDevice* s_device;
 static SDL_Texture* s_texture;
 static SDL_Texture* s_movieTexture;
 static int s_movieWidth, s_movieHeight;
@@ -17,6 +21,33 @@ static unsigned int* s_pixels;
 static int s_width;
 static int s_height;
 static bool s_fitAutomaticWindow;
+static bool s_failed;
+static std::string s_error;
+
+static bool RenderFailure(const char* p_operation, const char* p_detail = nullptr)
+{
+	if (!s_failed) {
+		const char* detail = p_detail && *p_detail ? p_detail : SDL_GetError();
+		s_error = p_operation;
+		if (detail && *detail) {
+			s_error += std::string(": ") + detail;
+		}
+		SDL_LogError(SDL_LOG_CATEGORY_RENDER, "%s", s_error.c_str());
+	}
+	s_failed = true;
+	SDL_SetError("%s", s_error.c_str());
+	return false;
+}
+
+static std::string CurrentRenderError()
+{
+	const char* gpuError = s_device ? GPU_RENDER::Error() : nullptr;
+	if (gpuError && *gpuError) {
+		return gpuError;
+	}
+	const char* error = SDL_GetError();
+	return error && *error ? error : "Renderer initialization failed";
+}
 
 static void SetPortableWindowIcon()
 {
@@ -133,7 +164,11 @@ static SDL_Texture* CreateTexture(int p_width, int p_height)
 		return 0;
 	}
 
-	SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
+	if (!SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST) ||
+		!SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE)) {
+		SDL_DestroyTexture(texture);
+		return nullptr;
+	}
 	return texture;
 }
 
@@ -143,14 +178,16 @@ static int ReplaceLogicalTargets(int p_width, int p_height)
 		(size_t) p_width * (size_t) p_height > SIZE_MAX / sizeof(unsigned int)) {
 		return 1;
 	}
-	SDL_Texture* texture = CreateTexture(p_width, p_height);
-	if (!texture) {
+	SDL_Texture* texture = s_device ? nullptr : CreateTexture(p_width, p_height);
+	if (!s_device && !texture) {
 		return 1;
 	}
 
-	unsigned int* pixels = (unsigned int*) calloc((size_t) p_width * p_height, sizeof(unsigned int));
-	if (!pixels) {
+	unsigned int* pixels =
+		s_device ? nullptr : (unsigned int*) calloc((size_t) p_width * p_height, sizeof(unsigned int));
+	if (!s_device && !pixels) {
 		SDL_DestroyTexture(texture);
+		SDL_OutOfMemory();
 		return 1;
 	}
 	if (!SDL_SetRenderLogicalPresentation(s_renderer, p_width, p_height, SDL_LOGICAL_PRESENTATION_STRETCH)) {
@@ -158,8 +195,21 @@ static int ReplaceLogicalTargets(int p_width, int p_height)
 		SDL_DestroyTexture(texture);
 		return 1;
 	}
+	if (s_device && !(GPU_RENDER::Active() ? GPU_RENDER::Resize(p_width, p_height)
+										   : GPU_RENDER::Open(s_renderer, p_width, p_height))) {
+		const std::string error = CurrentRenderError();
+		if (s_width > 0 && s_height > 0) {
+			SDL_SetRenderLogicalPresentation(s_renderer, s_width, s_height, SDL_LOGICAL_PRESENTATION_STRETCH);
+		}
+		SDL_DestroyTexture(texture);
+		SDL_SetError("%s", error.c_str());
+		return 1;
+	}
+	if (s_device) {
+		texture = GPU_RENDER::OutputTexture(false);
+	}
 
-	if (s_texture) {
+	if (s_texture && !s_device) {
 		SDL_DestroyTexture(s_texture);
 	}
 	free(s_pixels);
@@ -173,62 +223,129 @@ static int ReplaceLogicalTargets(int p_width, int p_height)
 	return 0;
 }
 
-int Platform_RenderOpen(
-	const char* p_title,
-	int p_outputWidth,
-	int p_outputHeight,
-	int p_frameWidth,
-	int p_frameHeight,
-	int p_fullscreen,
-	int p_fitAutomaticWindow,
-	unsigned int p_display
-)
+static int OpenRenderer(const char* p_title,
+						int p_outputWidth,
+						int p_outputHeight,
+						int p_frameWidth,
+						int p_frameHeight,
+						int p_fullscreen,
+						int p_fitAutomaticWindow,
+						unsigned int p_display,
+						bool p_gpu)
 {
-	if (s_window) {
-		return 0;
-	}
-	if (p_outputWidth <= 0 || p_outputHeight <= 0 || p_frameWidth <= 0 || p_frameHeight <= 0) {
+	SDL_WindowFlags flags = p_fullscreen ? SDL_WINDOW_FULLSCREEN : 0;
+	s_window = SDL_CreateWindow(p_title, p_outputWidth, p_outputHeight, flags);
+	if (!s_window) {
 		return 1;
 	}
-
-	if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
-		return 1;
+	if (p_gpu) {
+		s_device =
+			SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_SPIRV | SDL_GPU_SHADERFORMAT_DXIL | SDL_GPU_SHADERFORMAT_MSL,
+								false,
+								Settings_GPUDriver());
+		if (!s_device) {
+			return 1;
+		}
+		s_renderer = SDL_CreateGPURenderer(s_device, s_window);
 	}
-
-	SDL_WindowFlags flags = 0;
-	if (p_fullscreen) {
-		flags |= SDL_WINDOW_FULLSCREEN;
+	else {
+		s_renderer = SDL_CreateRenderer(s_window, "software");
 	}
-
-	if (!SDL_CreateWindowAndRenderer(p_title, p_outputWidth, p_outputHeight, flags, &s_window, &s_renderer)) {
-		s_window = 0;
-		s_renderer = 0;
+	if (!s_renderer) {
 		return 1;
 	}
 	SetPortableWindowIcon();
-
 	s_fitAutomaticWindow = p_fitAutomaticWindow != 0;
 	if (p_display) {
-		SDL_SetWindowPosition(
-			s_window,
-			SDL_WINDOWPOS_CENTERED_DISPLAY(p_display),
-			SDL_WINDOWPOS_CENTERED_DISPLAY(p_display)
-		);
+		SDL_SetWindowPosition(s_window,
+							  SDL_WINDOWPOS_CENTERED_DISPLAY(p_display),
+							  SDL_WINDOWPOS_CENTERED_DISPLAY(p_display));
 		SDL_SyncWindow(s_window);
 	}
 	if (s_fitAutomaticWindow) {
 		FitWindowToUsableBounds(p_display);
 	}
-
 	if (ReplaceLogicalTargets(p_frameWidth, p_frameHeight)) {
-		Platform_RenderClose();
+		return 1;
+	}
+	if (!SDL_StartTextInput(s_window)) {
+		return 1;
+	}
+	return 0;
+}
+
+int Platform_RenderOpen(const char* p_title,
+						int p_outputWidth,
+						int p_outputHeight,
+						int p_frameWidth,
+						int p_frameHeight,
+						int p_fullscreen,
+						int p_fitAutomaticWindow,
+						unsigned int p_display)
+{
+	if (s_window) {
+		return s_failed ? 1 : 0;
+	}
+	s_failed = false;
+	s_error.clear();
+	if (p_outputWidth <= 0 || p_outputHeight <= 0 || p_frameWidth <= 0 || p_frameHeight <= 0) {
+		RenderFailure("Invalid render dimensions");
 		return 1;
 	}
 
-	if (!SDL_StartTextInput(s_window)) {
-		Platform_RenderClose();
+	if (!SDL_InitSubSystem(SDL_INIT_VIDEO)) {
+		RenderFailure("SDL video initialization failed");
 		return 1;
 	}
+	const bool gpu = Settings_Renderer() != SETTINGS_RENDERER_SOFTWARE;
+	std::string fallback;
+	if (OpenRenderer(p_title,
+					 p_outputWidth,
+					 p_outputHeight,
+					 p_frameWidth,
+					 p_frameHeight,
+					 p_fullscreen,
+					 p_fitAutomaticWindow,
+					 p_display,
+					 gpu)) {
+		const std::string error = CurrentRenderError();
+		Platform_RenderClose();
+		if (!gpu || Settings_Renderer() == SETTINGS_RENDERER_GPU) {
+			RenderFailure(gpu ? "GPU renderer startup failed" : "Software renderer startup failed", error.c_str());
+			return 1;
+		}
+		fallback = error;
+		SDL_LogWarn(SDL_LOG_CATEGORY_RENDER,
+					"GPU renderer unavailable; falling back to software: %s",
+					fallback.c_str());
+		SDL_ClearError();
+		if (OpenRenderer(p_title,
+						 p_outputWidth,
+						 p_outputHeight,
+						 p_frameWidth,
+						 p_frameHeight,
+						 p_fullscreen,
+						 p_fitAutomaticWindow,
+						 p_display,
+						 false)) {
+			const std::string softwareError = CurrentRenderError();
+			Platform_RenderClose();
+			RenderFailure("Software renderer fallback failed", softwareError.c_str());
+			return 1;
+		}
+	}
+	int outputWidth = 0, outputHeight = 0;
+	Platform_RenderOutputSize(&outputWidth, &outputHeight);
+	SDL_Log("Renderer selected: %s; driver=%s; requested=%s; logical=%dx%d; output=%dx%d%s%s",
+			Platform_RenderBackendName(),
+			Platform_RenderDriverName(),
+			Settings_RendererName(),
+			s_width,
+			s_height,
+			outputWidth,
+			outputHeight,
+			fallback.empty() ? "" : "; fallback=",
+			fallback.c_str());
 	return 0;
 }
 
@@ -239,15 +356,23 @@ void Platform_RenderClose()
 	if (s_window && SDL_TextInputActive(s_window)) {
 		SDL_StopTextInput(s_window);
 	}
-	if (s_texture) {
-		SDL_DestroyTexture(s_texture);
-		s_texture = 0;
+	if (s_renderer) {
+		SDL_FlushRenderer(s_renderer);
 	}
+	GPU_RENDER::Close();
+	if (s_texture && !s_device) {
+		SDL_DestroyTexture(s_texture);
+	}
+	s_texture = 0;
 	free(s_pixels);
 	s_pixels = 0;
 	if (s_renderer) {
 		SDL_DestroyRenderer(s_renderer);
 		s_renderer = 0;
+	}
+	if (s_device) {
+		SDL_DestroyGPUDevice(s_device);
+		s_device = nullptr;
 	}
 	if (s_window) {
 		SDL_DestroyWindow(s_window);
@@ -256,6 +381,7 @@ void Platform_RenderClose()
 	s_width = 0;
 	s_height = 0;
 	s_fitAutomaticWindow = false;
+	s_debugTextCount = 0;
 }
 
 unsigned int* Platform_RenderPixels()
@@ -280,7 +406,7 @@ int Platform_RenderHeight()
 
 int Platform_RenderResizeLogical(int p_width, int p_height)
 {
-	if (!s_window || !s_renderer || !s_pixels) {
+	if (s_failed || !s_window || !s_renderer || (!s_device && !s_pixels)) {
 		return 1;
 	}
 	if (p_width == s_width && p_height == s_height) {
@@ -291,7 +417,7 @@ int Platform_RenderResizeLogical(int p_width, int p_height)
 
 void Platform_RenderPresent()
 {
-	if (!s_renderer || !s_texture) {
+	if (s_failed || !s_renderer || !s_texture) {
 		return;
 	}
 
@@ -300,20 +426,31 @@ void Platform_RenderPresent()
 		const char* env = SDL_getenv("ALIEN_FRAME_PROFILE");
 		s_profile = env && *env && *env != '0';
 	}
-	static Uint64 s_lastPresentNs, s_gameNs, s_updateNs, s_presentNs;
+	static Uint64 s_lastPresentNs, s_gameNs, s_updateNs, s_drawNs, s_presentNs;
 	static int s_frames;
 	Uint64 t0 = SDL_GetTicksNS();
 	if (s_profile && s_lastPresentNs) {
 		s_gameNs += t0 - s_lastPresentNs;
 	}
 
-	SDL_UpdateTexture(s_texture, 0, s_pixels, s_width * (int) sizeof(unsigned int));
-	s_hasPresented = true;
+	if (s_device) {
+		s_texture = GPU_RENDER::OutputTexture();
+		if (!s_texture) {
+			RenderFailure("GPU output export failed", GPU_RENDER::Error());
+			return;
+		}
+	}
+	else if (!SDL_UpdateTexture(s_texture, 0, s_pixels, s_width * (int) sizeof(unsigned int))) {
+		RenderFailure("Software frame upload failed");
+		return;
+	}
 	Uint64 t1 = s_profile ? SDL_GetTicksNS() : 0;
 
-	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
-	SDL_RenderClear(s_renderer);
-	SDL_RenderTexture(s_renderer, s_texture, 0, 0);
+	if (!SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255) || !SDL_RenderClear(s_renderer) ||
+		!SDL_RenderTexture(s_renderer, s_texture, 0, 0)) {
+		RenderFailure("Frame composition failed");
+		return;
+	}
 
 	for (int i = 0; i < s_debugTextCount; ++i) {
 		const DEBUG_TEXT& t = s_debugText[i];
@@ -321,15 +458,17 @@ void Platform_RenderPresent()
 		if (scale < 1.0f) {
 			scale = 1.0f;
 		}
-		SDL_SetRenderScale(s_renderer, scale, scale);
-		SDL_SetRenderDrawColor(
-			s_renderer,
-			(t.m_color >> 16) & 0xff,
-			(t.m_color >> 8) & 0xff,
-			t.m_color & 0xff,
-			(t.m_color >> 24) & 0xff
-		);
-		SDL_RenderDebugText(s_renderer, t.m_x / scale, t.m_y / scale, t.m_text);
+		if (!SDL_SetRenderScale(s_renderer, scale, scale) ||
+			!SDL_SetRenderDrawColor(s_renderer,
+									(t.m_color >> 16) & 0xff,
+									(t.m_color >> 8) & 0xff,
+									t.m_color & 0xff,
+									(t.m_color >> 24) & 0xff) ||
+			!SDL_RenderDebugText(s_renderer, t.m_x / scale, t.m_y / scale, t.m_text)) {
+			SDL_SetRenderScale(s_renderer, 1.0f, 1.0f);
+			RenderFailure("Debug text presentation failed");
+			return;
+		}
 	}
 	SDL_SetRenderScale(s_renderer, 1.0f, 1.0f);
 	s_debugTextCount = 0;
@@ -343,8 +482,20 @@ void Platform_RenderPresent()
 	if (s_dump) {
 		++s_dumpFrame;
 		if (s_dumpFrame % 300 == 0) {
-			SDL_Surface* shot = SDL_CreateSurfaceFrom(s_width, s_height, SDL_PIXELFORMAT_XRGB8888, s_pixels, s_width * 4);
+			SDL_Surface* shot =
+				s_device ? SDL_CreateSurface(s_width, s_height, SDL_PIXELFORMAT_XRGB8888)
+						 : SDL_CreateSurfaceFrom(s_width, s_height, SDL_PIXELFORMAT_XRGB8888, s_pixels, s_width * 4);
 			if (shot) {
+				if (s_device && !GPU_RENDER::ReadColor(0,
+													   0,
+													   s_width,
+													   s_height,
+													   static_cast<uint32_t*>(shot->pixels),
+													   shot->pitch / 4)) {
+					SDL_DestroySurface(shot);
+					RenderFailure("GPU frame capture failed", GPU_RENDER::Error());
+					return;
+				}
 				char path[512];
 				SDL_snprintf(path, sizeof(path), "%s/frame%04d.bmp", SDL_getenv("ALIEN_FRAME_DUMP"), s_dumpFrame);
 				SDL_SaveBMP(shot, path);
@@ -354,25 +505,60 @@ void Platform_RenderPresent()
 	}
 
 	Uint64 t2 = s_profile ? SDL_GetTicksNS() : 0;
-	SDL_RenderPresent(s_renderer);
+	if (!SDL_RenderPresent(s_renderer)) {
+		RenderFailure("Frame presentation failed");
+		return;
+	}
+	s_hasPresented = true;
 	if (s_profile) {
 		Uint64 t3 = SDL_GetTicksNS();
-		s_updateNs += t2 - t1;
+		s_updateNs += t1 - t0;
+		s_drawNs += t2 - t1;
 		s_presentNs += t3 - t2;
 		s_lastPresentNs = t3;
 		if (++s_frames >= 120) {
-			SDL_Log(
-				"frame profile: game+draw %.1fms, texture update %.1fms, present %.1fms (%dx%d)",
-				(double) s_gameNs / s_frames * 1e-6,
-				(double) s_updateNs / s_frames * 1e-6,
-				(double) s_presentNs / s_frames * 1e-6,
-				s_width,
-				s_height
-			);
+			SDL_Log("frame profile [%s]: game+draw %.1fms, upload/submit %.1fms, composition/capture %.1fms, present "
+					"%.1fms (%dx%d)",
+					Platform_RenderBackendName(),
+					(double) s_gameNs / s_frames * 1e-6,
+					(double) s_updateNs / s_frames * 1e-6,
+					(double) s_drawNs / s_frames * 1e-6,
+					(double) s_presentNs / s_frames * 1e-6,
+					s_width,
+					s_height);
 			s_frames = 0;
-			s_gameNs = s_updateNs = s_presentNs = 0;
+			s_gameNs = s_updateNs = s_drawNs = s_presentNs = 0;
 		}
 	}
+}
+
+bool Platform_RenderFailed()
+{
+	if (!s_failed && s_device) {
+		const char* error = GPU_RENDER::Error();
+		if (error && *error) {
+			RenderFailure("GPU rendering failed", error);
+		}
+	}
+	return s_failed;
+}
+
+const char* Platform_RenderError()
+{
+	return s_error.c_str();
+}
+
+const char* Platform_RenderBackendName()
+{
+	return !s_renderer ? "none" : s_device ? "gpu" : "software";
+}
+
+const char* Platform_RenderDriverName()
+{
+	const char* name = s_device     ? SDL_GetGPUDeviceDriver(s_device)
+					   : s_renderer ? SDL_GetRendererName(s_renderer)
+									: nullptr;
+	return name ? name : "none";
 }
 
 void Platform_RenderCloseMovie()
@@ -384,64 +570,98 @@ void Platform_RenderCloseMovie()
 
 bool Platform_RenderPresentMovie(const unsigned int* p_pixels, int p_width, int p_height, int p_x, int p_y)
 {
-	if (!s_renderer || !s_texture) return false;
-
+	if (s_failed || !s_renderer || !s_texture) {
+		return false;
+	}
 
 	int logicalWidth = 0, logicalHeight = 0;
 	SDL_RendererLogicalPresentation mode;
 	if (!SDL_GetRenderLogicalPresentation(s_renderer, &logicalWidth, &logicalHeight, &mode) ||
-		!SDL_SetRenderLogicalPresentation(s_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED)) return false;
+		!SDL_SetRenderLogicalPresentation(s_renderer, 0, 0, SDL_LOGICAL_PRESENTATION_DISABLED)) {
+		return RenderFailure("Movie coordinate setup failed");
+	}
 	struct RestorePresentation {
 		int w, h;
 		SDL_RendererLogicalPresentation mode;
 		~RestorePresentation() { SDL_SetRenderLogicalPresentation(s_renderer, w, h, mode); }
 	} restore{logicalWidth, logicalHeight, mode};
 
-
-	SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255);
-	if (!SDL_RenderClear(s_renderer)) return false;
-	if (s_hasPresented && !SDL_RenderTexture(s_renderer, s_texture, nullptr, nullptr)) return false;
+	if (!SDL_SetRenderDrawColor(s_renderer, 0, 0, 0, 255) || !SDL_RenderClear(s_renderer)) {
+		return RenderFailure("Movie background clear failed");
+	}
+	if (s_hasPresented && !SDL_RenderTexture(s_renderer, s_texture, nullptr, nullptr)) {
+		return RenderFailure("Movie background restore failed");
+	}
 	const SDL_FRect rect{(float) p_x, (float) p_y, 640.0f, 480.0f};
-	if (!SDL_RenderFillRect(s_renderer, &rect)) return false;
+	if (!SDL_RenderFillRect(s_renderer, &rect)) {
+		return RenderFailure("Movie rectangle draw failed");
+	}
 	if (p_pixels) {
-		if (p_width <= 0 || p_height <= 0 || p_width > 1920 || p_height > 1080) return false;
+		if (p_width <= 0 || p_height <= 0 || p_width > 1920 || p_height > 1080) {
+			return false;
+		}
 		if (!s_movieTexture || s_movieWidth != p_width || s_movieHeight != p_height) {
 			Platform_RenderCloseMovie();
-			s_movieTexture = SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888,
-				SDL_TEXTUREACCESS_STREAMING, p_width, p_height);
-			if (!s_movieTexture) return false;
-			SDL_SetTextureScaleMode(s_movieTexture, SDL_SCALEMODE_LINEAR);
-			SDL_SetTextureBlendMode(s_movieTexture, SDL_BLENDMODE_NONE);
+			s_movieTexture =
+				SDL_CreateTexture(s_renderer, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, p_width, p_height);
+			if (!s_movieTexture) {
+				return RenderFailure("Movie texture allocation failed");
+			}
+			if (!SDL_SetTextureScaleMode(s_movieTexture, SDL_SCALEMODE_LINEAR) ||
+				!SDL_SetTextureBlendMode(s_movieTexture, SDL_BLENDMODE_NONE)) {
+				return RenderFailure("Movie texture state failed");
+			}
 			s_movieWidth = p_width;
 			s_movieHeight = p_height;
 		}
 		if (!SDL_UpdateTexture(s_movieTexture, nullptr, p_pixels, p_width * 4) ||
-			!SDL_RenderTexture(s_renderer, s_movieTexture, nullptr, &rect)) return false;
+			!SDL_RenderTexture(s_renderer, s_movieTexture, nullptr, &rect)) {
+			return RenderFailure("Movie frame draw failed");
+		}
 	}
 	s_debugTextCount = 0;
-	return SDL_RenderPresent(s_renderer);
+	return SDL_RenderPresent(s_renderer) || RenderFailure("Movie frame presentation failed");
 }
 
 int Platform_RenderHandleDeviceReset()
 {
 	Platform_RenderCloseMovie();
+	const bool hadPresented = s_hasPresented;
 	s_hasPresented = false;
-	if (!s_renderer || !s_pixels || s_width <= 0 || s_height <= 0) {
+	if (s_failed || !s_renderer || (!s_device && !s_pixels) || s_width <= 0 || s_height <= 0) {
+		RenderFailure("Renderer reset cannot recover invalid targets");
 		return 1;
 	}
-	SDL_Texture* texture = CreateTexture(s_width, s_height);
-	if (!texture) {
+	SDL_Texture* texture = s_device ? nullptr : CreateTexture(s_width, s_height);
+	if (!s_device && !texture) {
+		RenderFailure("Renderer reset target allocation failed");
 		return 1;
 	}
 	if (!SDL_SetRenderLogicalPresentation(s_renderer, s_width, s_height, SDL_LOGICAL_PRESENTATION_STRETCH)) {
 		SDL_DestroyTexture(texture);
+		RenderFailure("Renderer reset logical presentation failed");
 		return 1;
 	}
-	if (s_texture) {
+	if (s_device && !GPU_RENDER::Recreate()) {
+		SDL_DestroyTexture(texture);
+		RenderFailure("GPU renderer reset failed", GPU_RENDER::Error());
+		return 1;
+	}
+	if (s_device) {
+		texture = GPU_RENDER::OutputTexture(false);
+		s_hasPresented = hadPresented;
+	}
+	if (s_texture && !s_device) {
 		SDL_DestroyTexture(s_texture);
 	}
 	s_texture = texture;
 	return 0;
+}
+
+void Platform_RenderHandleDeviceLoss()
+{
+	RenderFailure("Graphics device was lost and cannot be recovered",
+				  "Restart the engine after restoring the graphics device");
 }
 
 void Platform_RenderSetFullscreen(int p_fullscreen)
@@ -454,7 +674,16 @@ void Platform_RenderSetFullscreen(int p_fullscreen)
 void Platform_RenderSetVSync(int p_vsync)
 {
 	if (s_renderer) {
-		SDL_SetRenderVSync(s_renderer, p_vsync ? 1 : SDL_RENDERER_VSYNC_DISABLED);
+		if (!SDL_SetRenderVSync(s_renderer, p_vsync ? 1 : SDL_RENDERER_VSYNC_DISABLED)) {
+			SDL_LogWarn(SDL_LOG_CATEGORY_RENDER,
+						"Renderer vsync request %i was not applied: %s",
+						p_vsync,
+						SDL_GetError());
+		}
+		int applied = 0;
+		if (SDL_GetRenderVSync(s_renderer, &applied)) {
+			SDL_Log("Renderer vsync: requested=%i, applied=%i", p_vsync != 0, applied);
+		}
 	}
 }
 
@@ -466,6 +695,22 @@ SDL_Window* Platform_RenderWindow()
 SDL_Renderer* Platform_RenderRenderer()
 {
 	return s_renderer;
+}
+
+bool Platform_RenderConvertEvent(SDL_Event* p_event)
+{
+	return s_renderer && p_event && SDL_ConvertEventToRenderCoordinates(s_renderer, p_event);
+}
+
+bool Platform_RenderOutputSize(int* p_width, int* p_height)
+{
+	if (p_width) {
+		*p_width = 0;
+	}
+	if (p_height) {
+		*p_height = 0;
+	}
+	return s_renderer && p_width && p_height && SDL_GetRenderOutputSize(s_renderer, p_width, p_height);
 }
 
 void Platform_RenderRestoreWindowPosition(int p_x, int p_y)

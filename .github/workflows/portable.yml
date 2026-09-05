@@ -12,6 +12,34 @@ permissions:
   contents: read
 
 jobs:
+  shaders:
+    name: Verify embedded GPU shaders
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}
+      - uses: libsdl-org/setup-sdl@main
+        id: sdl
+        with:
+          version: 3.4.14
+          build-type: Release
+          cmake-generator: Ninja
+          cmake-arguments: -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TEST_LIBRARY=OFF
+          install-linux-dependencies: true
+          discriminator: shader-tools-linux-x64
+      - name: Build pinned shader tools
+        run: >-
+          cmake -DWORK_DIR="${{ github.workspace }}/dependencies/shader-tools"
+          -DSDL_PREFIX="${{ steps.sdl.outputs.prefix }}"
+          -P cmake/BuildShaderTools.cmake
+      - name: Check embedded shaders
+        run: >-
+          cmake -DSHADERCROSS="${{ github.workspace }}/dependencies/shader-tools/build/shadercross"
+          -DSOURCE_DIR="${{ github.workspace }}"
+          -DWORK_DIR="${{ github.workspace }}/build/shader-check"
+          -DCHECK_ONLY=ON -P cmake/GenerateShaders.cmake
+
   linux:
     name: Linux ${{ matrix.compiler }} ${{ matrix.arch }} Release
     runs-on: ${{ matrix.runner }}
@@ -48,7 +76,7 @@ jobs:
       - uses: libsdl-org/setup-sdl@main
         id: sdl
         with:
-          version: 3-latest
+          version: 3.4.14
           pre-release: false
           build-type: Release
           cmake-generator: Ninja
@@ -122,7 +150,7 @@ jobs:
       - uses: libsdl-org/setup-sdl@main
         id: sdl
         with:
-          version: 3-latest
+          version: 3.4.14
           pre-release: false
           build-type: Release
           cmake-generator: Ninja
@@ -195,7 +223,7 @@ jobs:
       - uses: libsdl-org/setup-sdl@main
         id: sdl
         with:
-          version: 3-latest
+          version: 3.4.14
           pre-release: false
           build-type: Release
           cmake-generator: Ninja
@@ -230,9 +258,9 @@ jobs:
         run: |
           cmake --install build --prefix package/OpenGromada
           if ($LASTEXITCODE -ne 0) { throw 'Installation failed' }
-          cmake -DFFMPEG_VCPKG_ROOT=dependencies/vcpkg `
-            -DFFMPEG_TRIPLET="${{ matrix.arch }}-gromada-windows" `
-            -DFFMPEG_PACKAGE_DIR=package/OpenGromada -DFFMPEG_SOURCE_DIR=. `
+          cmake "-DFFMPEG_VCPKG_ROOT=dependencies/vcpkg" `
+            "-DFFMPEG_TRIPLET=${{ matrix.arch }}-gromada-windows" `
+            "-DFFMPEG_PACKAGE_DIR=package/OpenGromada" "-DFFMPEG_SOURCE_DIR=." `
             -P cmake/PackageFFmpeg.cmake
           if ($LASTEXITCODE -ne 0) { throw 'Movie packaging failed' }
           Copy-Item README.md, LICENSE.md package/OpenGromada/
@@ -250,7 +278,7 @@ jobs:
   publish:
     name: Publish GitHub Release assets
     if: github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')
-    needs: [linux, macos, windows]
+    needs: [shaders, linux, macos, windows]
     runs-on: ubuntu-latest
     concurrency:
       group: release-${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}

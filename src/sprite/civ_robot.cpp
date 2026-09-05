@@ -48,6 +48,7 @@ CIV_ROBOT::CIV_ROBOT(VID* p_vid, float p_x, float p_y, float p_z, ANGLE p_dir, S
 	m_state = 0;
 	m_target = 0;
 	m_unk0xa0 = 0;
+	m_unk0xa4 = 0;
 }
 
 // FUNCTION: ALIEN 0x44a650

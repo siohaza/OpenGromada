@@ -3,17 +3,16 @@
 
 struct SDL_Window;
 struct SDL_Renderer;
+union SDL_Event;
 
-int Platform_RenderOpen(
-	const char* p_title,
-	int p_outputWidth,
-	int p_outputHeight,
-	int p_frameWidth,
-	int p_frameHeight,
-	int p_fullscreen,
-	int p_fitAutomaticWindow = 0,
-	unsigned int p_display = 0
-);
+int Platform_RenderOpen(const char* p_title,
+						int p_outputWidth,
+						int p_outputHeight,
+						int p_frameWidth,
+						int p_frameHeight,
+						int p_fullscreen,
+						int p_fitAutomaticWindow = 0,
+						unsigned int p_display = 0);
 
 void Platform_RenderClose();
 
@@ -27,18 +26,24 @@ int Platform_RenderHeight();
 int Platform_RenderResizeLogical(int p_width, int p_height);
 
 void Platform_RenderPresent();
-
+bool Platform_RenderFailed();
+const char* Platform_RenderError();
+const char* Platform_RenderBackendName();
+const char* Platform_RenderDriverName();
 
 bool Platform_RenderPresentMovie(const unsigned int* p_pixels, int p_width, int p_height, int p_x, int p_y);
 void Platform_RenderCloseMovie();
 
 int Platform_RenderHandleDeviceReset();
+void Platform_RenderHandleDeviceLoss();
 
 void Platform_RenderSetFullscreen(int p_fullscreen);
 void Platform_RenderSetVSync(int p_vsync);
 
 SDL_Window* Platform_RenderWindow();
 SDL_Renderer* Platform_RenderRenderer();
+bool Platform_RenderConvertEvent(SDL_Event* p_event);
+bool Platform_RenderOutputSize(int* p_width, int* p_height);
 
 void Platform_RenderRestoreWindowPosition(int p_x, int p_y);
 

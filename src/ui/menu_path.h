@@ -9,26 +9,26 @@
 namespace MENU_PATH
 {
 
-inline int PreferredGamebarWidth(int p_logicalWidth, int p_uiScale)
+inline int PreferredGamebarWidth(int p_logicalWidth, float p_uiScale)
 {
-	if (p_uiScale < 1) {
+	if (!(p_uiScale > 0.0f)) {
 		p_uiScale = 1;
 	}
 	else if (p_uiScale > 3) {
 		p_uiScale = 3;
 	}
 	if (p_logicalWidth <= 0) {
-		p_logicalWidth = 640 * p_uiScale;
+		p_logicalWidth = (int) (640 * p_uiScale);
 	}
 
 	const int widths[] = {640, 800, 1024, 1280};
 	int best = widths[0];
-	long long bestDistance = (long long) p_logicalWidth - (long long) best * p_uiScale;
+	double bestDistance = (double) p_logicalWidth - (double) best * p_uiScale;
 	if (bestDistance < 0) {
 		bestDistance = -bestDistance;
 	}
 	for (size_t i = 1; i < sizeof(widths) / sizeof(widths[0]); ++i) {
-		long long distance = (long long) p_logicalWidth - (long long) widths[i] * p_uiScale;
+		double distance = (double) p_logicalWidth - (double) widths[i] * p_uiScale;
 		if (distance < 0) {
 			distance = -distance;
 		}
