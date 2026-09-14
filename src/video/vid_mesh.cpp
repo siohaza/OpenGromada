@@ -1,6 +1,8 @@
 #include "video/vid_mesh.h"
 
 #include "game/map.h"
+#include "gfx/gpu_backend.h"
+#include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
@@ -10,6 +12,7 @@
 #include "video/vid_exdata.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <vector>
 
@@ -24,11 +27,17 @@ struct VID_MESH::FRAME_SET {
 	std::vector<FRAME> m_frames;
 };
 
-VID_MESH::VID_MESH() : m_reportedUnsupported(false)
+static bool DrawMeshInViewPort(const GRAPH_CORE* p_graph, float p_x, float p_y)
+{
+	return p_x >= p_graph->m_viewXMin && p_x < p_graph->m_viewXMax && p_y >= p_graph->m_viewYMin &&
+		   p_y < p_graph->m_viewYMax;
+}
+
+VID_MESH::VID_MESH()
 {
 }
 
-VID_MESH::VID_MESH(VID_MESH& p_other) : m_frames(p_other.m_frames), m_reportedUnsupported(false)
+VID_MESH::VID_MESH(VID_MESH& p_other) : m_frames(p_other.m_frames)
 {
 	m_weaponPtr = p_other.m_weaponPtr;
 	p_other.m_weaponPtr = this;
@@ -74,8 +83,8 @@ void VID_MESH::Load(RESOURCE* p_res)
 	if (p_res->ReadWords(&format, 4) || !p_res->RequireEnd()) {
 		return;
 	}
-	if (m_pixelFlag16 != 0x1012 || format != D3DFMT_A4R4G4B4 || !(m_flag & 0x8000)) {
-		p_res->Fail("unsupported legacy mesh pixel format or world-space mesh");
+	if (m_pixelFlag16 != 0x1012 || format != D3DFMT_A4R4G4B4) {
+		p_res->Fail("unsupported legacy mesh pixel format");
 		return;
 	}
 	if (m_dotFrameCount <= 0 || p_res->GoBegin(0x41544144  )) {
@@ -154,12 +163,21 @@ int VID_MESH::Draw(SPRITE* p_sprite)
 	if (m_unk0x47c & 0x40) {
 		return 0;
 	}
-	if (!(m_flag & 0x8000)) {
-		if (!m_reportedUnsupported) {
-			Error(5, "unsupported world-space legacy mesh", p_sprite->m_noCadr);
-			m_reportedUnsupported = true;
+	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
+
+	const bool depthGate = !(m_flag & 0x8000) && !(m_pixelFlag16 & 4);
+	const int anchorX = (int) (p_sprite->m_x - Map->m_shiftX);
+	const int anchorY = (int) (p_sprite->m_y - p_sprite->m_z - Map->m_shiftY);
+	const int anchorThreshold = 8 * (int) p_sprite->m_z + 1024;
+	if (depthGate) {
+		if (!DrawMeshInViewPort(graph, (float) anchorX, (float) anchorY)) {
+			return 0;
 		}
-		return 0;
+		if (!GPU_RENDER::Active() &&
+			(!graph->m_zbuffer || graph->m_zpitch < (int) graph->m_width ||
+			 ((unsigned short*) graph->m_zbuffer)[anchorX + anchorY * graph->m_zpitch] > anchorThreshold)) {
+			return 0;
+		}
 	}
 	const FRAME_SET::FRAME& frame = m_frames->m_frames[p_sprite->m_noCadr];
 	double scaleX = double(m_gammaR) * p_sprite->UIDrawScale();
@@ -202,8 +220,6 @@ int VID_MESH::Draw(SPRITE* p_sprite)
 	}
 	const int dst[] = {int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3])};
 	const int src[] = {0, 0, frame.m_texture->m_width, frame.m_texture->m_height};
-	GRAPH_CORE* graph = (GRAPH_CORE*) Graph;
-
 
 	graph->SetRenderState(D3DRS_ZFUNC, D3DCMP_ALWAYS);
 	graph->SetAlphaBlend(D3DBLEND_SRCALPHA, D3DBLEND_INVSRCALPHA);
@@ -215,6 +231,14 @@ int VID_MESH::Draw(SPRITE* p_sprite)
 		withScreen.Add(color, GAMMA(GAMMA::RAW_COPY, graph->m_gammaSet.m_a, graph->m_gammaSet.m_b));
 		drawGamma = &withScreen;
 	}
+
+	const uint32_t gpuAnchor =
+		depthGate && GPU_RENDER::Active() ? GPU_TEXTURE::Visibility(anchorX, anchorY, anchorThreshold) : 0;
+	GPU_TEXTURE::SetPredicate(gpuAnchor);
 	frame.m_texture->Draw_z(0.99999988f, 0, dst, src, drawGamma);
+	GPU_TEXTURE::SetPredicate(0);
+	if (gpuAnchor) {
+		GPU_RENDER::Release(gpuAnchor);
+	}
 	return 0;
 }

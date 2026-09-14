@@ -192,16 +192,13 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 
 
 		if (scratch.m_pixelFlag16 & 0x1000) {
+			if (GameDesc->m_objSchema == GAME_OBJ_ZS1) {
+				if (removeTemp) {
+					Platform_Remove(fname.m_str);
+				}
+				return 0;
+			}
 			vid = new VID_MESH;
-		}
-		else if (scratch.m_pixelFlag16 & 0x40) {
-
-
-
-
-			vidFile.Fail("unsupported VID CADR schema (pixel flag 0x40); matching executable evidence required");
-			if (removeTemp) Platform_Remove(fname.m_str);
-			return 0;
 		}
 		else if (scratch.m_pixelFlag16 & 0x80) {
 			vid = new VID_LIGHT;
@@ -216,6 +213,13 @@ VID* MAP::CreateVid(RESOURCE* p_res, int p_idx)
 		}
 		else if (scratch.m_sprClass == 8) {
 			vid = new VID_SOFTWARE16;
+		}
+		else if (scratch.m_pixelFlag16 & 0x40) {
+			vidFile.Fail("unsupported VID CADR schema (pixel flag 0x40); matching executable evidence required");
+			if (removeTemp) {
+				Platform_Remove(fname.m_str);
+			}
+			return 0;
 		}
 		else if (((GRAPH_CORE*) Graph)->m_flags & 2) {
 			vid = new VID_SOFTWARE;

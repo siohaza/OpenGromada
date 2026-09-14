@@ -21,6 +21,9 @@ public:
 	ANGLE(float p_x, float p_y, int* p_dist);
 	float Sin() const;
 	float Cos() const;
+
+	float RotateX(float p_x, float p_y) const { return p_x * Cos() - p_y * Sin(); }
+	float RotateY(float p_x, float p_y) const { return p_x * Sin() + p_y * Cos(); }
 	ANGLE& operator=(const ANGLE& p_other);
 	ANGLE operator+(const ANGLE& p_other);
 	ANGLE operator-(const ANGLE& p_other);

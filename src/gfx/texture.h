@@ -48,6 +48,8 @@ public:
 	bool m_gpuCpuDirty = true;
 };
 
+unsigned int TextureSampleArgb(const TEXTURE* p_texture, int p_x, int p_y);
+
 extern int TextureMemoryInUse;
 
 extern int g_textureMaxWidth;

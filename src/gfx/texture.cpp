@@ -1,5 +1,7 @@
 #include "gfx/texture.h"
 
+#include "gfx/sprite_rotate.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -116,6 +118,7 @@ TEXTURE::~TEXTURE()
 	}
 	GPU_RENDER::Forget(this);
 	GPU_RENDER::Forget(&m_palette);
+	SPRITE_ROTATE::Forget(this);
 	if (m_data) {
 		TextureMemoryInUse -= m_width * m_height * ((m_format != D3DFMT_P8) + 1);
 		free(m_data);
@@ -510,6 +513,15 @@ inline static unsigned int SampleTexel(const TEXTURE* p_tex, int p_x, int p_y)
 inline static unsigned int Lerp8(unsigned int p_a, unsigned int p_b, unsigned int p_t)
 {
 	return p_a + (((int) p_b - (int) p_a) * (int) p_t >> 8);
+}
+
+unsigned int TextureSampleArgb(const TEXTURE* p_texture, int p_x, int p_y)
+{
+	if (!p_texture || !p_texture->m_data || p_x < 0 || p_y < 0 || p_x >= p_texture->m_width ||
+		p_y >= p_texture->m_height) {
+		return 0;
+	}
+	return SampleTexel(p_texture, p_x, p_y);
 }
 
 inline static unsigned int LerpArgb(unsigned int p_a, unsigned int p_b, unsigned int p_t)

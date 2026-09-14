@@ -21,7 +21,6 @@ public:
 private:
 	struct FRAME_SET;
 	std::shared_ptr<FRAME_SET> m_frames;
-	bool m_reportedUnsupported;
 };
 
 #endif

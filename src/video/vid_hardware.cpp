@@ -12,7 +12,7 @@
 #include "gfx/gpu_texture.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
-#include "gfx/render_math.h"
+#include "gfx/sprite_rotate.h"
 #include "gfx/texture.h"
 #include "sprite/ex_sprite_data.h"
 #include "sprite/sprite.h"
@@ -275,7 +275,8 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		m_unk0x48c[t] = 0;
 	}
 
-	void* unpack = operator new(0x20008);
+	const unsigned int unpackBytes = 0x40008;
+	void* unpack = operator new(unpackBytes, std::nothrow);
 	if (!unpack) {
 		Error(2,
 			  // STRING: ALIEN 0x482d04
@@ -322,6 +323,9 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		else if (m_pixelFlag16 & 8) {
 			m_unk0x48c[i] = new TEXTURE(w, h, 41, 0); // P8
 		}
+		else if ((m_pixelFlag16 & 0x2000) && GameDesc->m_objSchema == GAME_OBJ_ZS1) {
+			m_unk0x48c[i] = new TEXTURE(w, h, D3DFMT_A8R8G8B8, 0);
+		}
 		else if ((m_pixelFlag16 & 2) && (m_pixelFlag16 & 1)) {
 			m_unk0x48c[i] = new TEXTURE(w, h, 26, 0); // A4R4G4B4
 		}
@@ -367,6 +371,17 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 
 		int offset = 0;
 		p_res->Read(&offset, 4);
+		if (offset < 0 || (unsigned int) offset > unpackBytes) {
+			p_res->Fail("packed surface stream exceeds the unpack buffer");
+			if (colorCoder) {
+				delete colorCoder;
+			}
+			if (zCoder) {
+				delete zCoder;
+			}
+			operator delete(unpack);
+			return;
+		}
 		int decoded = p_res->ReadPacked(unpack, offset, colorCoder);
 		if (decoded) {
 			Error(5,
@@ -409,6 +424,9 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 							memcpy(row, (unsigned char*) unpack + y * w, w);
 						}
 					}
+					else if (m_unk0x48c[i]->m_format == D3DFMT_A8R8G8B8) {
+						memcpy(row, (const unsigned char*) unpack + (size_t) y * w * 4, (size_t) 4 * w);
+					}
 					else if (m_unk0x48c[i]->m_format != 23 && m_unk0x48c[i]->m_format != 26) {
 						unsigned short* s = (unsigned short*) unpack + y * w;
 						for (int x = 0; x < w; ++x) {
@@ -444,7 +462,7 @@ void VID_HARDWARE::Load(RESOURCE* p_res)
 		}
 
 		int next = i;
-		if (m_pixelFlag16 & 4) {
+		if ((m_pixelFlag16 & 4) && i + 1 < (short) m_unk0x488) {
 
 			++i;
 			TEXTURE* ztex = new TEXTURE(w, h, 80, 2); // D16
@@ -617,6 +635,8 @@ void VID_HARDWARE::SetLayer()
 	m_layer = 8;
 }
 
+static const float kIsoYScale = 0.7070602178573608f;
+
 inline static float DrawInterpolate(float* p_table, float p_frame)
 {
 	int fi = (int) p_frame;
@@ -742,6 +762,33 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 					float oz = DrawInterpolate(m_exData->m_unk0x184, ex->m_unk0x1c);
 					zval += (int) oz;
 				}
+				ANGLE quadDir((unsigned char) 0);
+				const bool rotateQuad = (m_flag & 0x20000000) != 0;
+				if (rotateQuad) {
+					ANGLE facing = p_sprite->Direction();
+					bool resolved = false;
+					if (m_flag & 0x80000) {
+						EX_SPRITE_DATA* ex = p_sprite->m_exData;
+						if (ex && (p_sprite->X() != ex->m_x || p_sprite->Y() != ex->m_y)) {
+							quadDir = ANGLE(
+								p_sprite->X() - ex->m_x,
+								(p_sprite->Y() - p_sprite->Z() - ex->m_y + ex->m_z) / kIsoYScale
+							);
+							resolved = true;
+						}
+						else if (p_sprite->m_speed != 0.0f && p_sprite->m_unk0x24 != 0.0f) {
+							const float vx = p_sprite->m_speed * facing.Sin();
+							const float vy = -(p_sprite->m_unk0x24 + p_sprite->m_speed * facing.Cos()) / kIsoYScale;
+							quadDir = ANGLE(vx, vy);
+							resolved = true;
+						}
+					}
+					if (!resolved) {
+						const int stepped = m_noDir ? (int) (RealDirection(facing) * 256 / m_noDir) : 0;
+						quadDir = ANGLE((unsigned char) (facing.m_dir - stepped));
+					}
+				}
+
 				if (m_flag & 0x200000) {
 					int span = frameChild->m_w;
 					if (span) {
@@ -762,44 +809,22 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 						zval = (int) ((ex->m_z - p_sprite->Z()) * s / segments + p_sprite->m_z);
 					}
 					uint32_t gpuAnchor = 0;
-					bool gpuChildTest = false;
-					bool alphaDepthGate = false;
-					bool alphaAnchorVisible = false;
 
 					const bool independentQuad = GameDesc->m_layerRules == GAME_LAYERS_LOCOLAND ||
 												 (GameDesc->m_layerRules == GAME_LAYERS_ZS1 &&
 												  (m_unk0x0c == 16 || (m_unk0x0c == 1 && !(m_pixelFlag16 & 2))));
 					if (!(flag & 0x8000) && !(m_pixelFlag16 & 4) && !independentQuad) {
+
 						GRAPH_CORE* g = (GRAPH_CORE*) Graph;
 						int threshold = 8 * zval + 1024;
+						if (!DrawInViewPort(g, (float) baseX, (float) baseY)) {
+							continue;
+						}
 						if (GPU_RENDER::Active()) {
 							gpuAnchor = GPU_TEXTURE::Visibility(baseX, baseY, threshold);
-							gpuChildTest = (m_pixelFlag16 & 2) && !uiSprite;
 						}
-						else if ((m_pixelFlag16 & 2) && !uiSprite) {
-							alphaDepthGate = true;
-							alphaAnchorVisible =
-								RENDER_MATH::AlphaSpriteAnchorVisible((const unsigned short*) g->m_zbuffer,
-																	  g->m_zpitch,
-																	  (int) g->m_width,
-																	  (int) g->m_height,
-																	  (int) g->m_viewXMin,
-																	  (int) g->m_viewYMin,
-																	  (int) g->m_viewXMax,
-																	  (int) g->m_viewYMax,
-																	  baseX,
-																	  baseY,
-																	  threshold,
-																	  m_footprintWidth,
-																	  m_footprintHeight);
-						}
-						else {
-							if (!DrawInViewPort(g, (float) baseX, (float) baseY)) {
-								continue;
-							}
-							if (((unsigned short*) g->m_zbuffer)[baseX + baseY * g->m_zpitch] > threshold) {
-								continue;
-							}
+						else if (((unsigned short*) g->m_zbuffer)[baseX + baseY * g->m_zpitch] > threshold) {
+							continue;
 						}
 					}
 
@@ -811,6 +836,8 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 						int sy;
 						int drawW;
 						int drawH;
+						int cxOff = child->m_offsetX - m_unk0x2f6 / 2;
+						int cyOff = child->m_offsetY - m_messageLineHeight / 2;
 						if (uiSprite) {
 							int spriteLeft = baseX - ScaledUIBoundary(m_unk0x2f6, scaleX) / 2;
 							int spriteTop = baseY - ScaledUIBoundary(m_messageLineHeight, scaleY) / 2;
@@ -824,12 +851,29 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 							drawH = childBottom - childTop;
 						}
 						else {
-							int cxOff = child->m_offsetX - m_unk0x2f6 / 2;
-							int cyOff = child->m_offsetY - m_messageLineHeight / 2;
 							sx = baseX + (int) (cxOff * scaleX);
 							sy = baseY + (int) (cyOff * scaleY);
 							drawW = (int) (clipW * scaleX);
 							drawH = (int) (clipH * scaleY);
+						}
+						const SPRITE_ROTATE::TILE* rotatedTile = 0;
+						if (rotateQuad && !uiSprite && quadDir.m_dir && !(m_pixelFlag16 & 4)) {
+							const int tileSrc[4] = {child->m_x, child->m_y, child->m_x + clipW, child->m_y + clipH};
+							rotatedTile = SPRITE_ROTATE::Acquire(
+								m_unk0x48c[child->m_texture],
+								tileSrc,
+								drawW,
+								drawH,
+								quadDir.m_dir
+							);
+						}
+						if (rotatedTile) {
+							const float centreX = cxOff * scaleX + drawW * 0.5f;
+							const float centreY = cyOff * scaleY + drawH * 0.5f;
+							sx = baseX + (int) quadDir.RotateX(centreX, centreY) - rotatedTile->m_width / 2;
+							sy = baseY + (int) quadDir.RotateY(centreX, centreY) - rotatedTile->m_height / 2;
+							drawW = rotatedTile->m_width;
+							drawH = rotatedTile->m_height;
 						}
 						bool childVisible = uiSprite ? drawW > 0 && drawH > 0 && sx + drawW > ViewXMin() &&
 														   sx < ViewXMax() && sy + drawH > ViewYMin() && sy < ViewYMax()
@@ -847,36 +891,15 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 							int dst[4];
 							dst[0] = sx;
 							dst[1] = sy;
-							dst[2] = sx + (uiSprite ? drawW : (int) (clipW * scaleX));
-							dst[3] = sy + (uiSprite ? drawH : (int) (clipH * scaleY));
-							uint32_t gpuChild =
-								gpuChildTest ? GPU_TEXTURE::Visibility(baseX, baseY, 8 * zval + 1024, dst, gpuAnchor)
-											 : 0;
-							GPU_TEXTURE::SetPredicate(gpuChild ? gpuChild : gpuAnchor);
-							if (alphaDepthGate && !alphaAnchorVisible) {
-								GRAPH_CORE* g = (GRAPH_CORE*) Graph;
-								if (!RENDER_MATH::AlphaSpriteChildVisible((const unsigned short*) g->m_zbuffer,
-																		  g->m_zpitch,
-																		  (int) g->m_width,
-																		  (int) g->m_height,
-																		  (int) g->m_viewXMin,
-																		  (int) g->m_viewYMin,
-																		  (int) g->m_viewXMax,
-																		  (int) g->m_viewYMax,
-																		  dst,
-																		  8 * zval + 1024)) {
-									if (!child->m_next) {
-										break;
-									}
-									child = &m_unk0x484[child->m_next];
-									continue;
-								}
-							}
+							dst[2] = sx + ((uiSprite || rotatedTile) ? drawW : (int) (clipW * scaleX));
+							dst[3] = sy + ((uiSprite || rotatedTile) ? drawH : (int) (clipH * scaleY));
+							GPU_TEXTURE::SetPredicate(gpuAnchor);
 							int src[4];
-							src[0] = child->m_x;
-							src[1] = child->m_y;
-							src[2] = src[0] + clipW;
-							src[3] = src[1] + clipH;
+							src[0] = rotatedTile ? 0 : child->m_x;
+							src[1] = rotatedTile ? 0 : child->m_y;
+							src[2] = src[0] + (rotatedTile ? rotatedTile->m_width : clipW);
+							src[3] = src[1] + (rotatedTile ? rotatedTile->m_height : clipH);
+							TEXTURE* childTexture = rotatedTile ? rotatedTile->m_texture : m_unk0x48c[child->m_texture];
 
 							int zfunc;
 							if (m_pixelFlag16 & 4) {
@@ -933,7 +956,7 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 								GAMMA composited;
 								composited.Add(GAMMA(GAMMA::RAW_COPY, m_colorSub, m_colorAdd),
 											   GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
-								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &composited);
+								childTexture->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &composited);
 							}
 							else {
 								int graphNeg = ((GRAPH_CORE*) Graph)->m_gammaSet.m_a;
@@ -943,12 +966,9 @@ int VID_HARDWARE::Draw(SPRITE* p_sprite)
 											   GAMMA(GAMMA::RAW_COPY, p_sprite->GetGamma()));
 								GAMMA withGraph;
 								withGraph.Add(composited, GAMMA(GAMMA::RAW_COPY, graphNeg, graphPos));
-								m_unk0x48c[child->m_texture]->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &withGraph);
+								childTexture->Draw_z(z1, std::bit_cast<int>(z2), dst, src, &withGraph);
 							}
 							GPU_TEXTURE::SetPredicate(0);
-							if (gpuChild) {
-								GPU_RENDER::Release(gpuChild);
-							}
 						}
 						if (!child->m_next) {
 							break;
