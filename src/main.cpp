@@ -3,6 +3,7 @@
 #include "game/map.h"
 #include "game/map_steam.h"
 #include "game/settings.h"
+#include "net/net_client.h"
 #include "platform/gamepad.h"
 #include "platform/paths.h"
 #include "platform/render.h"
@@ -80,6 +81,7 @@ int main(int argc, char** argv)
 	}
 	Platform_GamepadInit();
 	Platform_StoreInit();
+	Net_Init();
 
 	int result = 0;
 	Map = new MAP_STEAM(commandLine, &Settings);
@@ -97,12 +99,14 @@ int main(int argc, char** argv)
 		if (Platform_RenderFailed()) {
 			result = 1;
 		}
+		Net_Disconnect();
 		delete Map;
 		Map = 0;
 	}
 	else {
 		result = 1;
 	}
+	Net_Shutdown();
 	Platform_StoreShutdown();
 	Platform_GamepadShutdown();
 	SDL_Quit();

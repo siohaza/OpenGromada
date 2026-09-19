@@ -8,6 +8,7 @@
 #include "game/region.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
+#include "net/net_client.h"
 #include "sprite/ex_sprite_data.h"
 #include "sprite/linker.h"
 #include "sprite/sprite.h"
@@ -669,6 +670,9 @@ void SPRITE::Tact()
 	}
 
 	for (int script = m_vid->m_unk0x408[m_ani]; script >= 0; script = m_vid->m_unk0x408[m_ani]) {
+		if (Net_IsProxy(this)) {
+			break;
+		}
 		if (m_noCadr != m_begCadr && !(m_vid->m_flag & 0x10) &&
 			!(Game_IsZS1() && (m_vid->m_flag & 0x400))) {
 			break;

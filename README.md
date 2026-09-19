@@ -55,6 +55,44 @@ the game's data directories. Alternatively, point to that directory with
 | `--config=PATH` | Selects the startup configuration before opening resources. |
 | `--script=PATH` | Overrides the startup map/script. Directly starting a later campaign map can skip initialization performed by earlier maps. |
 
+## Multiplayer (experimental)
+
+You can play Alien Shooter 1 together with friends. This feature is new and is
+still being tested.
+
+It is turned off in normal builds and in the release downloads. The automatic
+CI builds have it turned on. To turn it on in your own build:
+
+```sh
+cmake -S . -B build/native -DCMAKE_BUILD_TYPE=Release -DALIEN_MULTIPLAYER=ON
+```
+
+With Premake, add `--multiplayer`. The build then also makes a server program,
+`OpenGromadaServer`.
+
+It works only with AS1 (GOG/retail 1.2)
+
+To start, click MULTIPLAYER in the main menu, or press F2 at any time. A panel
+opens. There you can join a game or host a game. To use a different key, set
+`PanelKey` in the `[net]` section of `portable.ini`.
+
+You can also use the command line:
+
+| Option | Description |
+| --- | --- |
+| `--host` / `--host=PORT` | Hosts a game and joins it. The default port is 33100 (UDP). |
+| `--connect=HOST[:PORT]` | Joins a game when the program starts. For an IPv6 address, write `[address]:PORT`. |
+| `--name=NAME` | Sets your player name. The name can have up to 15 characters. |
+
+You can also run the server on its own. It does not need the game data:
+
+```sh
+./OpenGromadaServer --port 33100 --max-players 8 --map "maps\Level_01.map"
+```
+
+`--map` sets the map for players who join from the main menu. `--no-follow`
+stops the server from sending new players to the map the others are on.
+
 ## File locations
 
 Writable configuration, progress, saves, and logs use SDL's

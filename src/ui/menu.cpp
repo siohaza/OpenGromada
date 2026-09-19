@@ -6,6 +6,7 @@
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
+#include "net/net_ui.h"
 #include "platform/paths.h"
 #include "sprite/list_sprite.h"
 #include "sprite/sprite.h"
@@ -385,6 +386,7 @@ int MENU::Load(const STRING& p_name, int p_opt)
 	RESOURCE resource;
 	std::string resolvedName = ResolveMenuName(p_name);
 	STRING actualName(resolvedName.c_str());
+	NetUi_OnMenuLoaded(p_name.m_str);
 	if (resource.OpenForRead(actualName, 0x554e454d)) {
 		MYERROR::Error(::Error,
 					   // STRING: ALIEN 0x48436c

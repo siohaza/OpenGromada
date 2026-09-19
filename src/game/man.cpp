@@ -5,6 +5,7 @@
 #include "game/map.h"
 #include "gfx/gpu_backend.h"
 #include "gfx/graph.h"
+#include "net/net_client.h"
 #include "sprite/ex_sprite_data.h"
 #include "video/vid.h"
 #include "video/vid_exdata.h"
@@ -97,6 +98,7 @@ decomp_intptr MAN::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, de
 {
 	switch (p_action) {
 	case 0x25: {
+		Net_OnLocalAttack(this, (float) p_a, (float) p_b);
 		SPRITE* c = m_child;
 		if (!c) {
 			break;

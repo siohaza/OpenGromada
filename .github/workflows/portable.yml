@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+env:
+  ALIEN_MULTIPLAYER: ${{ (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/')) && 'OFF' || 'ON' }}
+
 jobs:
   shaders:
     name: Verify embedded GPU shaders
@@ -99,6 +102,7 @@ jobs:
           -DCMAKE_INSTALL_BINDIR=.
           -DALIEN_STEAMWORKS_SDK="${{ github.workspace }}/SteamworksSDK"
           -DALIEN_MOVIES=ON
+          -DALIEN_MULTIPLAYER=${{ env.ALIEN_MULTIPLAYER }}
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-linux
           -DVCPKG_MANIFEST_MODE=OFF
@@ -172,6 +176,7 @@ jobs:
           -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }}
           -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
           -DALIEN_MOVIES=ON
+          -DALIEN_MULTIPLAYER=${{ env.ALIEN_MULTIPLAYER }}
           -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-osx
           -DVCPKG_MANIFEST_MODE=OFF
@@ -246,6 +251,7 @@ jobs:
           "-DCMAKE_INSTALL_BINDIR=."
           -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
           -DALIEN_MOVIES=ON
+          "-DALIEN_MULTIPLAYER=${{ env.ALIEN_MULTIPLAYER }}"
           "-DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/dependencies/vcpkg/scripts/buildsystems/vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=${{ matrix.arch }}-gromada-windows
           -DVCPKG_MANIFEST_MODE=OFF

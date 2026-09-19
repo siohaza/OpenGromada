@@ -2,6 +2,7 @@
 #include "game/gametime.h"
 #include "game/map.h"
 #include "game/unit.h"
+#include "net/net_client.h"
 #include "sprite/ex_sprite_data.h"
 #include "util/game_random.h"
 #include "util/myerror.h"
@@ -313,6 +314,7 @@ decomp_intptr UNIT::Action(int p_action, decomp_intptr p_a, decomp_intptr p_b, d
 	int state;
 	switch (p_action) {
 	case 93: { // ACT_ADD_AMMO
+		Net_OnAmmoSpent(this, (int) p_a);
 		int max = m_vid->GetMaxAmmo();
 		if (max == 999999) {
 			m_ammo = 63999936;

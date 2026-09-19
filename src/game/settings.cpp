@@ -1,6 +1,7 @@
 #include "game/settings.h"
 
 #include "game/game_descriptor.h"
+#include "net/net_client.h"
 #include "util/string.h"
 
 #include <SDL3/SDL.h>
@@ -32,6 +33,10 @@ struct COMMAND_LINE_SETTINGS {
 	int m_native;
 	int m_uiScale;
 	int m_vsync;
+	int m_host;
+	int m_hostPort;
+	char m_connect[256];
+	char m_playerName[16];
 };
 
 COMMAND_LINE_SETTINGS g_commandLine;
@@ -178,6 +183,27 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 		else if ((value = OptionValue(arg, "--pref-path", &i, p_argc, p_argv))) {
 			SDL_setenv_unsafe("ALIEN_SHOOTER_PREF_PATH", value, 1);
 		}
+		else if (Net_Compiled() && (value = OptionValue(arg, "--connect", &i, p_argc, p_argv))) {
+			if (strlen(value) >= sizeof(g_commandLine.m_connect)) {
+				fprintf(stderr, "--connect address is too long.\n");
+				exit(1);
+			}
+			snprintf(g_commandLine.m_connect, sizeof(g_commandLine.m_connect), "%s", value);
+		}
+		else if (Net_Compiled() && (value = OptionValue(arg, "--name", &i, p_argc, p_argv))) {
+			snprintf(g_commandLine.m_playerName, sizeof(g_commandLine.m_playerName), "%s", value);
+		}
+		else if (Net_Compiled() && !strcmp(arg, "--host")) {
+			g_commandLine.m_host = 1;
+		}
+		else if (Net_Compiled() && !strncmp(arg, "--host=", 7)) {
+			g_commandLine.m_host = 1;
+			g_commandLine.m_hostPort = PositiveInt(arg + 7);
+			if (!g_commandLine.m_hostPort || g_commandLine.m_hostPort > 65535) {
+				fprintf(stderr, "--host accepts a UDP port from 1 to 65535.\n");
+				exit(1);
+			}
+		}
 		else if ((value = OptionValue(arg, "--game", &i, p_argc, p_argv)) ||
 				 (value = OptionValue(arg, "--profile", &i, p_argc, p_argv))) {
 			if (!Game_SetCliOverride(value)) {
@@ -246,6 +272,16 @@ void Settings_ParseCommandLine(int p_argc, char** p_argv, STRING* p_gameArgument
 	if (g_gpuDriver && g_renderer != SETTINGS_RENDERER_GPU) {
 		fprintf(stderr, "--gpu-driver requires --renderer=gpu.\n");
 		exit(1);
+	}
+	if (g_commandLine.m_host && g_commandLine.m_connect[0]) {
+		fprintf(stderr, "--host and --connect cannot be combined.\n");
+		exit(1);
+	}
+	if (g_commandLine.m_host) {
+		Net_SetAutoHost(g_commandLine.m_hostPort, g_commandLine.m_playerName);
+	}
+	else if (g_commandLine.m_connect[0]) {
+		Net_SetAutoConnect(g_commandLine.m_connect, g_commandLine.m_playerName);
 	}
 }
 

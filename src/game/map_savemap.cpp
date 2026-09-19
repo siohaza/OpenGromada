@@ -5,6 +5,7 @@
 #include "game/game_descriptor.h"
 #include "game/player.h"
 #include "gfx/graph.h"
+#include "net/net_client.h"
 #include "platform/paths.h"
 #include "platform/save_file.h"
 #include "sprite/sprite.h"
@@ -31,6 +32,7 @@ int MAP::SaveMap(STRING p_name)
 	if (!strcmp(p_name.m_str, empty_str)) {
 		return 0;
 	}
+	Net_OnBeforeSave();
 	m_saveSpriteIds.Clear();
 	if (!staged.Begin(p_name.m_str) || out.OpenForWrite(STRING(staged.Path().c_str()), 0x2050414d /* 'MAP ' */)) {
 		MYERROR::Window(
