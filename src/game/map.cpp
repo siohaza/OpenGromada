@@ -21,6 +21,7 @@
 #include "gfx/picture_font.h"
 #include "gfx/picture_makevid.h"
 #include "logic/script_commands.h"
+#include "net/net_client.h"
 #include "platform/gamepad.h"
 #include "platform/paths.h"
 #include "platform/portable_config.h"
@@ -624,6 +625,7 @@ int MAP::StartTact()
 
 	if (m_flag & 0x40) {
 		m_flag &= 0xffffffbf;
+		Net_OnMapChangeRequest(m_scriptName);
 		Load(m_scriptName);
 	}
 
@@ -668,6 +670,7 @@ int MAP::StartTact()
 	}
 
 	Platform_StorePump();
+	Net_Pump();
 	return m_quit;
 }
 

@@ -19,6 +19,7 @@
 #include "gfx/graph_core.h"
 #include "gfx/texture.h"
 #include "logic/relation.h"
+#include "net/net_client.h"
 #include "platform/cursor.h"
 #include "platform/paths.h"
 #include "platform/portable_config.h"
@@ -509,6 +510,7 @@ MAP::MAP(STRING& p_argv, SETTINGS* p_settings)
 // FUNCTION: ALIEN 0x40b4b0
 void MAP::DeletePointerToSprite(SPRITE* p_sprite)
 {
+	Net_OnSpriteDeleted(p_sprite);
 	for (int i = 0; i < 4; ++i) {
 		m_player[i]->DeletePointerToSprite(p_sprite);
 	}
@@ -646,6 +648,7 @@ void MAP::DrawSecondaryInfo()
 // FUNCTION: ALIEN 0x40c570
 void MAP::Release()
 {
+	Net_OnMapRelease();
 
 	if (Graph && GameDesc->m_nativeMoviePlayback) Graph->StopMovie();
 	ClearTerrainCamera();
@@ -1422,6 +1425,7 @@ int MAP::Load(STRING p_name)
 	if (Const->m_debugMode) {
 		((GRAPH*) Graph)->DrawDebugText("");
 	}
+	Net_OnMapLoaded();
 	return 0;
 }
 

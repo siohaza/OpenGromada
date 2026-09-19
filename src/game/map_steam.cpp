@@ -13,6 +13,7 @@
 #include "gfx/gamma.h"
 #include "gfx/graph.h"
 #include "gfx/graph_core.h"
+#include "net/net_ui.h"
 #include "platform/timing.h"
 #include "sprite/balloon.h"
 #include "sprite/civ_robot.h"
@@ -198,6 +199,7 @@ int MAP_STEAM::Tact()
 			DrawSecondaryInfo();
 		}
 		if (draw) {
+			NetUi_Draw();
 			((GRAPH_CORE*) Graph)->PostTact(1);
 		}
 		Sound->Tact();

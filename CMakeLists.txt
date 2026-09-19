@@ -15,6 +15,14 @@ file(GLOB_RECURSE ALIEN_SOURCES CONFIGURE_DEPENDS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c"
 )
+file(GLOB ALIEN_NET_SOURCES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/net/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/server/*.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/3rdparty/*.c"
+)
+if(ALIEN_NET_SOURCES)
+    list(REMOVE_ITEM ALIEN_SOURCES ${ALIEN_NET_SOURCES})
+endif()
 list(LENGTH ALIEN_SOURCES ALIEN_SOURCE_COUNT)
 message(STATUS
     "OpenGromada: ${ALIEN_SOURCE_COUNT} sources (${ALIEN_POINTER_BITS}-bit target ABI)")
@@ -178,6 +186,59 @@ target_compile_definitions(alien_core PUBLIC
 
 add_executable(res_probe "${CMAKE_CURRENT_SOURCE_DIR}/tools/res_probe.cpp")
 target_compile_features(res_probe PRIVATE cxx_std_20)
+
+option(ALIEN_MULTIPLAYER
+    "Co-op AS1 support and dedicated server" OFF)
+if(ALIEN_MULTIPLAYER)
+    set(ALIEN_NET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/net")
+    set(ALIEN_ENET_IMPL "${CMAKE_CURRENT_SOURCE_DIR}/src/3rdparty/enet_impl.c")
+
+    add_library(alien_net_relay STATIC
+        "${ALIEN_NET_DIR}/net_relay.cpp"
+        "${ALIEN_ENET_IMPL}")
+    target_compile_features(alien_net_relay PUBLIC cxx_std_20)
+    set_target_properties(alien_net_relay PROPERTIES CXX_EXTENSIONS OFF)
+    target_include_directories(alien_net_relay PUBLIC
+        "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    if(MSVC)
+        set_source_files_properties("${ALIEN_ENET_IMPL}" PROPERTIES
+            COMPILE_OPTIONS "/w")
+    else()
+        set_source_files_properties("${ALIEN_ENET_IMPL}" PROPERTIES
+            COMPILE_OPTIONS "-w;-fno-sanitize=shift")
+        target_compile_options(alien_net_relay PRIVATE -Wall -Wextra
+            -Werror=format -Werror=format-security)
+    endif()
+    if(WIN32)
+        target_compile_definitions(alien_net_relay PRIVATE NOMINMAX)
+        target_link_libraries(alien_net_relay PUBLIC ws2_32 winmm)
+        set_source_files_properties("${ALIEN_NET_DIR}/net_client.cpp" PROPERTIES
+            COMPILE_DEFINITIONS WIN32_LEAN_AND_MEAN)
+    endif()
+
+    target_sources(alien_core PRIVATE
+        "${ALIEN_NET_DIR}/net_client.cpp"
+        "${ALIEN_NET_DIR}/net_ui.cpp")
+    target_compile_definitions(alien_core PUBLIC OPENGROMADA_HAVE_MULTIPLAYER=1)
+    target_link_libraries(alien_core PUBLIC alien_net_relay)
+
+    add_executable(alien_server
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/server/main.cpp")
+    target_link_libraries(alien_server PRIVATE alien_net_relay)
+    set_target_properties(alien_server PROPERTIES
+        OUTPUT_NAME "OpenGromadaServer"
+        CXX_EXTENSIONS OFF)
+    if(APPLE)
+        install(TARGETS alien_server RUNTIME DESTINATION ".")
+    else()
+        install(TARGETS alien_server
+            RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
+    endif()
+
+    message(STATUS "Multiplayer: enabled (Alien Shooter 1 co-op, OpenGromadaServer)")
+else()
+    message(STATUS "Multiplayer: disabled")
+endif()
 
 if(ALIEN_STEAM_RUNTIME)
     add_custom_command(TARGET alien_portable POST_BUILD

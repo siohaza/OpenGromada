@@ -3,6 +3,7 @@
 #include "game/map.h"
 #include "gfx/graph.h"
 #include "gfx/texture.h"
+#include "net/net_ui.h"
 #include "platform/gamepad.h"
 #include "platform/portable_config.h"
 #include "platform/render.h"
@@ -81,6 +82,9 @@ MAP::~MAP()
 int MAP::ProcessEvent(const SDL_Event& p_event)
 {
 	Platform_GamepadProcessEvent(p_event);
+	if (NetUi_ProcessEvent(p_event)) {
+		return 1;
+	}
 	if ((m_flag & 8) && m_input.ProcessEvent(p_event)) {
 		return 1;
 	}
