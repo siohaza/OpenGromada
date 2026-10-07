@@ -10,11 +10,6 @@ newoption {
 	description = "Path to a Steamworks SDK"
 }
 
-newoption {
-	trigger = "multiplayer",
-	description = "Build co-op support and dedicated server"
-}
-
 if not _ACTION then
 	return
 end
@@ -62,13 +57,6 @@ else
 	print("Steamworks: disabled. Store is local only")
 end
 
-local multiplayer = _OPTIONS["multiplayer"] ~= nil
-if multiplayer then
-	print("Multiplayer: enabled")
-else
-	print("Multiplayer: disabled")
-end
-
 workspace "OpenGromada"
 	location "build/premake"
 	configurations { "Debug", "Release" }
@@ -109,9 +97,6 @@ local function configure_project()
 	includedirs { "src" }
 	externalincludedirs { path.join(sdl3_dir, "include") }
 	defines { "NOMINMAX" }
-	if multiplayer then
-		defines { "OPENGROMADA_HAVE_MULTIPLAYER=1" }
-	end
 	objdir "build/premake/obj/%{prj.name}/%{cfg.platform}/%{cfg.buildcfg}"
 
 	filter "files:**.cpp"
@@ -135,23 +120,8 @@ project "alien_core"
 		"src/**.cpp",
 		"src/**.h"
 	}
-	removefiles {
-		"src/main.cpp",
-		"src/server/**",
-		"src/3rdparty/**.c",
-		"src/net/net_relay.cpp"
-	}
-	if not multiplayer then
-		removefiles { "src/net/**.cpp" }
-	end
+	removefiles { "src/main.cpp" }
 	configure_project()
-
-	if multiplayer then
-		filter "files:src/net/net_client.cpp"
-			defines { "WIN32_LEAN_AND_MEAN" }
-
-		filter {}
-	end
 
 project "OpenGromada"
 	kind "ConsoleApp"
@@ -164,9 +134,6 @@ project "OpenGromada"
 		"resources/OpenGromada.res"
 	}
 	links { "alien_core", "SDL3" }
-	if multiplayer then
-		links { "alien_net_relay", "ws2_32", "winmm" }
-	end
 	linkoptions { '"' .. path.getabsolute("resources/OpenGromada.res") .. '"' }
 	configure_project()
 
@@ -204,38 +171,3 @@ project "OpenGromada"
 		}
 
 	filter {}
-
-if multiplayer then
-	project "alien_net_relay"
-		kind "StaticLib"
-		language "C++"
-		cppdialect "C++20"
-		targetdir "build/premake/lib/%{cfg.platform}/%{cfg.buildcfg}"
-		objdir "build/premake/obj/%{prj.name}/%{cfg.platform}/%{cfg.buildcfg}"
-		includedirs { "src" }
-		defines { "NOMINMAX" }
-		files {
-			"src/net/net_relay.cpp",
-			"src/net/net_relay.h",
-			"src/net/net_protocol.h",
-			"src/3rdparty/enet_impl.c",
-			"src/3rdparty/enet.h"
-		}
-
-		filter "files:src/3rdparty/enet_impl.c"
-			warnings "Off"
-
-		filter {}
-
-	project "OpenGromadaServer"
-		kind "ConsoleApp"
-		language "C++"
-		cppdialect "C++20"
-		targetname "OpenGromadaServer"
-		targetdir "build/premake/bin/%{cfg.platform}/%{cfg.buildcfg}"
-		objdir "build/premake/obj/%{prj.name}/%{cfg.platform}/%{cfg.buildcfg}"
-		includedirs { "src" }
-		defines { "NOMINMAX" }
-		files { "src/server/main.cpp" }
-		links { "alien_net_relay", "ws2_32", "winmm" }
-end
